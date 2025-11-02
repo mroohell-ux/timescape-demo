@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.example.timescapedemo.AspectRatioCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    app:ratio="5:3"
+    app:cardUseCompatPadding="true"
+    app:cardPreventCornerOverlap="true"
+    app:cardElevation="8dp"
+    android:foreground="?attr/selectableItemBackground">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/card_bg_glass"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="1h ago"
+                android:textStyle="bold"
+                android:textColor="#7F1B2558"/>
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Contact"
+                android:textStyle="bold"
+                android:textSize="22sp"
+                android:textColor="#1B2558"
+                android:layout_marginTop="6dp"/>
+
+            <TextView
+                android:id="@+id/snippet"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:text="Status update — sample preview."
+                android:textColor="#1B2558"
+                android:maxLines="2"/>
+        </LinearLayout>
+    </FrameLayout>
+</com.example.timescapedemo.AspectRatioCardView>

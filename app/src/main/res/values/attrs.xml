@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="AspectRatioCardView">
+        <!-- Width : Height, e.g. "4:3", "3:4", "16:9" or a single float like "1.33" -->
+        <attr name="ratio" format="string"/>
+    </declare-styleable>
+</resources>
