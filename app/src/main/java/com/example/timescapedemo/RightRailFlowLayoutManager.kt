@@ -17,15 +17,16 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
- * Timescape-like vertical flow:
- *  - Swipe up: cards enter from bottom RIGHT, swing LEFT at center, exit top RIGHT.
- *  - Cards remain STRAIGHT (no rotation); only translation + size/alpha changes.
+ * Timescape-like vertical flow with variable-height cards:
+ *  - Height grows with text (wrap-content), capped at 2/3 of the screen.
+ *  - Width still follows center "gain" + focus animation.
  *  - Only near neighbors overlap slightly (itemPitchPx).
+ *  - Cards remain STRAIGHT (no rotation).
  */
 class RightRailFlowLayoutManager(
-    private val baseSidePx: Int,          // size near center (non-focused)
-    private val focusSidePx: Int,         // size when focused (main)
-    private val itemPitchPx: Int,         // center-to-center spacing
+    private val baseSidePx: Int,          // width near center (non-focused)
+    private val focusSidePx: Int,         // width when focused (main)
+    private val itemPitchPx: Int,         // visual spacing (center-to-center)
     private val rightInsetPx: Int,
     private val topInsetPx: Int = 0,
     private val bottomInsetPx: Int = 0,
@@ -35,7 +36,7 @@ class RightRailFlowLayoutManager(
     private val edgeAlphaMin: Float = 0.30f,
     private val depthScaleDrop: Float = 0.06f,
 
-    // >>> NEW: horizontal rail shaping (controls inflow/outflow direction)
+    // Horizontal rail shaping (controls inflow/outflow direction)
     private val edgeRightShiftPx: Int = 96,     // far cards to the RIGHT by this many px
     private val centerLeftShiftPx: Int = 48,    // center card to the LEFT by this many px
     private val railCurvePow: Float = 1.2f      // curvature; 1 = linear, >1 stronger S-curve
@@ -54,7 +55,7 @@ class RightRailFlowLayoutManager(
     override fun canScrollHorizontally() = false
     override fun isAutoMeasureEnabled() = true
     override fun generateDefaultLayoutParams() =
-        RecyclerView.LayoutParams(baseSidePx, baseSidePx)
+        RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
 
     // ---- Public helpers ----
     fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
@@ -118,27 +119,31 @@ class RightRailFlowLayoutManager(
         layoutAll(recycler)
     }
 
-    private fun setSizeAndMeasure(child: View, side: Int) {
+    private fun measureCardWithWidthAndCap(child: View, widthPx: Int, maxHeightPx: Int) {
+        // Width = exact, height = wrap_content; child caps itself via MaxHeightLinearLayout
         val lp = child.layoutParams
-        if (lp.width != side || lp.height != side) {
-            lp.width = side; lp.height = side
+        if (lp.width != widthPx || lp.height != RecyclerView.LayoutParams.WRAP_CONTENT) {
+            lp.width = widthPx
+            lp.height = RecyclerView.LayoutParams.WRAP_CONTENT
             child.layoutParams = lp
         }
+        child.findViewById<MaxHeightLinearLayout>(R.id.card_content)?.setMaxHeightPx(maxHeightPx)
         measureChildWithMargins(child, 0, 0)
     }
 
     private fun applyTextByGain(child: View, gain: Float, focused: Boolean) {
         val title = child.findViewById<TextView>(R.id.title)
         val snippet = child.findViewById<TextView>(R.id.snippet)
+
+        // Text grows a bit near center; we no longer clamp max lines (height is capped globally)
         if (focused) {
             title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
-            snippet?.maxLines = 6
         } else {
             val titleSp = 21f + 5f * gain
             title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
-            val lines = 2 + (gain * 3f).roundToInt()
-            snippet?.maxLines = lines.coerceIn(2, 5)
         }
+        // Leave snippet lines unconstrained; overall height is capped by MaxHeightLinearLayout.
+        snippet?.maxLines = Integer.MAX_VALUE
     }
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
@@ -150,8 +155,9 @@ class RightRailFlowLayoutManager(
         val firstIdx = max(0, floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt())
         val lastIdx  = min(itemCount - 1, ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt())
 
-        // Size growth radius (how quickly a card grows near center)
+        // Size growth radius (how quickly a card "blooms" near center)
         val focusRadiusPx = itemPitchPx * 0.95f
+        val heightCap = (height * 2f / 3f).roundToInt()
 
         for (i in firstIdx..lastIdx) {
             val child = recycler.getViewForPosition(i)
@@ -171,12 +177,14 @@ class RightRailFlowLayoutManager(
 
             val isSelected = (selectedIndex == i)
 
-            // Size: far small -> base -> (if selected) focused
+            // Width: far small -> base -> (if selected) focused
             val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
             var side = (edgeSide + (baseSidePx - edgeSide) * interp.getInterpolation(gain)).roundToInt()
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
 
-            setSizeAndMeasure(child, side)
+            // Measure: fixed width, wrap-content height, capped to 2/3 screen
+            measureCardWithWidthAndCap(child, side, heightCap)
+
             applyTextByGain(child, gain, isSelected && focusProgress > 0.5f)
 
             val w = getDecoratedMeasuredWidth(child)
@@ -185,7 +193,7 @@ class RightRailFlowLayoutManager(
             val t = (py - h / 2f).toInt()
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
-            // Alpha / depth
+            // Alpha / depth (z-order so nearer items render above)
             val alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
             child.alpha = if (isSelected) alpha + (1f - alpha) * focusProgress else alpha
 

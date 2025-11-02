@@ -7,12 +7,8 @@ import com.google.android.material.card.MaterialCardView
 import kotlin.math.roundToInt
 
 /**
- * A CardView that keeps a given width:height aspect ratio.
- * Set with app:ratio="4:3", "3:4", "16:9", etc. (default 1:1).
- *
- * - If width is known -> height = width / ratio
- * - Else if height is known -> width = height * ratio
- * - Else fallback to super
+ * CardView that can enforce a width:height ratio *only if explicitly set* via app:ratio="W:H".
+ * If no ratio is provided, it behaves like a normal CardView (wraps content).
  */
 class AspectRatioCardView @JvmOverloads constructor(
     context: Context,
@@ -21,15 +17,15 @@ class AspectRatioCardView @JvmOverloads constructor(
 ) : MaterialCardView(context, attrs, defStyleAttr) {
 
     private var ratio: Float = 1f // width / height
+    private var useRatio: Boolean = false
 
     init {
         if (attrs != null) {
             val a = context.obtainStyledAttributes(attrs, R.styleable.AspectRatioCardView)
             val ratioStr = a.getString(R.styleable.AspectRatioCardView_ratio)?.trim()
-            ratio = parseRatio(ratioStr) ?: 1f
+            parseRatio(ratioStr)?.let { ratio = it; useRatio = true }
             a.recycle()
         }
-        // MaterialCardView defaults
         isClickable = true
         isFocusable = false
     }
@@ -39,6 +35,12 @@ class AspectRatioCardView @JvmOverloads constructor(
         val hMode = MeasureSpec.getMode(heightMeasureSpec)
         val wSize = MeasureSpec.getSize(widthMeasureSpec)
         val hSize = MeasureSpec.getSize(heightMeasureSpec)
+
+        // If no ratio OR the parent is giving us an AT_MOST cap, let content decide height.
+        if (!useRatio || hMode == MeasureSpec.AT_MOST) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            return
+        }
 
         when {
             // Prefer computing height from a known width
@@ -61,7 +63,7 @@ class AspectRatioCardView @JvmOverloads constructor(
         if (s.isNullOrEmpty()) return null
         val parts = s.split(':', '×', 'x').map { it.trim() }.filter { it.isNotEmpty() }
         return when (parts.size) {
-            1 -> parts[0].toFloatOrNull() // allow "1.33"
+            1 -> parts[0].toFloatOrNull()
             2 -> {
                 val w = parts[0].toFloatOrNull()
                 val h = parts[1].toFloatOrNull()
@@ -71,8 +73,8 @@ class AspectRatioCardView @JvmOverloads constructor(
         }
     }
 
-    /** Public setter if you want to change it in code. */
+    /** Public setter if you want to turn the ratio behavior on programmatically. */
     fun setRatioString(r: String) {
-        parseRatio(r)?.let { ratio = it; requestLayout() }
+        parseRatio(r)?.let { ratio = it; useRatio = true; requestLayout() }
     }
 }
