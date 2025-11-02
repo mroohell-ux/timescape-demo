@@ -1,9 +1,16 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.TimescapeDemo" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
-    </style>
+<resources>
+    <!-- Bright, optimistic look -->
+    <style name="Theme.TimescapeDemo" parent="Theme.Material3.Light.NoActionBar">
+        <!-- Paint the whole window with our pastel background -->
+        <item name="android:windowBackground">@drawable/bg_app_light_optimistic</item>
 
-    <style name="Theme.TimescapeDemo" parent="Base.Theme.TimescapeDemo" />
+        <!-- Edge-to-edge with dark icons (because background is light) -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+
+        <!-- Keep system from force-darking custom backgrounds -->
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
 </resources>

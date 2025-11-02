@@ -195,7 +195,7 @@ class RightRailFlowLayoutManager(
 
             // Alpha / depth (z-order so nearer items render above)
             val alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
-            child.alpha = if (isSelected) alpha + (1f - alpha) * focusProgress else alpha
+            child.alpha = 0.92f + 0.08f * gain
 
             val centerIdxY = yT + nearestIndex() * itemPitchPx - scrollYPx
             val dIdx = abs(centerIdxY - py) / itemPitchPx

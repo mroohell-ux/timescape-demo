@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- Shown only on Images tab -->
+    <item
+        android:id="@+id/action_pick"
+        android:title="Add"
+        android:icon="@android:drawable/ic_menu_add"
+        app:showAsAction="ifRoom"/>
+    <item
+        android:id="@+id/action_sync"
+        android:title="Sync drawable bg_*"
+        android:icon="@android:drawable/ic_popup_sync"
+        app:showAsAction="ifRoom"/>
+    <item
+        android:id="@+id/action_clear"
+        android:title="Clear all"
+        android:icon="@android:drawable/ic_menu_delete"
+        app:showAsAction="never"/>
+
+</menu>
