@@ -1,5 +1,6 @@
 package com.example.timescapedemo
 
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BlendMode
@@ -51,6 +52,7 @@ class CardsAdapter(
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        val actionIcon: ImageView = v.findViewById(R.id.actionIcon)
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -100,18 +102,22 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.40f else 0.12f
+        holder.textScrim.alpha = if (isBright) 0.35f else 0.10f
 
         if (isBright) {
             holder.title.setTextColor(0xFF111111.toInt())
             holder.snippet.setTextColor(0xE0000000.toInt())
             holder.time.setTextColor(0x99000000.toInt())
             clearShadow(holder.title, holder.snippet)
+            holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFF1B1B1B.toInt())
+            holder.actionIcon.background?.alpha = 200
         } else {
             holder.title.setTextColor(0xFFFFFFFF.toInt())
             holder.snippet.setTextColor(0xF2FFFFFF.toInt())
             holder.time.setTextColor(0xCCFFFFFF.toInt())
             addShadow(holder.title, holder.snippet)
+            holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+            holder.actionIcon.background?.alpha = 160
         }
 
         holder.itemView.setOnClickListener {
