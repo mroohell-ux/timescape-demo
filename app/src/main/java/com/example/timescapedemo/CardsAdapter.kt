@@ -86,7 +86,7 @@ class CardsAdapter(
 
         // Apply NON-GLASS tint directly to image and fade slightly for a clearer pane
         applyTintToImage(holder.bg, tint, baseEffect)
-        holder.bg.alpha = 0.72f
+        holder.bg.alpha = 0.82f
 
         // ---- Adaptive readability (local scrim + text color swap) ----
         val key = when (val b = item.bg) {
@@ -103,7 +103,7 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.24f else 0.08f
+        holder.textScrim.alpha = if (isBright) 0.38f else 0.18f
 
         if (isBright) {
             holder.title.setTextColor(0xFF111111.toInt())
