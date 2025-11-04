@@ -32,14 +32,20 @@ class RightRailFlowLayoutManager(
     private val bottomInsetPx: Int = 0,
 
     // Visual tuning
-    private val minEdgeScale: Float = 0.66f,
-    private val edgeAlphaMin: Float = 0.30f,
-    private val depthScaleDrop: Float = 0.06f,
+    private val minEdgeScale: Float = 0.58f,
+    private val edgeAlphaMin: Float = 0.22f,
+    private val depthScaleDrop: Float = 0.10f,
 
     // Horizontal rail shaping (controls inflow/outflow direction)
-    private val edgeRightShiftPx: Int = 96,     // far cards to the RIGHT by this many px
-    private val centerLeftShiftPx: Int = 48,    // center card to the LEFT by this many px
-    private val railCurvePow: Float = 1.2f      // curvature; 1 = linear, >1 stronger S-curve
+    private val edgeRightShiftPx: Int = 120,    // far cards to the RIGHT by this many px
+    private val centerLeftShiftPx: Int = 72,    // center card to the LEFT by this many px
+    private val railCurvePow: Float = 1.35f,    // curvature; 1 = linear, >1 stronger S-curve
+
+    // Diagonal/perspective tuning
+    private val diagonalSpreadPx: Int = 160,
+    private val tiltXDeg: Float = 32f,
+    private val tiltYDeg: Float = 18f,
+    private val glassPulse: Float = 0.35f
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
 
     // focus animation state
@@ -156,7 +162,7 @@ class RightRailFlowLayoutManager(
         val lastIdx  = min(itemCount - 1, ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt())
 
         // Size growth radius (how quickly a card "blooms" near center)
-        val focusRadiusPx = itemPitchPx * 0.95f
+        val focusRadiusPx = itemPitchPx * 0.90f
         val heightCap = (height * 2f / 3f).roundToInt()
 
         for (i in firstIdx..lastIdx) {
@@ -170,10 +176,13 @@ class RightRailFlowLayoutManager(
             // Gain ~ 1 at center, ~ 0 at edges
             val gain = exp(-(dist * dist) / (2f * focusRadiusPx * focusRadiusPx))
 
+            val normalized = ((py - cy) / (height / 2f)).coerceIn(-1f, 1f)
+
             // ---- X rail shaping: edges right, center left (S-curve) ----
             val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
             val toLeft  = gain * centerLeftShiftPx
-            val px = baseX + toRight - toLeft
+            val diag = diagonalSpreadPx * normalized
+            val px = baseX + toRight - toLeft - diag
 
             val isSelected = (selectedIndex == i)
 
@@ -194,17 +203,30 @@ class RightRailFlowLayoutManager(
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
             // Alpha / depth (z-order so nearer items render above)
-            val alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
-            child.alpha = 0.92f + 0.08f * gain
+            child.alpha = 0.45f + 0.55f * gain
 
             val centerIdxY = yT + nearestIndex() * itemPitchPx - scrollYPx
             val dIdx = abs(centerIdxY - py) / itemPitchPx
-            val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
+            val depthS = max(0.75f, 1f - depthScaleDrop * dIdx)
             child.scaleX = depthS
             child.scaleY = depthS
+
+            val density = child.resources.displayMetrics.density
+            child.cameraDistance = 6000f * density
+            child.pivotX = w * (0.32f + 0.28f * gain)
+            child.pivotY = h * (0.5f - 0.25f * normalized)
+            child.rotationX = normalized * tiltXDeg
+            child.rotationY = -normalized * tiltYDeg
             child.rotation = 0f
-            val z = if (isSelected) 6000f else (1000f - dist / 10f)
-            child.translationZ = z; child.elevation = z
+
+            val z = if (isSelected) 700f else (350f + 220f * gain)
+            child.translationZ = z
+            child.elevation = z
+
+            child.translationY = -normalized * 18f * density
+
+            child.findViewById<View>(R.id.glassFrame)?.alpha = 0.55f + glassPulse * gain
+            child.findViewById<View>(R.id.topHighlight)?.alpha = 0.35f + 0.45f * gain
         }
     }
 

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">TimescapeDemo</string>
+    <string name="card_action_cd">Open message actions</string>
 </resources>

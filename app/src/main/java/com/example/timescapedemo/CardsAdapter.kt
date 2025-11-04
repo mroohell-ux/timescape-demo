@@ -1,5 +1,6 @@
 package com.example.timescapedemo
 
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BlendMode
@@ -49,8 +50,10 @@ class CardsAdapter(
         val time: TextView = v.findViewById(R.id.time)
         val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
-        val bg: ImageView = v.findViewById(R.id.bgImage)
+        val bg: RadialFadeImageView = v.findViewById(R.id.bgImage)
+        val centerGlow: View = v.findViewById(R.id.centerGlow)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        val actionIcon: ImageView = v.findViewById(R.id.actionIcon)
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -82,8 +85,9 @@ class CardsAdapter(
             baseEffect = RenderEffect.createBlurEffect(26f, 26f, Shader.TileMode.CLAMP)
         }
 
-        // Apply NON-GLASS tint directly to image
+        // Apply NON-GLASS tint directly to image while preserving the photo's intensity
         applyTintToImage(holder.bg, tint, baseEffect)
+        holder.bg.alpha = 1f
 
         // ---- Adaptive readability (local scrim + text color swap) ----
         val key = when (val b = item.bg) {
@@ -100,19 +104,15 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.40f else 0.12f
+        holder.centerGlow.alpha = if (isBright) 0.45f else 0.6f
+        holder.textScrim.alpha = if (isBright) 0.32f else 0.18f
 
-        if (isBright) {
-            holder.title.setTextColor(0xFF111111.toInt())
-            holder.snippet.setTextColor(0xE0000000.toInt())
-            holder.time.setTextColor(0x99000000.toInt())
-            clearShadow(holder.title, holder.snippet)
-        } else {
-            holder.title.setTextColor(0xFFFFFFFF.toInt())
-            holder.snippet.setTextColor(0xF2FFFFFF.toInt())
-            holder.time.setTextColor(0xCCFFFFFF.toInt())
-            addShadow(holder.title, holder.snippet)
-        }
+        holder.title.setTextColor(0xFFFFFFFF.toInt())
+        holder.snippet.setTextColor(0xF5FFFFFF.toInt())
+        holder.time.setTextColor(0xCCFFFFFF.toInt())
+        addShadow(holder.title, holder.snippet)
+        holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+        holder.actionIcon.background?.alpha = 255
 
         holder.itemView.setOnClickListener {
             val idx = holder.bindingAdapterPosition
@@ -173,7 +173,6 @@ class CardsAdapter(
 
     // --- Text helpers ---
     private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(4f, 0f, 1f, 0x66000000) } }
-    private fun clearShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(0f, 0f, 0f, 0) } }
 
     // --- Luminance helpers (fast, downsampled) ---
     private fun computeAvgLuminanceFromRes(root: View, resId: Int): Float {

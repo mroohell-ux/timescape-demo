@@ -7,8 +7,8 @@
     android:layout_height="wrap_content"
     android:clipToOutline="true"
     app:cardUseCompatPadding="false"
-    app:cardCornerRadius="20dp"
-    app:cardElevation="8dp"
+    app:cardCornerRadius="22dp"
+    app:cardElevation="0dp"
     app:cardBackgroundColor="@android:color/transparent"
     app:strokeWidth="0dp">
 
@@ -17,15 +17,48 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Pure background image. We blur/adjust it in the adapter. No glass/tint here. -->
-        <ImageView
+        <!-- Base background image. Blur/tint is handled in the adapter. -->
+        <com.example.timescapedemo.RadialFadeImageView
             android:id="@+id/bgImage"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:scaleType="centerCrop"
             android:contentDescription="@null"
+            android:scaleType="centerCrop"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <View
+            android:id="@+id/centerGlow"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_center_glow"
+            android:importantForAccessibility="no"
+            android:visibility="visible"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Frosted-glass frame -->
+        <View
+            android:id="@+id/glassFrame"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_bg_glass"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Edge highlight similar to classic Timescape chrome -->
+        <View
+            android:id="@+id/topHighlight"
+            android:layout_width="0dp"
+            android:layout_height="2dp"
+            android:background="@drawable/card_edge_highlight"
+            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
@@ -46,7 +79,10 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="18dp"
+            android:paddingBottom="18dp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
@@ -57,7 +93,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="12h ago"
-                android:textColor="#88555555"
+                android:textColor="#80555555"
                 android:textSize="12sp"/>
 
             <!-- Title stays one line and autoshrinks so numbers never clip -->
@@ -84,5 +120,18 @@
                 android:textSize="14sp"
                 android:ellipsize="end"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
+
+        <ImageView
+            android:id="@+id/actionIcon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="12dp"
+            android:background="@drawable/card_icon_bg"
+            android:padding="8dp"
+            android:contentDescription="@string/card_action_cd"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_card_message"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
