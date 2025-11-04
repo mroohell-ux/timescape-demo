@@ -38,8 +38,8 @@ sealed class TintStyle {
     data class Sepia(val amount: Float = 1f) : TintStyle()
     data class Duotone(@ColorInt val dark: Int, @ColorInt val light: Int, val amount: Float = 1f) : TintStyle()
     data class LiquidGlass(
-        val imageAlphaBright: Float = 0.42f,
-        val imageAlphaDark: Float = 0.52f
+        val imageAlphaBright: Float = 0.88f,
+        val imageAlphaDark: Float = 0.96f
     ) : TintStyle()
 }
 
@@ -114,7 +114,7 @@ class CardsAdapter(
         }
         holder.bg.alpha = imageAlpha
 
-        val overlayDampen = if (tint is TintStyle.LiquidGlass) 0.78f else 1f
+        val overlayDampen = if (tint is TintStyle.LiquidGlass) 0.72f else 1f
         holder.textScrim.alpha = (if (isBright) 0.2f else 0.14f) * overlayDampen
         holder.liquidTint.alpha = (if (isBright) 0.24f else 0.32f) * overlayDampen
         holder.centerGlow.alpha = (if (isBright) 0.26f else 0.34f) * overlayDampen
