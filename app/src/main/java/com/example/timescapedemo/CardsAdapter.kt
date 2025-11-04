@@ -84,8 +84,9 @@ class CardsAdapter(
             baseEffect = RenderEffect.createBlurEffect(26f, 26f, Shader.TileMode.CLAMP)
         }
 
-        // Apply NON-GLASS tint directly to image
+        // Apply NON-GLASS tint directly to image and fade slightly for a clearer pane
         applyTintToImage(holder.bg, tint, baseEffect)
+        holder.bg.alpha = 0.72f
 
         // ---- Adaptive readability (local scrim + text color swap) ----
         val key = when (val b = item.bg) {
@@ -102,7 +103,7 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.35f else 0.10f
+        holder.textScrim.alpha = if (isBright) 0.24f else 0.08f
 
         if (isBright) {
             holder.title.setTextColor(0xFF111111.toInt())
@@ -110,14 +111,14 @@ class CardsAdapter(
             holder.time.setTextColor(0x99000000.toInt())
             clearShadow(holder.title, holder.snippet)
             holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFF1B1B1B.toInt())
-            holder.actionIcon.background?.alpha = 200
+            holder.actionIcon.background?.alpha = 180
         } else {
             holder.title.setTextColor(0xFFFFFFFF.toInt())
             holder.snippet.setTextColor(0xF2FFFFFF.toInt())
             holder.time.setTextColor(0xCCFFFFFF.toInt())
             addShadow(holder.title, holder.snippet)
             holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
-            holder.actionIcon.background?.alpha = 160
+            holder.actionIcon.background?.alpha = 140
         }
 
         holder.itemView.setOnClickListener {
