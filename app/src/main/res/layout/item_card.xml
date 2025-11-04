@@ -7,18 +7,17 @@
     android:layout_height="wrap_content"
     android:clipToOutline="true"
     app:cardUseCompatPadding="false"
-    app:cardCornerRadius="20dp"
-    app:cardElevation="8dp"
+    app:cardCornerRadius="22dp"
+    app:cardElevation="10dp"
     app:cardBackgroundColor="@android:color/transparent"
-    app:strokeWidth="0dp">
+    app:strokeColor="@color/card_glass_stroke"
+    app:strokeWidth="1dp">
 
-    <!-- ConstraintLayout so bg layer doesn't affect measured height -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Pure background image. We blur/adjust it in the adapter. No glass/tint here. -->
-        <ImageView
+        <com.example.timescapedemo.RadialFadeImageView
             android:id="@+id/bgImage"
             android:layout_width="0dp"
             android:layout_height="0dp"
@@ -29,7 +28,38 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- LOCAL scrim: very light, only beneath the text block for readability -->
+        <View
+            android:id="@+id/liquidTint"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_liquid_tint"
+            android:alpha="0.55"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <View
+            android:id="@+id/centerGlow"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_center_glow"
+            android:alpha="0.35"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <View
+            android:id="@+id/highlight"
+            android:layout_width="0dp"
+            android:layout_height="70dp"
+            android:background="@drawable/card_highlight"
+            android:alpha="0.6"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
         <View
             android:id="@+id/textScrim"
             android:layout_width="0dp"
@@ -40,13 +70,12 @@
             app:layout_constraintTop_toTopOf="@id/card_content"
             app:layout_constraintBottom_toBottomOf="@id/card_content" />
 
-        <!-- Content drives height; LayoutManager caps to 2/3 screen -->
         <com.example.timescapedemo.MaxHeightLinearLayout
             android:id="@+id/card_content"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp"
+            android:padding="18dp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
@@ -57,15 +86,15 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="12h ago"
-                android:textColor="#88555555"
-                android:textSize="12sp"/>
+                android:textColor="#A7FFFFFF"
+                android:textSize="12sp"
+                android:letterSpacing="0.05" />
 
-            <!-- Title stays one line and autoshrinks so numbers never clip -->
             <TextView
                 android:id="@+id/title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="8dp"
                 android:text="Contact"
                 android:textStyle="bold"
                 android:ellipsize="end"
@@ -73,7 +102,7 @@
                 app:autoSizeTextType="uniform"
                 app:autoSizeMinTextSize="18sp"
                 app:autoSizeMaxTextSize="27sp"
-                app:autoSizeStepGranularity="1sp"/>
+                app:autoSizeStepGranularity="1sp" />
 
             <TextView
                 android:id="@+id/snippet"
@@ -82,7 +111,7 @@
                 android:layout_marginTop="6dp"
                 android:text="Snippet"
                 android:textSize="14sp"
-                android:ellipsize="end"/>
+                android:ellipsize="end" />
         </com.example.timescapedemo.MaxHeightLinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>

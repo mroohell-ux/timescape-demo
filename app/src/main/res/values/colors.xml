@@ -2,4 +2,6 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="card_glass_stroke">#66FFFFFF</color>
+    <color name="card_glass_shadow">#1A000000</color>
 </resources>
