@@ -8,9 +8,13 @@ import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.view.LayoutInflater
@@ -19,9 +23,11 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.hypot
 
 data class CardItem(
     val title: String,
@@ -51,8 +57,41 @@ class CardsAdapter(
         val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
+        private val edgeFade: View = v.findViewById(R.id.bgEdgeFade)
         val textScrim: View = v.findViewById(R.id.textScrim)
         val actionIcon: ImageView = v.findViewById(R.id.actionIcon)
+
+        private val fadePaint = Paint().apply {
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+        }
+        private var lastMaskWidth = -1
+        private var lastMaskHeight = -1
+
+        init {
+            ViewCompat.setLayerType(edgeFade, ViewCompat.LAYER_TYPE_SOFTWARE, fadePaint)
+            edgeFade.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+                val w = view.width
+                val h = view.height
+                if (w != lastMaskWidth || h != lastMaskHeight) {
+                    lastMaskWidth = w
+                    lastMaskHeight = h
+                    updateMaskDrawable(w, h)
+                }
+            }
+        }
+
+        private fun updateMaskDrawable(width: Int, height: Int) {
+            if (width <= 0 || height <= 0) return
+            val radius = hypot(width / 2f, height / 2f)
+            val mask = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                gradientType = GradientDrawable.RADIAL_GRADIENT
+                setGradientCenter(0.5f, 0.5f)
+                gradientRadius = radius
+                colors = intArrayOf(0x00000000, 0x00000000, 0xFF000000.toInt())
+            }
+            edgeFade.background = mask
+        }
     }
 
     // Cache luminance by key (drawable id or uri string)

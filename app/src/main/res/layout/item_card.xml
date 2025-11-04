@@ -18,16 +18,29 @@
         android:layout_height="wrap_content">
 
         <!-- Base background image. Blur/tint is handled in the adapter. -->
-        <ImageView
-            android:id="@+id/bgImage"
+        <FrameLayout
+            android:id="@+id/bgContainer"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:scaleType="centerCrop"
-            android:contentDescription="@null"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <ImageView
+                android:id="@+id/bgImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null" />
+
+            <View
+                android:id="@+id/bgEdgeFade"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:importantForAccessibility="no"
+                android:visibility="visible" />
+        </FrameLayout>
 
         <!-- Frosted-glass frame -->
         <View
