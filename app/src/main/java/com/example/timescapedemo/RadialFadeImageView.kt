@@ -45,7 +45,7 @@ class RadialFadeImageView @JvmOverloads constructor(
 
         val centerX = w / 2f
         val centerY = h / 2f
-        val radius = (hypot(centerX.toDouble(), centerY.toDouble()) * 1.05).toFloat()
+        val radius = (hypot(centerX.toDouble(), centerY.toDouble()) * 0.95).toFloat()
         val shader = RadialGradient(
             centerX,
             centerY,
@@ -53,12 +53,13 @@ class RadialFadeImageView @JvmOverloads constructor(
             intArrayOf(
                 0x00000000,
                 0x00000000,
-                0x20000000,
-                0x70000000,
-                0xC8000000.toInt(),
+                0x16000000,
+                0x52000000,
+                0x96000000.toInt(),
+                0xD8000000.toInt(),
                 0xFF000000.toInt()
             ),
-            floatArrayOf(0f, 0.55f, 0.72f, 0.88f, 0.96f, 1f),
+            floatArrayOf(0f, 0.38f, 0.58f, 0.76f, 0.88f, 0.95f, 1f),
             Shader.TileMode.CLAMP
         )
         gradientPaint.shader = shader
