@@ -37,6 +37,11 @@ sealed class TintStyle {
     data class Colorize(@ColorInt val color: Int, val amount: Float = 0.35f) : TintStyle()
     data class Sepia(val amount: Float = 1f) : TintStyle()
     data class Duotone(@ColorInt val dark: Int, @ColorInt val light: Int, val amount: Float = 1f) : TintStyle()
+    data class LiquidGlass(
+        val dimAmount: Float = 0.32f,
+        val desaturation: Float = 0.45f,
+        val lift: Float = 0.06f
+    ) : TintStyle()
 }
 
 class CardsAdapter(
@@ -55,6 +60,7 @@ class CardsAdapter(
         val centerGlow: View = v.findViewById(R.id.centerGlow)
         val highlight: View = v.findViewById(R.id.highlight)
         val liquidSheen: View = v.findViewById(R.id.liquidSheen)
+        val liquidCaustic: View = v.findViewById(R.id.liquidCaustic)
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -79,8 +85,6 @@ class CardsAdapter(
             is BgImage.UriRef -> holder.bg.setImageURI(b.uri)
             null              -> holder.bg.setImageDrawable(null)
         }
-        holder.bg.alpha = 1f
-
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -105,11 +109,14 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.24f else 0.12f
-        holder.liquidTint.alpha = if (isBright) 0.2f else 0.3f
-        holder.centerGlow.alpha = if (isBright) 0.22f else 0.32f
-        holder.highlight.alpha = if (isBright) 0.32f else 0.38f
-        holder.liquidSheen.alpha = if (isBright) 0.42f else 0.55f
+        holder.bg.alpha = if (isBright) 0.58f else 0.65f
+
+        holder.textScrim.alpha = if (isBright) 0.2f else 0.14f
+        holder.liquidTint.alpha = if (isBright) 0.24f else 0.32f
+        holder.centerGlow.alpha = if (isBright) 0.26f else 0.34f
+        holder.highlight.alpha = if (isBright) 0.28f else 0.34f
+        holder.liquidSheen.alpha = if (isBright) 0.38f else 0.5f
+        holder.liquidCaustic.alpha = if (isBright) 0.45f else 0.56f
 
         if (isBright) {
             holder.title.setTextColor(0xFF1E1E1E.toInt())
@@ -171,6 +178,23 @@ class CardsAdapter(
                 } else {
                     applyTintToImage(iv, TintStyle.Colorize(style.light, style.amount * 0.6f), baseEffect)
                 }
+            }
+            is TintStyle.LiquidGlass -> {
+                val sat = (1f - style.desaturation).coerceIn(0f, 1f)
+                val dim = (1f - style.dimAmount).coerceIn(0.3f, 1f)
+                val lift = style.lift.coerceIn(0f, 0.3f)
+                val cm = ColorMatrix().apply { setSaturation(sat) }
+                val scale = ColorMatrix(
+                    floatArrayOf(
+                        dim, 0f, 0f, 0f, 255f * lift,
+                        0f, dim, 0f, 0f, 255f * lift,
+                        0f, 0f, dim, 0f, 255f * lift,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+                cm.postConcat(scale)
+                iv.colorFilter = ColorMatrixColorFilter(cm)
+                if (baseEffect != null) iv.setRenderEffect(baseEffect)
             }
         }
     }

@@ -72,6 +72,17 @@
             app:layout_constraintEnd_toEndOf="parent" />
 
         <View
+            android:id="@+id/liquidCaustic"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_liquid_caustic"
+            android:alpha="0.52"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <View
             android:id="@+id/textScrim"
             android:layout_width="0dp"
             android:layout_height="0dp"
