@@ -43,15 +43,15 @@ class RadialFadeImageView @JvmOverloads constructor(
         maskBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(maskBitmap!!)
 
-        val radius = hypot(w.toDouble(), h.toDouble()).toFloat() * 0.65f
+        val radius = hypot(w.toDouble(), h.toDouble()).toFloat() * 0.78f
         val centerX = w / 2f
         val centerY = h / 2f
         val shader = RadialGradient(
             centerX,
             centerY,
             radius,
-            intArrayOf(0x00000000, 0xE0000000.toInt()),
-            floatArrayOf(0.55f, 1f),
+            intArrayOf(0x00000000, 0xD0000000.toInt()),
+            floatArrayOf(0.45f, 1f),
             Shader.TileMode.CLAMP
         )
         gradientPaint.shader = shader

@@ -54,6 +54,7 @@ class CardsAdapter(
         val liquidTint: View = v.findViewById(R.id.liquidTint)
         val centerGlow: View = v.findViewById(R.id.centerGlow)
         val highlight: View = v.findViewById(R.id.highlight)
+        val liquidSheen: View = v.findViewById(R.id.liquidSheen)
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -78,7 +79,7 @@ class CardsAdapter(
             is BgImage.UriRef -> holder.bg.setImageURI(b.uri)
             null              -> holder.bg.setImageDrawable(null)
         }
-        holder.bg.alpha = 0.96f
+        holder.bg.alpha = 1f
 
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
@@ -104,10 +105,11 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.32f else 0.16f
-        holder.liquidTint.alpha = if (isBright) 0.36f else 0.5f
-        holder.centerGlow.alpha = if (isBright) 0.28f else 0.42f
-        holder.highlight.alpha = 0.62f
+        holder.textScrim.alpha = if (isBright) 0.24f else 0.12f
+        holder.liquidTint.alpha = if (isBright) 0.2f else 0.3f
+        holder.centerGlow.alpha = if (isBright) 0.22f else 0.32f
+        holder.highlight.alpha = if (isBright) 0.32f else 0.38f
+        holder.liquidSheen.alpha = if (isBright) 0.42f else 0.55f
 
         if (isBright) {
             holder.title.setTextColor(0xFF1E1E1E.toInt())
