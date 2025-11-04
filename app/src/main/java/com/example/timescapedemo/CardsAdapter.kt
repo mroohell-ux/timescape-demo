@@ -38,9 +38,8 @@ sealed class TintStyle {
     data class Sepia(val amount: Float = 1f) : TintStyle()
     data class Duotone(@ColorInt val dark: Int, @ColorInt val light: Int, val amount: Float = 1f) : TintStyle()
     data class LiquidGlass(
-        val dimAmount: Float = 0.32f,
-        val desaturation: Float = 0.45f,
-        val lift: Float = 0.06f
+        val imageAlphaBright: Float = 0.42f,
+        val imageAlphaDark: Float = 0.52f
     ) : TintStyle()
 }
 
@@ -109,14 +108,19 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.bg.alpha = if (isBright) 0.58f else 0.65f
+        val imageAlpha = when (val style = tint) {
+            is TintStyle.LiquidGlass -> if (isBright) style.imageAlphaBright else style.imageAlphaDark
+            else -> if (isBright) 0.58f else 0.65f
+        }
+        holder.bg.alpha = imageAlpha
 
-        holder.textScrim.alpha = if (isBright) 0.2f else 0.14f
-        holder.liquidTint.alpha = if (isBright) 0.24f else 0.32f
-        holder.centerGlow.alpha = if (isBright) 0.26f else 0.34f
-        holder.highlight.alpha = if (isBright) 0.28f else 0.34f
-        holder.liquidSheen.alpha = if (isBright) 0.38f else 0.5f
-        holder.liquidCaustic.alpha = if (isBright) 0.45f else 0.56f
+        val overlayDampen = if (tint is TintStyle.LiquidGlass) 0.78f else 1f
+        holder.textScrim.alpha = (if (isBright) 0.2f else 0.14f) * overlayDampen
+        holder.liquidTint.alpha = (if (isBright) 0.24f else 0.32f) * overlayDampen
+        holder.centerGlow.alpha = (if (isBright) 0.26f else 0.34f) * overlayDampen
+        holder.highlight.alpha = (if (isBright) 0.28f else 0.34f) * overlayDampen
+        holder.liquidSheen.alpha = (if (isBright) 0.38f else 0.5f) * overlayDampen
+        holder.liquidCaustic.alpha = (if (isBright) 0.45f else 0.56f) * overlayDampen
 
         if (isBright) {
             holder.title.setTextColor(0xFF1E1E1E.toInt())
@@ -180,20 +184,7 @@ class CardsAdapter(
                 }
             }
             is TintStyle.LiquidGlass -> {
-                val sat = (1f - style.desaturation).coerceIn(0f, 1f)
-                val dim = (1f - style.dimAmount).coerceIn(0.3f, 1f)
-                val lift = style.lift.coerceIn(0f, 0.3f)
-                val cm = ColorMatrix().apply { setSaturation(sat) }
-                val scale = ColorMatrix(
-                    floatArrayOf(
-                        dim, 0f, 0f, 0f, 255f * lift,
-                        0f, dim, 0f, 0f, 255f * lift,
-                        0f, 0f, dim, 0f, 255f * lift,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(scale)
-                iv.colorFilter = ColorMatrixColorFilter(cm)
+                iv.colorFilter = null
                 if (baseEffect != null) iv.setRenderEffect(baseEffect)
             }
         }

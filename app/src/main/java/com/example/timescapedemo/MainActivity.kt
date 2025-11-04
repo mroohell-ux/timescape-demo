@@ -225,7 +225,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        val tint: TintStyle = TintStyle.LiquidGlass(dimAmount = 0.38f, desaturation = 0.5f, lift = 0.05f)
+        val tint: TintStyle = TintStyle.LiquidGlass()
 
         recyclerCards.adapter = CardsAdapter(items, tint) { index ->
             if (lm.isFocused(index)) { lm.clearFocus(); return@CardsAdapter }
