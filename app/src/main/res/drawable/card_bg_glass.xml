@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Clear glass frame with a faint perimeter stroke -->
+    <!-- Core frosted panel -->
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="18dp"/>
-            <solid android:color="@android:color/transparent"/>
-            <stroke android:width="1dp" android:color="#29FFFFFF"/>
+            <corners android:radius="20dp"/>
+            <solid android:color="#14FFFFFF"/>
+        </shape>
+    </item>
+
+    <!-- Bright perimeter stroke reminiscent of classic Timescape cards -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="20dp"/>
+            <stroke android:width="2dp" android:color="#66FFFFFF"/>
         </shape>
     </item>
 </layer-list>

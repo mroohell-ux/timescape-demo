@@ -8,13 +8,9 @@ import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.view.LayoutInflater
@@ -23,11 +19,9 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
-import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.hypot
 
 data class CardItem(
     val title: String,
@@ -56,42 +50,10 @@ class CardsAdapter(
         val time: TextView = v.findViewById(R.id.time)
         val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
-        val bg: ImageView = v.findViewById(R.id.bgImage)
-        private val edgeFade: View = v.findViewById(R.id.bgEdgeFade)
+        val bg: RadialFadeImageView = v.findViewById(R.id.bgImage)
+        private val centerGlow: View = v.findViewById(R.id.centerGlow)
         val textScrim: View = v.findViewById(R.id.textScrim)
         val actionIcon: ImageView = v.findViewById(R.id.actionIcon)
-
-        private val fadePaint = Paint().apply {
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-        }
-        private var lastMaskWidth = -1
-        private var lastMaskHeight = -1
-
-        init {
-            ViewCompat.setLayerType(edgeFade, ViewCompat.LAYER_TYPE_SOFTWARE, fadePaint)
-            edgeFade.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-                val w = view.width
-                val h = view.height
-                if (w != lastMaskWidth || h != lastMaskHeight) {
-                    lastMaskWidth = w
-                    lastMaskHeight = h
-                    updateMaskDrawable(w, h)
-                }
-            }
-        }
-
-        private fun updateMaskDrawable(width: Int, height: Int) {
-            if (width <= 0 || height <= 0) return
-            val radius = hypot(width / 2f, height / 2f)
-            val mask = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                gradientType = GradientDrawable.RADIAL_GRADIENT
-                setGradientCenter(0.5f, 0.5f)
-                gradientRadius = radius
-                colors = intArrayOf(0x00000000, 0x00000000, 0xFF000000.toInt())
-            }
-            edgeFade.background = mask
-        }
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -142,23 +104,15 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.38f else 0.18f
+        holder.centerGlow.alpha = if (isBright) 0.45f else 0.6f
+        holder.textScrim.alpha = if (isBright) 0.32f else 0.18f
 
-        if (isBright) {
-            holder.title.setTextColor(0xFF111111.toInt())
-            holder.snippet.setTextColor(0xE0000000.toInt())
-            holder.time.setTextColor(0x99000000.toInt())
-            clearShadow(holder.title, holder.snippet)
-            holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFF1B1B1B.toInt())
-            holder.actionIcon.background?.alpha = 255
-        } else {
-            holder.title.setTextColor(0xFFFFFFFF.toInt())
-            holder.snippet.setTextColor(0xF2FFFFFF.toInt())
-            holder.time.setTextColor(0xCCFFFFFF.toInt())
-            addShadow(holder.title, holder.snippet)
-            holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
-            holder.actionIcon.background?.alpha = 255
-        }
+        holder.title.setTextColor(0xFFFFFFFF.toInt())
+        holder.snippet.setTextColor(0xF5FFFFFF.toInt())
+        holder.time.setTextColor(0xCCFFFFFF.toInt())
+        addShadow(holder.title, holder.snippet)
+        holder.actionIcon.imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+        holder.actionIcon.background?.alpha = 255
 
         holder.itemView.setOnClickListener {
             val idx = holder.bindingAdapterPosition
@@ -219,7 +173,6 @@ class CardsAdapter(
 
     // --- Text helpers ---
     private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(4f, 0f, 1f, 0x66000000) } }
-    private fun clearShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(0f, 0f, 0f, 0) } }
 
     // --- Luminance helpers (fast, downsampled) ---
     private fun computeAvgLuminanceFromRes(root: View, resId: Int): Float {
