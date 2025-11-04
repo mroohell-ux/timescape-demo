@@ -51,7 +51,7 @@ class CardsAdapter(
         val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: RadialFadeImageView = v.findViewById(R.id.bgImage)
-        private val centerGlow: View = v.findViewById(R.id.centerGlow)
+        val centerGlow: View = v.findViewById(R.id.centerGlow)
         val textScrim: View = v.findViewById(R.id.textScrim)
         val actionIcon: ImageView = v.findViewById(R.id.actionIcon)
     }
