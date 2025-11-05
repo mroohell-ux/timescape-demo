@@ -19,43 +19,15 @@
             app:title="@string/app_name"
             app:titleCentered="false"
             app:titleTextColor="#111111"
-            app:navigationIconTint="#111111"
-            app:menu="@menu/menu_main"/>
+            app:navigationIconTint="#111111"/>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <FrameLayout
-        android:id="@+id/content"
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerCards"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerCards"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipChildren="false"
-            android:clipToPadding="false"
-            android:paddingBottom="84dp"/>
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerImages"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:visibility="gone"
-            android:padding="12dp"
-            android:clipToPadding="false"/>
-    </FrameLayout>
-
-    <!-- Bottom navigation on a soft translucent pill -->
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/bottomBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:elevation="6dp"
-        app:menu="@menu/menu_bottom_nav"
-        app:backgroundTint="#CCFFFFFF"
-    app:itemIconTint="#333333"
-    app:itemTextColor="#333333"
-    app:labelVisibilityMode="labeled"/>
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:paddingBottom="32dp"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior"/>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
