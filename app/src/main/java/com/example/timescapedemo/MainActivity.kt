@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
@@ -19,6 +20,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.snackbar.Snackbar
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.FileNotFoundException
 import java.io.InputStream
 import kotlin.math.max
@@ -43,6 +46,9 @@ class MainActivity : AppCompatActivity() {
     private val cards: MutableList<CardItem> = mutableListOf()
     private var nextCardId: Long = 0
     private var currentTab: Tab = Tab.CARDS
+    private val prefs: SharedPreferences by lazy {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+    }
 
     // ------- pickers -------
     private val pickImages =
@@ -52,6 +58,7 @@ class MainActivity : AppCompatActivity() {
                 selectedImages.shuffle()
                 imagesAdapter.submit(selectedImages)
                 refreshCardsAdapter()
+                saveState()
                 snackbar("Added ${uris.size} image(s)")
             } else snackbar("No photos selected")
         }
@@ -70,6 +77,7 @@ class MainActivity : AppCompatActivity() {
                 selectedImages.shuffle()
                 imagesAdapter.submit(selectedImages)
                 refreshCardsAdapter()
+                saveState()
                 snackbar("Added ${uris.size} image(s)")
             } else snackbar("No photos selected")
         }
@@ -122,9 +130,12 @@ class MainActivity : AppCompatActivity() {
             selectedImages.remove(img)
             imagesAdapter.submit(selectedImages)
             refreshCardsAdapter()
+            saveState()
             snackbar("Removed 1 image")
         }
         recyclerImages.adapter = imagesAdapter
+
+        loadState()
 
         // BottomNav with TWO tabs
         bottomBar = findViewById(R.id.bottomBar)
@@ -137,11 +148,13 @@ class MainActivity : AppCompatActivity() {
         }
         bottomBar.selectedItemId = R.id.nav_cards
 
-        // Seed from project drawables (bg_*) on first launch
-        syncFromProjectDrawables()
-        imagesAdapter.submit(selectedImages)
-
-        refreshCardsAdapter()
+        if (selectedImages.isEmpty()) {
+            // Seed from project drawables (bg_*) on first launch
+            syncFromProjectDrawables(announce = false)
+        } else {
+            imagesAdapter.submit(selectedImages)
+            refreshCardsAdapter()
+        }
 
         // Back press: defocus first
         onBackPressedDispatcher.addCallback(this) {
@@ -179,6 +192,7 @@ class MainActivity : AppCompatActivity() {
                     selectedImages.clear()
                     imagesAdapter.submit(selectedImages)
                     refreshCardsAdapter()
+                    saveState()
                     snackbar("Cleared all images"); true
                 }
                 else -> false
@@ -196,7 +210,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Merge all drawables named bg_* into selectedImages (no duplicates). */
-    private fun syncFromProjectDrawables() {
+    private fun syncFromProjectDrawables(announce: Boolean = true) {
+        val before = selectedImages.toList()
         val res = resources
         val pkg = packageName
         val found = mutableListOf<BgImage.Res>()
@@ -227,12 +242,19 @@ class MainActivity : AppCompatActivity() {
 
         imagesAdapter.submit(selectedImages)
         refreshCardsAdapter()
-        snackbar("Synced ${found.size} drawable image(s)")
+
+        val changed = before != selectedImages
+        if (changed) {
+            saveState()
+            if (announce) snackbar("Synced ${found.size} drawable image(s)")
+        } else if (announce) {
+            snackbar("Project images are already up to date")
+        }
     }
 
     // ---------- cards ----------
     private fun refreshCardsAdapter(scrollToTop: Boolean = false) {
-        ensureSeedCards()
+        val seeded = ensureSeedCards()
         cards.sortByDescending { it.updatedAt }
 
         val fallback: BgImage = BgImage.Res(R.drawable.bg_placeholder)
@@ -242,14 +264,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         cardsAdapter.submitList(cards)
+        if (seeded) saveState()
         if (scrollToTop) {
             lm.clearFocus()
             recyclerCards.scrollToPosition(0)
         }
     }
 
-    private fun ensureSeedCards() {
-        if (cards.isNotEmpty()) return
+    private fun ensureSeedCards(): Boolean {
+        if (cards.isNotEmpty()) return false
 
         val variants = listOf(
             "Ping me when you’re free.",
@@ -269,6 +292,7 @@ class MainActivity : AppCompatActivity() {
                 updatedAt = System.currentTimeMillis() - (i * 90L * 60L * 1000L)
             )
         }
+        return true
     }
 
     private fun editCard(index: Int) {
@@ -280,6 +304,7 @@ class MainActivity : AppCompatActivity() {
             if (snippetValue.isNotEmpty()) card.snippet = snippetValue
             card.updatedAt = System.currentTimeMillis()
             refreshCardsAdapter(scrollToTop = true)
+            saveState()
             snackbar("Card updated")
         }
     }
@@ -296,6 +321,7 @@ class MainActivity : AppCompatActivity() {
             )
             cards += card
             refreshCardsAdapter(scrollToTop = true)
+            saveState()
             snackbar("Added card")
         }
     }
@@ -390,4 +416,104 @@ class MainActivity : AppCompatActivity() {
 
     private fun snackbar(msg: String) =
         Snackbar.make(findViewById(R.id.content), msg, Snackbar.LENGTH_SHORT).show()
+
+    private fun loadState() {
+        cards.clear()
+        selectedImages.clear()
+
+        val cardsJson = prefs.getString(KEY_CARDS, null)
+        if (!cardsJson.isNullOrBlank()) {
+            try {
+                val arr = JSONArray(cardsJson)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    cards += CardItem(
+                        id = obj.optLong("id"),
+                        title = obj.optString("title"),
+                        snippet = obj.optString("snippet"),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                }
+            } catch (_: Exception) {
+                cards.clear()
+            }
+        }
+
+        val imagesJson = prefs.getString(KEY_IMAGES, null)
+        if (!imagesJson.isNullOrBlank()) {
+            try {
+                val arr = JSONArray(imagesJson)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    when (obj.optString("type")) {
+                        "res" -> {
+                            val id = obj.optInt("id")
+                            val resolvedId = if (id != 0) id else {
+                                val name = obj.optString("name")
+                                if (name.isNullOrBlank()) 0 else resources.getIdentifier(name, "drawable", packageName)
+                            }
+                            if (resolvedId != 0) selectedImages += BgImage.Res(resolvedId)
+                        }
+                        "uri" -> {
+                            val value = obj.optString("value")
+                            if (!value.isNullOrBlank()) selectedImages += BgImage.UriRef(Uri.parse(value))
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                selectedImages.clear()
+            }
+        }
+
+        val savedNext = prefs.getLong(KEY_NEXT_CARD_ID, -1L)
+        nextCardId = if (savedNext >= 0) savedNext else (cards.maxOfOrNull { it.id }?.plus(1) ?: 0L)
+    }
+
+    private fun saveState() {
+        val cardsArray = JSONArray()
+        cards.forEach { card ->
+            val obj = JSONObject()
+            obj.put("id", card.id)
+            obj.put("title", card.title)
+            obj.put("snippet", card.snippet)
+            obj.put("updatedAt", card.updatedAt)
+            cardsArray.put(obj)
+        }
+
+        val imagesArray = JSONArray()
+        selectedImages.forEach { img ->
+            val obj = JSONObject()
+            when (img) {
+                is BgImage.Res -> {
+                    obj.put("type", "res")
+                    obj.put("id", img.id)
+                    runCatching { resources.getResourceEntryName(img.id) }
+                        .getOrNull()?.let { obj.put("name", it) }
+                }
+                is BgImage.UriRef -> {
+                    obj.put("type", "uri")
+                    obj.put("value", img.uri.toString())
+                }
+            }
+            imagesArray.put(obj)
+        }
+
+        prefs.edit()
+            .putString(KEY_CARDS, cardsArray.toString())
+            .putString(KEY_IMAGES, imagesArray.toString())
+            .putLong(KEY_NEXT_CARD_ID, nextCardId)
+            .apply()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        saveState()
+    }
+
+    companion object {
+        private const val PREFS_NAME = "timescape_state"
+        private const val KEY_CARDS = "cards"
+        private const val KEY_IMAGES = "images"
+        private const val KEY_NEXT_CARD_ID = "next_card_id"
+    }
 }
