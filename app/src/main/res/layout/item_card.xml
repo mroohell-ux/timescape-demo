@@ -8,37 +8,25 @@
     android:clipToOutline="true"
     app:cardUseCompatPadding="false"
     app:cardCornerRadius="20dp"
-    app:cardElevation="8dp"
+    app:cardElevation="12dp"
     app:cardBackgroundColor="@android:color/transparent"
-    app:strokeWidth="0dp">
+    app:strokeColor="#33FFFFFF"
+    app:strokeWidth="1dp">
 
     <!-- ConstraintLayout so bg layer doesn't affect measured height -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Pure background image. We blur/adjust it in the adapter. No glass/tint here. -->
-        <ImageView
-            android:id="@+id/bgImage"
+        <!-- Liquid glass overlay driven by Kyant's shader -->
+        <com.example.timescapedemo.liquid.LiquidGlassLayout
+            android:id="@+id/liquidGlass"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:scaleType="centerCrop"
-            android:contentDescription="@null"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
-
-        <!-- LOCAL scrim: very light, only beneath the text block for readability -->
-        <View
-            android:id="@+id/textScrim"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:background="@drawable/text_scrim"
-            app:layout_constraintStart_toStartOf="@id/card_content"
-            app:layout_constraintEnd_toEndOf="@id/card_content"
-            app:layout_constraintTop_toTopOf="@id/card_content"
-            app:layout_constraintBottom_toBottomOf="@id/card_content" />
 
         <!-- Content drives height; LayoutManager caps to 2/3 screen -->
         <com.example.timescapedemo.MaxHeightLinearLayout
