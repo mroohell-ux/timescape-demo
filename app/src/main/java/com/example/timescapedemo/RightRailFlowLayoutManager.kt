@@ -167,6 +167,9 @@ class RightRailFlowLayoutManager(
         val focusRadiusPx = itemPitchPx * 0.95f
         val heightCap = (height * 2f / 3f).roundToInt()
 
+        val nearest = nearestIndex()
+        val nearestY = yT + nearest * itemPitchPx - scrollYPx
+
         for (i in firstIdx..lastIdx) {
             val child = recycler.getViewForPosition(i)
             addView(child)
@@ -202,11 +205,8 @@ class RightRailFlowLayoutManager(
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
             // Alpha / depth (z-order so nearer items render above)
-            val alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
             child.alpha = 0.92f + 0.08f * gain
-
-            val centerIdxY = yT + nearestIndex() * itemPitchPx - scrollYPx
-            val dIdx = abs(centerIdxY - py) / itemPitchPx
+            val dIdx = abs(nearestY - py) / itemPitchPx
             val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
             child.scaleX = depthS
             child.scaleY = depthS
