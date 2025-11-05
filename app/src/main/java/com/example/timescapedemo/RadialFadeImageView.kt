@@ -6,11 +6,10 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
-import android.graphics.RadialGradient
+import android.graphics.LinearGradient
 import android.graphics.Shader
 import android.util.AttributeSet
 import androidx.appcompat.widget.AppCompatImageView
-import kotlin.math.hypot
 
 class RadialFadeImageView @JvmOverloads constructor(
     context: Context,
@@ -43,23 +42,22 @@ class RadialFadeImageView @JvmOverloads constructor(
         maskBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(maskBitmap!!)
 
-        val centerX = w / 2f
         val centerY = h / 2f
-        val radius = (hypot(centerX.toDouble(), centerY.toDouble()) * 0.95).toFloat()
-        val shader = RadialGradient(
-            centerX,
+        val shader = LinearGradient(
+            0f,
             centerY,
-            radius,
+            w.toFloat(),
+            centerY,
             intArrayOf(
+                0xFF000000.toInt(),
+                0xE0000000.toInt(),
+                0x66000000,
                 0x00000000,
-                0x00000000,
-                0x16000000,
-                0x52000000,
-                0x96000000.toInt(),
-                0xD8000000.toInt(),
+                0x66000000,
+                0xE0000000.toInt(),
                 0xFF000000.toInt()
             ),
-            floatArrayOf(0f, 0.38f, 0.58f, 0.76f, 0.88f, 0.95f, 1f),
+            floatArrayOf(0f, 0.08f, 0.22f, 0.5f, 0.78f, 0.92f, 1f),
             Shader.TileMode.CLAMP
         )
         gradientPaint.shader = shader

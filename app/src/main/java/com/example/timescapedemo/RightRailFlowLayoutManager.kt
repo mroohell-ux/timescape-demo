@@ -33,7 +33,6 @@ class RightRailFlowLayoutManager(
 
     // Visual tuning
     private val minEdgeScale: Float = 0.66f,
-    private val edgeAlphaMin: Float = 0.30f,
     private val depthScaleDrop: Float = 0.06f,
 
     // Horizontal rail shaping (controls inflow/outflow direction)
@@ -42,7 +41,10 @@ class RightRailFlowLayoutManager(
     private val railCurvePow: Float = 1.2f      // curvature; 1 = linear, >1 stronger S-curve
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
 
+    enum class PresentationMode { OVERVIEW, READING }
+
     // focus animation state
+    private var presentationMode: PresentationMode = PresentationMode.OVERVIEW
     private var selectedIndex: Int? = null
     private var focusProgress: Float = 0f
     private var focusAnimator: ValueAnimator? = null
@@ -60,6 +62,30 @@ class RightRailFlowLayoutManager(
     // ---- Public helpers ----
     fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
 
+    fun setPresentationMode(mode: PresentationMode, anchorIndex: Int? = null) {
+        if (presentationMode == mode && anchorIndex == null) return
+        presentationMode = mode
+        focusAnimator?.cancel()
+        if (itemCount == 0) {
+            selectedIndex = null
+            focusProgress = if (mode == PresentationMode.READING) 1f else 0f
+            requestLayout()
+            return
+        }
+        when (mode) {
+            PresentationMode.OVERVIEW -> {
+                selectedIndex = null
+                focusProgress = 0f
+            }
+            PresentationMode.READING -> {
+                val target = anchorIndex ?: nearestIndex()
+                selectedIndex = target
+                focusProgress = 1f
+            }
+        }
+        requestLayout()
+    }
+
     /** Center index given current scroll (rounded to nearest). */
     fun nearestIndex(): Int {
         val idx = ((scrollYPx + screenCenter() - yTop()) / itemPitchPx).roundToInt()
@@ -73,11 +99,18 @@ class RightRailFlowLayoutManager(
     }
 
     fun focus(index: Int) {
+        if (presentationMode == PresentationMode.READING) {
+            selectedIndex = index
+            focusProgress = 1f
+            requestLayout()
+            return
+        }
         if (selectedIndex == index && focusProgress >= 0.999f) return
         selectedIndex = index
         animateFocus(1f)
     }
     fun clearFocus() {
+        if (presentationMode == PresentationMode.READING) return
         if (selectedIndex == null && focusProgress == 0f) return
         animateFocus(0f) { selectedIndex = null }
     }
@@ -135,21 +168,37 @@ class RightRailFlowLayoutManager(
         val title = child.findViewById<TextView>(R.id.title)
         val snippet = child.findViewById<TextView>(R.id.snippet)
 
-        // Text grows a bit near center; we no longer clamp max lines (height is capped globally)
-        if (focused) {
-            title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
-        } else {
-            val titleSp = 21f + 5f * gain
+        if (presentationMode == PresentationMode.OVERVIEW) {
+            val titleSp = 18f + 4f * gain
             title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
+            snippet?.maxLines = 3
+        } else {
+            if (focused) {
+                title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
+                snippet?.maxLines = Integer.MAX_VALUE
+            } else {
+                val titleSp = 21f + 4f * gain
+                title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
+                snippet?.maxLines = 6
+            }
         }
-        // Leave snippet lines unconstrained; overall height is capped by MaxHeightLinearLayout.
-        snippet?.maxLines = Integer.MAX_VALUE
     }
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
         val cy = screenCenter()
         val baseX = railX()
         val yT = yTop(); val yB = yBottom()
+
+        val isReading = presentationMode == PresentationMode.READING
+        val focusIndex = if (isReading) nearestIndex() else selectedIndex
+        if (isReading) {
+            selectedIndex = focusIndex
+            focusProgress = 1f
+        }
+
+        val baseSide = if (isReading) baseSidePx else (baseSidePx * 0.78f).roundToInt()
+        val focusSide = if (isReading) focusSidePx else (baseSide * 1.08f).roundToInt()
+        val edgeScale = if (isReading) minEdgeScale else 0.54f
 
         // Visible window of indices
         val firstIdx = max(0, floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt())
@@ -175,12 +224,12 @@ class RightRailFlowLayoutManager(
             val toLeft  = gain * centerLeftShiftPx
             val px = baseX + toRight - toLeft
 
-            val isSelected = (selectedIndex == i)
+            val isSelected = (focusIndex == i)
 
             // Width: far small -> base -> (if selected) focused
-            val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
-            var side = (edgeSide + (baseSidePx - edgeSide) * interp.getInterpolation(gain)).roundToInt()
-            if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
+            val edgeSide = (baseSide * edgeScale).roundToInt()
+            var side = (edgeSide + (baseSide - edgeSide) * interp.getInterpolation(gain)).roundToInt()
+            if (isSelected) side = (side + (focusSide - side) * focusProgress).roundToInt()
 
             // Measure: fixed width, wrap-content height, capped to 2/3 screen
             measureCardWithWidthAndCap(child, side, heightCap)
@@ -194,12 +243,12 @@ class RightRailFlowLayoutManager(
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
             // Alpha / depth (z-order so nearer items render above)
-            val alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
-            child.alpha = 0.92f + 0.08f * gain
+            child.alpha = if (isReading) 0.92f + 0.08f * gain else 0.84f + 0.12f * gain
 
             val centerIdxY = yT + nearestIndex() * itemPitchPx - scrollYPx
             val dIdx = abs(centerIdxY - py) / itemPitchPx
-            val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
+            val depthSBase = if (isReading) 1f - depthScaleDrop * dIdx else 0.92f + 0.08f * gain
+            val depthS = max(0.9f, depthSBase)
             child.scaleX = depthS
             child.scaleY = depthS
             child.rotation = 0f
@@ -210,7 +259,7 @@ class RightRailFlowLayoutManager(
 
     override fun scrollVerticallyBy(dy: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
         if (itemCount == 0 || height == 0) return 0
-        if (dy != 0 && selectedIndex != null && focusProgress > 0f) clearFocus()
+        if (dy != 0 && presentationMode == PresentationMode.OVERVIEW && selectedIndex != null && focusProgress > 0f) clearFocus()
 
         val old = scrollYPx
         val newY = (old + dy).coerceIn(minScroll(), maxScroll())
@@ -219,6 +268,16 @@ class RightRailFlowLayoutManager(
 
         detachAndScrapAttachedViews(recycler)
         layoutAll(recycler)
+
+        if (presentationMode == PresentationMode.READING) {
+            val target = nearestIndex()
+            if (selectedIndex != target) {
+                selectedIndex = target
+                focusProgress = 1f
+                requestLayout()
+            }
+        }
+
         return consumed
     }
 
