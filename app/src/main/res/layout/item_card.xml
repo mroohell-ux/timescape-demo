@@ -8,9 +8,10 @@
     android:clipToOutline="true"
     app:cardUseCompatPadding="false"
     app:cardCornerRadius="20dp"
-    app:cardElevation="8dp"
+    app:cardElevation="12dp"
     app:cardBackgroundColor="@android:color/transparent"
-    app:strokeWidth="0dp">
+    app:strokeColor="#33FFFFFF"
+    app:strokeWidth="1dp">
 
     <!-- ConstraintLayout so bg layer doesn't affect measured height -->
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -24,6 +25,30 @@
             android:layout_height="0dp"
             android:scaleType="centerCrop"
             android:contentDescription="@null"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Liquid glass surface overlay -->
+        <View
+            android:id="@+id/glassSurface"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/liquid_glass_surface"
+            android:alpha="0.88"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Highlight streaks for the liquid look -->
+        <View
+            android:id="@+id/glassHighlight"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/liquid_glass_highlight"
+            android:alpha="0.8"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"

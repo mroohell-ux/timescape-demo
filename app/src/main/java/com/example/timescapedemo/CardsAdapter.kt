@@ -50,6 +50,8 @@ class CardsAdapter(
         val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
+        val glassSurface: View = v.findViewById(R.id.glassSurface)
+        val glassHighlight: View = v.findViewById(R.id.glassHighlight)
         val textScrim: View = v.findViewById(R.id.textScrim)
     }
 
@@ -101,6 +103,14 @@ class CardsAdapter(
         val isBright = lum >= 0.55f
 
         holder.textScrim.alpha = if (isBright) 0.40f else 0.12f
+        holder.glassSurface.alpha = if (isBright) 0.78f else 0.92f
+
+        val density = holder.itemView.resources.displayMetrics.density
+        val rotation = (position * 23f) % 360f
+        val translate = ((position % 3) - 1) * 12f * density
+        holder.glassHighlight.rotation = rotation
+        holder.glassHighlight.translationX = translate
+        holder.glassHighlight.alpha = if (isBright) 0.75f else 0.88f
 
         if (isBright) {
             holder.title.setTextColor(0xFF111111.toInt())
