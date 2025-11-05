@@ -12,6 +12,7 @@ import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.example.timescapedemo.R
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -29,6 +30,7 @@ class LiquidGlassLayout @JvmOverloads constructor(
     private val highlightView = View(context)
 
     private var isAnimating = false
+    private var lastSceneLuminance = -1f
 
     private var shaderWrapper: HighlightShaderWrapper? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         HighlightShaderWrapper()
@@ -60,7 +62,7 @@ class LiquidGlassLayout @JvmOverloads constructor(
         val highlightDrawable = ContextCompat.getDrawable(context, R.drawable.liquid_glass_highlight)
         highlightView.apply {
             background = highlightDrawable
-            alpha = 0.82f
+            alpha = 0.84f
         }
 
         addView(surfaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -73,6 +75,7 @@ class LiquidGlassLayout @JvmOverloads constructor(
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             shaderWrapper?.attach(highlightView)
+            shaderWrapper?.setEnvironment(0.5f, false)
         }
     }
 
@@ -102,10 +105,29 @@ class LiquidGlassLayout @JvmOverloads constructor(
 
     fun setSceneLuminance(value: Float) {
         val luminance = value.coerceIn(0f, 1f)
-        val isBright = luminance >= 0.55f
-        surfaceView.alpha = if (isBright) 0.72f else 0.9f
-        highlightView.alpha = if (isBright) 0.68f else 0.88f
-        shaderWrapper?.setSceneBrightness(if (isBright) 0.65f else 1.1f)
+        if (abs(luminance - lastSceneLuminance) < 0.01f) {
+            return
+        }
+        lastSceneLuminance = luminance
+        val isBright = luminance >= 0.58f
+        val surfaceAlpha = if (isBright) 0.74f else 0.9f
+        val highlightAlpha = if (isBright) 0.64f else 0.88f
+        animateAlpha(surfaceView, surfaceAlpha)
+        animateAlpha(highlightView, highlightAlpha)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            shaderWrapper?.setEnvironment(luminance, isBright)
+        }
+    }
+
+    private fun animateAlpha(target: View, to: Float) {
+        if (!target.isLaidOut) {
+            target.alpha = to
+            return
+        }
+        if (abs(target.alpha - to) < 0.01f) {
+            return
+        }
+        target.animate().alpha(to).setDuration(220L).start()
     }
 
     private fun start() {
@@ -147,8 +169,14 @@ class LiquidGlassLayout @JvmOverloads constructor(
             updateEffect()
         }
 
-        fun setSceneBrightness(scale: Float) {
-            shader.setFloatUniform("caustics", scale)
+        fun setEnvironment(luminance: Float, bright: Boolean) {
+            shader.setFloatUniform("envLum", luminance)
+            val brightness = if (bright) 0.78f else 1.1f
+            val sparkle = if (bright) 0.56f else 0.86f
+            val glint = if (bright) 0.48f else 0.8f
+            shader.setFloatUniform("brightness", brightness)
+            shader.setFloatUniform("sparkle", sparkle)
+            shader.setFloatUniform("glint", glint)
             updateEffect()
         }
 
@@ -166,7 +194,6 @@ class LiquidGlassLayout @JvmOverloads constructor(
             lastFrameNs = frameTimeNanos
             time += dt
             shader.setFloatUniform("time", time)
-            shader.setFloatUniform("intensity", 0.9f)
             updateEffect()
             attachedView?.invalidate()
         }
@@ -175,7 +202,7 @@ class LiquidGlassLayout @JvmOverloads constructor(
             val target = attachedView ?: return
             if (resolutionW <= 0f || resolutionH <= 0f) return
             val base = RenderEffect.createRuntimeShaderEffect(shader, "content")
-            val combined = RenderEffect.createChainEffect(base, RenderEffect.createBlurEffect(18f, 18f, Shader.TileMode.DECAL))
+            val combined = RenderEffect.createChainEffect(base, RenderEffect.createBlurEffect(20f, 20f, Shader.TileMode.DECAL))
             effect = combined
             target.setRenderEffect(effect)
         }
@@ -186,8 +213,10 @@ class LiquidGlassLayout @JvmOverloads constructor(
             uniform shader content;
             uniform float2 resolution;
             uniform float time;
-            uniform float intensity;
-            uniform float caustics;
+            uniform float envLum;
+            uniform float brightness;
+            uniform float sparkle;
+            uniform float glint;
 
             float hash(float2 p) {
                 return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
@@ -204,29 +233,49 @@ class LiquidGlassLayout @JvmOverloads constructor(
                 return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
             }
 
-            float causticField(float2 uv, float t) {
-                float n1 = noise(uv * 6.0 + t * 0.8);
-                float n2 = noise(uv * float2(8.0, 4.0) - t * 1.1);
-                float streaks = sin((uv.x + t * 0.4) * 40.0) * 0.5 + 0.5;
-                return mix(n1, n2, 0.5) * 0.65 + streaks * 0.35;
+            float fbm(float2 p) {
+                float value = 0.0;
+                float amplitude = 0.5;
+                for (int i = 0; i < 4; ++i) {
+                    value += noise(p) * amplitude;
+                    p *= 2.0;
+                    amplitude *= 0.5;
+                }
+                return value;
             }
 
             half4 main(float2 fragCoord) {
-                float2 uv = fragCoord / resolution;
-                float wave1 = sin((uv.y + time * 0.18) * 18.0) * 0.012;
-                float wave2 = cos((uv.x + time * 0.13) * 24.0) * 0.01;
-                float2 offset = float2(wave1, wave2) * intensity;
-                float2 sampleCoord = fragCoord + offset * resolution;
+                float2 safeRes = max(resolution, float2(1.0, 1.0));
+                float2 uv = fragCoord / safeRes;
+                float aspect = safeRes.x / safeRes.y;
+                float2 centered = uv - 0.5;
+
+                float flow = time * 0.22;
+                float wave1 = sin((centered.y + flow) * 18.0) * 0.018;
+                float wave2 = cos((centered.x * aspect - flow * 0.6) * 22.0) * 0.014;
+                float swirl = sin((centered.x * aspect + centered.y * 0.6 + flow * 0.8) * 14.0) * 0.012;
+
+                float2 offset = float2(wave1 + swirl, wave2 - swirl);
+                float2 sampleCoord = fragCoord + offset * safeRes * sparkle;
                 half4 color = content.eval(sampleCoord);
 
-                float highlight = smoothstep(0.32, 0.94, uv.y + wave1 * 2.1 + wave2 * 1.8);
-                float caustic = causticField(uv + wave1, time) * caustics * 0.55;
-                float sheen = smoothstep(0.5, 1.0, sin((uv.x + time * 0.3) * 22.0) * 0.5 + 0.5);
+                float band = smoothstep(0.18, 0.74, uv.y + sin((uv.x + flow * 0.8) * 8.0) * 0.09);
+                float topSheen = smoothstep(0.02, 0.28, uv.y + wave1 * 2.6);
+                float bottomFade = smoothstep(0.86, 1.04, uv.y);
+                float streaks = smoothstep(0.25, 0.95, sin((uv.x * 0.7 + flow * 1.4) * 32.0) * 0.5 + 0.5);
 
-                float brighten = 1.05 + highlight * 0.25 + sheen * 0.12 + caustic * 0.35;
-                color.rgb *= brighten;
-                color.rgb = mix(color.rgb, float3(1.0, 1.0, 1.0), 0.04 + highlight * 0.08);
-                color.a *= mix(0.5, 0.92, highlight);
+                float caustic = fbm(uv * float2(9.0, 5.5) + float2(flow * 1.2, -flow * 1.6));
+                float sparkleMask = pow(max(0.0, caustic - 0.35), 3.0);
+                float highlight = max(max(band, topSheen), sparkleMask * 1.3);
+                highlight = max(highlight, streaks * glint);
+
+                float ambient = mix(0.55, 1.18, envLum);
+                float baseBright = brightness * ambient;
+                float finalBright = baseBright + highlight * 0.45 + topSheen * 0.15;
+
+                color.rgb *= finalBright;
+                color.rgb = mix(color.rgb, float3(1.0, 1.0, 1.0), 0.08 + highlight * 0.12 + topSheen * 0.05);
+                color.a *= mix(0.58, 0.95, band) * (1.0 - bottomFade * 0.35);
                 return color;
             }
         """
