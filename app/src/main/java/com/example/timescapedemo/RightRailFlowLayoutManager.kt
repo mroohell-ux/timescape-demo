@@ -92,6 +92,14 @@ class RightRailFlowLayoutManager(
         return idx.coerceIn(0, max(0, itemCount - 1))
     }
 
+    fun currentFocusedIndex(): Int? {
+        if (itemCount == 0) return null
+        return when (presentationMode) {
+            PresentationMode.READING -> nearestIndex()
+            PresentationMode.OVERVIEW -> selectedIndex?.takeIf { focusProgress > 0f }
+        }
+    }
+
     /** Pixel delta required to move `index` to vertical screen center. */
     fun offsetTo(index: Int): Int {
         val desiredScroll = yTop() + index * itemPitchPx - screenCenter()

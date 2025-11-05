@@ -19,20 +19,4 @@
         android:icon="@android:drawable/ic_menu_delete"
         app:showAsAction="never"/>
 
-    <!-- Card rail modes -->
-    <group
-        android:id="@+id/group_card_modes"
-        android:checkableBehavior="single">
-        <item
-            android:id="@+id/action_mode_overview"
-            android:title="Overview mode"
-            android:checkable="true"
-            app:showAsAction="never"/>
-        <item
-            android:id="@+id/action_mode_reading"
-            android:title="Reading mode"
-            android:checkable="true"
-            app:showAsAction="never"/>
-    </group>
-
 </menu>

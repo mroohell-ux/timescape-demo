@@ -115,7 +115,7 @@ class CardsAdapter(
         holder.bg.alpha = imageAlpha
 
         val overlayDampen = if (tint is TintStyle.LiquidGlass) 0.72f else 1f
-        holder.textScrim.alpha = (if (isBright) 0.2f else 0.14f) * overlayDampen
+        holder.textScrim.alpha = (if (isBright) 0.48f else 0.36f) * overlayDampen
         holder.liquidTint.alpha = (if (isBright) 0.24f else 0.32f) * overlayDampen
         holder.centerGlow.alpha = (if (isBright) 0.26f else 0.34f) * overlayDampen
         holder.highlight.alpha = (if (isBright) 0.28f else 0.34f) * overlayDampen
