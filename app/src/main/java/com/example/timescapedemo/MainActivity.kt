@@ -102,10 +102,15 @@ class MainActivity : AppCompatActivity() {
             tint,
             onItemClick = { index ->
                 if (lm.isFocused(index)) {
-                    lm.clearFocus(); return@onItemClick
+                    lm.clearFocus()
+                } else {
+                    val delta = lm.offsetTo(index)
+                    if (delta == 0) {
+                        lm.focus(index)
+                    } else {
+                        recyclerCards.smoothScrollBy(0, delta)
+                    }
                 }
-                val delta = lm.offsetTo(index)
-                if (delta == 0) lm.focus(index) else recyclerCards.smoothScrollBy(0, delta)
             },
             onItemDoubleClick = { index -> editCard(index) }
         )
