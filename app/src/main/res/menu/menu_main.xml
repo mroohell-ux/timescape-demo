@@ -2,6 +2,13 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <!-- Cards tab -->
+    <item
+        android:id="@+id/action_add_card"
+        android:title="Add card"
+        android:icon="@android:drawable/ic_input_add"
+        app:showAsAction="ifRoom"/>
+
     <!-- Shown only on Images tab -->
     <item
         android:id="@+id/action_pick"

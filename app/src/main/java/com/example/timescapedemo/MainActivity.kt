@@ -6,11 +6,13 @@ import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
 import androidx.activity.addCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.core.graphics.applyCanvas
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -35,8 +37,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
 
     // Adapters / state
+    private lateinit var cardsAdapter: CardsAdapter
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private val selectedImages: MutableList<BgImage> = mutableListOf()
+    private val cards: MutableList<CardItem> = mutableListOf()
+    private var nextCardId: Long = 0
     private var currentTab: Tab = Tab.CARDS
 
     // ------- pickers -------
@@ -46,7 +51,7 @@ class MainActivity : AppCompatActivity() {
                 selectedImages.addAll(uris.map { BgImage.UriRef(it) })
                 selectedImages.shuffle()
                 imagesAdapter.submit(selectedImages)
-                rebuildCardsAdapter()
+                refreshCardsAdapter()
                 snackbar("Added ${uris.size} image(s)")
             } else snackbar("No photos selected")
         }
@@ -64,7 +69,7 @@ class MainActivity : AppCompatActivity() {
                 selectedImages.addAll(uris.map { BgImage.UriRef(it) })
                 selectedImages.shuffle()
                 imagesAdapter.submit(selectedImages)
-                rebuildCardsAdapter()
+                refreshCardsAdapter()
                 snackbar("Added ${uris.size} image(s)")
             } else snackbar("No photos selected")
         }
@@ -92,12 +97,26 @@ class MainActivity : AppCompatActivity() {
         )
         recyclerCards.layoutManager = lm
 
+        val tint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
+        cardsAdapter = CardsAdapter(
+            tint,
+            onItemClick = { index ->
+                if (lm.isFocused(index)) {
+                    lm.clearFocus(); return@onItemClick
+                }
+                val delta = lm.offsetTo(index)
+                if (delta == 0) lm.focus(index) else recyclerCards.smoothScrollBy(0, delta)
+            },
+            onItemDoubleClick = { index -> editCard(index) }
+        )
+        recyclerCards.adapter = cardsAdapter
+
         // Images grid + adapter (lambda references class property 'imagesAdapter')
         recyclerImages.layoutManager = GridLayoutManager(this, 3)
         imagesAdapter = SelectedImagesAdapter { img ->
             selectedImages.remove(img)
             imagesAdapter.submit(selectedImages)
-            rebuildCardsAdapter()
+            refreshCardsAdapter()
             snackbar("Removed 1 image")
         }
         recyclerImages.adapter = imagesAdapter
@@ -117,7 +136,7 @@ class MainActivity : AppCompatActivity() {
         syncFromProjectDrawables()
         imagesAdapter.submit(selectedImages)
 
-        rebuildCardsAdapter()
+        refreshCardsAdapter()
 
         // Back press: defocus first
         onBackPressedDispatcher.addCallback(this) {
@@ -139,19 +158,22 @@ class MainActivity : AppCompatActivity() {
     private fun setupToolbarActionsFor(tab: Tab) {
         toolbar.menu.clear()
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
-        val visible = (tab == Tab.IMAGES)
-        toolbar.menu.findItem(R.id.action_pick)?.isVisible = visible
-        toolbar.menu.findItem(R.id.action_sync)?.isVisible = visible
-        toolbar.menu.findItem(R.id.action_clear)?.isVisible = visible
+        val showImagesActions = (tab == Tab.IMAGES)
+        toolbar.menu.findItem(R.id.action_pick)?.isVisible = showImagesActions
+        toolbar.menu.findItem(R.id.action_sync)?.isVisible = showImagesActions
+        toolbar.menu.findItem(R.id.action_clear)?.isVisible = showImagesActions
+        val showCardActions = (tab == Tab.CARDS)
+        toolbar.menu.findItem(R.id.action_add_card)?.isVisible = showCardActions
 
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
+                R.id.action_add_card -> { showAddCardDialog(); true }
                 R.id.action_pick -> { launchPicker(); true }
                 R.id.action_sync -> { syncFromProjectDrawables(); true }
                 R.id.action_clear -> {
                     selectedImages.clear()
                     imagesAdapter.submit(selectedImages)
-                    rebuildCardsAdapter()
+                    refreshCardsAdapter()
                     snackbar("Cleared all images"); true
                 }
                 else -> false
@@ -199,12 +221,31 @@ class MainActivity : AppCompatActivity() {
         selectedImages.sortBy { (it as? BgImage.Res)?.id ?: Int.MAX_VALUE }
 
         imagesAdapter.submit(selectedImages)
-        rebuildCardsAdapter()
+        refreshCardsAdapter()
         snackbar("Synced ${found.size} drawable image(s)")
     }
 
     // ---------- cards ----------
-    private fun rebuildCardsAdapter() {
+    private fun refreshCardsAdapter(scrollToTop: Boolean = false) {
+        ensureSeedCards()
+        cards.sortByDescending { it.updatedAt }
+
+        val fallback: BgImage = BgImage.Res(R.drawable.bg_placeholder)
+        val backgrounds = if (selectedImages.isNotEmpty()) selectedImages else listOf(fallback)
+        cards.forEachIndexed { index, card ->
+            card.bg = backgrounds[index % backgrounds.size]
+        }
+
+        cardsAdapter.submitList(cards)
+        if (scrollToTop) {
+            lm.clearFocus()
+            recyclerCards.scrollToPosition(0)
+        }
+    }
+
+    private fun ensureSeedCards() {
+        if (cards.isNotEmpty()) return
+
         val variants = listOf(
             "Ping me when you’re free.",
             "Grows toward center. Two neighbors overlap a bit.",
@@ -214,24 +255,65 @@ class MainActivity : AppCompatActivity() {
             "EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height."
         )
 
-        val fallback: BgImage = BgImage.Res(R.drawable.bg_placeholder)
-        val items = List(30) { i ->
-            val bg = if (selectedImages.isNotEmpty()) selectedImages[i % selectedImages.size] else fallback
-            CardItem(
+        repeat(30) { i ->
+            cards += CardItem(
+                id = nextCardId++,
                 title = "Contact $i",
                 snippet = variants[i % variants.size],
-                time = "${(i % 12) + 1}h ago",
-                bg = bg
+                bg = BgImage.Res(R.drawable.bg_placeholder),
+                updatedAt = System.currentTimeMillis() - (i * 90L * 60L * 1000L)
             )
         }
+    }
 
-        val tint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
-
-        recyclerCards.adapter = CardsAdapter(items, tint) { index ->
-            if (lm.isFocused(index)) { lm.clearFocus(); return@CardsAdapter }
-            val delta = lm.offsetTo(index)
-            if (delta == 0) lm.focus(index) else recyclerCards.smoothScrollBy(0, delta)
+    private fun editCard(index: Int) {
+        val card = cards.getOrNull(index) ?: return
+        showCardEditor(card.title, card.snippet) { newTitle, newSnippet ->
+            val titleValue = newTitle.trim()
+            val snippetValue = newSnippet.trim()
+            if (titleValue.isNotEmpty()) card.title = titleValue
+            if (snippetValue.isNotEmpty()) card.snippet = snippetValue
+            card.updatedAt = System.currentTimeMillis()
+            refreshCardsAdapter(scrollToTop = true)
+            snackbar("Card updated")
         }
+    }
+
+    private fun showAddCardDialog() {
+        showCardEditor(initialTitle = "", initialSnippet = "") { title, snippet ->
+            val finalTitle = title.trim().ifBlank { "New Contact" }
+            val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
+            val card = CardItem(
+                id = nextCardId++,
+                title = finalTitle,
+                snippet = finalSnippet,
+                updatedAt = System.currentTimeMillis()
+            )
+            cards += card
+            refreshCardsAdapter(scrollToTop = true)
+            snackbar("Added card")
+        }
+    }
+
+    private fun showCardEditor(
+        initialTitle: String,
+        initialSnippet: String,
+        onSave: (title: String, snippet: String) -> Unit
+    ) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_card, null, false)
+        val titleInput = dialogView.findViewById<android.widget.EditText>(R.id.inputTitle)
+        val snippetInput = dialogView.findViewById<android.widget.EditText>(R.id.inputSnippet)
+        titleInput.setText(initialTitle)
+        snippetInput.setText(initialSnippet)
+
+        AlertDialog.Builder(this)
+            .setTitle(if (initialTitle.isEmpty()) getString(R.string.dialog_add_card_title) else getString(R.string.dialog_edit_card_title))
+            .setView(dialogView)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                onSave(titleInput.text.toString(), snippetInput.text.toString())
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ---------- bitmap helpers (kept in case you reuse previews) ----------

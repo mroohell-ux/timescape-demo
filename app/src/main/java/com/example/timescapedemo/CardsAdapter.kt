@@ -12,21 +12,26 @@ import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
+import android.text.format.DateUtils
+import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.MotionEvent
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.max
 import kotlin.math.min
 
 data class CardItem(
-    val title: String,
-    val snippet: String,
-    val time: String,
-    val bg: BgImage? = null
+    val id: Long,
+    var title: String,
+    var snippet: String,
+    var bg: BgImage? = null,
+    var updatedAt: Long = System.currentTimeMillis()
 )
 
 /** Non-“glass” tint options that keep the card transparent. */
@@ -40,9 +45,9 @@ sealed class TintStyle {
 }
 
 class CardsAdapter(
-    private val items: List<CardItem>,
     private val tint: TintStyle,
-    private val onItemClick: (index: Int) -> Unit
+    private val onItemClick: (index: Int) -> Unit,
+    private val onItemDoubleClick: (index: Int) -> Unit
 ) : RecyclerView.Adapter<CardsAdapter.VH>() {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -51,6 +56,15 @@ class CardsAdapter(
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        lateinit var gestureDetector: GestureDetectorCompat
+    }
+
+    private val items = mutableListOf<CardItem>()
+
+    fun submitList(newItems: List<CardItem>) {
+        items.clear()
+        items.addAll(newItems)
+        notifyDataSetChanged()
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -58,14 +72,41 @@ class CardsAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
-        return VH(v)
+        val vh = VH(v)
+        vh.gestureDetector = GestureDetectorCompat(v.context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val idx = vh.bindingAdapterPosition
+                if (idx != RecyclerView.NO_POSITION) onItemClick(idx)
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val idx = vh.bindingAdapterPosition
+                if (idx != RecyclerView.NO_POSITION) onItemDoubleClick(idx)
+                return true
+            }
+        })
+        v.isClickable = true
+        v.setOnTouchListener { view, event ->
+            val handled = vh.gestureDetector.onTouchEvent(event)
+            if (!handled && event.action == MotionEvent.ACTION_UP) {
+                view.performClick()
+            }
+            true
+        }
+        return vh
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
 
         // ---- Bind text ----
-        holder.time.text = item.time
+        holder.time.text = DateUtils.getRelativeTimeSpanString(
+            item.updatedAt,
+            System.currentTimeMillis(),
+            DateUtils.MINUTE_IN_MILLIS,
+            DateUtils.FORMAT_ABBREV_RELATIVE
+        ).toString()
         holder.title.text = item.title
         holder.snippet.text = item.snippet
 
@@ -112,11 +153,6 @@ class CardsAdapter(
             holder.snippet.setTextColor(0xF2FFFFFF.toInt())
             holder.time.setTextColor(0xCCFFFFFF.toInt())
             addShadow(holder.title, holder.snippet)
-        }
-
-        holder.itemView.setOnClickListener {
-            val idx = holder.bindingAdapterPosition
-            if (idx != RecyclerView.NO_POSITION) onItemClick(idx)
         }
     }
 

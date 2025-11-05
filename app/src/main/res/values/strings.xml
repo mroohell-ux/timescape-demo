@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">TimescapeDemo</string>
+    <string name="dialog_add_card_title">Add card</string>
+    <string name="dialog_edit_card_title">Edit card</string>
+    <string name="dialog_save">Save</string>
+    <string name="dialog_title_hint">Title</string>
+    <string name="dialog_snippet_hint">Details</string>
 </resources>
