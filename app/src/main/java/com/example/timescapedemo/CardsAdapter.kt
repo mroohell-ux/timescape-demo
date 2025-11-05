@@ -37,6 +37,10 @@ sealed class TintStyle {
     data class Colorize(@ColorInt val color: Int, val amount: Float = 0.35f) : TintStyle()
     data class Sepia(val amount: Float = 1f) : TintStyle()
     data class Duotone(@ColorInt val dark: Int, @ColorInt val light: Int, val amount: Float = 1f) : TintStyle()
+    data class LiquidGlass(
+        val imageAlphaBright: Float = 0.88f,
+        val imageAlphaDark: Float = 0.96f
+    ) : TintStyle()
 }
 
 class CardsAdapter(
@@ -51,6 +55,11 @@ class CardsAdapter(
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        val liquidTint: View = v.findViewById(R.id.liquidTint)
+        val centerGlow: View = v.findViewById(R.id.centerGlow)
+        val highlight: View = v.findViewById(R.id.highlight)
+        val liquidSheen: View = v.findViewById(R.id.liquidSheen)
+        val liquidCaustic: View = v.findViewById(R.id.liquidCaustic)
     }
 
     // Cache luminance by key (drawable id or uri string)
@@ -75,7 +84,6 @@ class CardsAdapter(
             is BgImage.UriRef -> holder.bg.setImageURI(b.uri)
             null              -> holder.bg.setImageDrawable(null)
         }
-
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -100,17 +108,29 @@ class CardsAdapter(
         }
         val isBright = lum >= 0.55f
 
-        holder.textScrim.alpha = if (isBright) 0.40f else 0.12f
+        val imageAlpha = when (val style = tint) {
+            is TintStyle.LiquidGlass -> if (isBright) style.imageAlphaBright else style.imageAlphaDark
+            else -> if (isBright) 0.58f else 0.65f
+        }
+        holder.bg.alpha = imageAlpha
+
+        val overlayDampen = if (tint is TintStyle.LiquidGlass) 0.72f else 1f
+        holder.textScrim.alpha = (if (isBright) 0.48f else 0.36f) * overlayDampen
+        holder.liquidTint.alpha = (if (isBright) 0.24f else 0.32f) * overlayDampen
+        holder.centerGlow.alpha = (if (isBright) 0.26f else 0.34f) * overlayDampen
+        holder.highlight.alpha = (if (isBright) 0.28f else 0.34f) * overlayDampen
+        holder.liquidSheen.alpha = (if (isBright) 0.38f else 0.5f) * overlayDampen
+        holder.liquidCaustic.alpha = (if (isBright) 0.45f else 0.56f) * overlayDampen
 
         if (isBright) {
-            holder.title.setTextColor(0xFF111111.toInt())
-            holder.snippet.setTextColor(0xE0000000.toInt())
-            holder.time.setTextColor(0x99000000.toInt())
+            holder.title.setTextColor(0xFF1E1E1E.toInt())
+            holder.snippet.setTextColor(0xE0111111.toInt())
+            holder.time.setTextColor(0xAA111111.toInt())
             clearShadow(holder.title, holder.snippet)
         } else {
             holder.title.setTextColor(0xFFFFFFFF.toInt())
-            holder.snippet.setTextColor(0xF2FFFFFF.toInt())
-            holder.time.setTextColor(0xCCFFFFFF.toInt())
+            holder.snippet.setTextColor(0xF5FFFFFF.toInt())
+            holder.time.setTextColor(0xD8FFFFFF.toInt())
             addShadow(holder.title, holder.snippet)
         }
 
@@ -162,6 +182,10 @@ class CardsAdapter(
                 } else {
                     applyTintToImage(iv, TintStyle.Colorize(style.light, style.amount * 0.6f), baseEffect)
                 }
+            }
+            is TintStyle.LiquidGlass -> {
+                iv.colorFilter = null
+                if (baseEffect != null) iv.setRenderEffect(baseEffect)
             }
         }
     }

@@ -26,6 +26,7 @@ import kotlin.math.roundToInt
 class MainActivity : AppCompatActivity() {
 
     private enum class Tab { CARDS, IMAGES }
+    private enum class CardMode { OVERVIEW, READING }
 
     // Views
     private lateinit var recyclerCards: RecyclerView
@@ -35,9 +36,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
 
     // Adapters / state
+    private lateinit var cardsAdapter: CardsAdapter
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private val selectedImages: MutableList<BgImage> = mutableListOf()
     private var currentTab: Tab = Tab.CARDS
+    private var cardMode: CardMode = CardMode.OVERVIEW
 
     // ------- pickers -------
     private val pickImages =
@@ -121,8 +124,14 @@ class MainActivity : AppCompatActivity() {
 
         // Back press: defocus first
         onBackPressedDispatcher.addCallback(this) {
+            if (currentTab == Tab.CARDS && cardMode == CardMode.READING) {
+                setCardMode(CardMode.OVERVIEW)
+                return@addCallback
+            }
             val idx = lm.nearestIndex()
-            if (lm.isFocused(idx)) lm.clearFocus() else {
+            if (lm.isFocused(idx)) {
+                lm.clearFocus()
+            } else {
                 remove(); onBackPressedDispatcher.onBackPressed()
             }
         }
@@ -139,10 +148,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupToolbarActionsFor(tab: Tab) {
         toolbar.menu.clear()
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
-        val visible = (tab == Tab.IMAGES)
-        toolbar.menu.findItem(R.id.action_pick)?.isVisible = visible
-        toolbar.menu.findItem(R.id.action_sync)?.isVisible = visible
-        toolbar.menu.findItem(R.id.action_clear)?.isVisible = visible
+        val showImages = (tab == Tab.IMAGES)
+        toolbar.menu.findItem(R.id.action_pick)?.isVisible = showImages
+        toolbar.menu.findItem(R.id.action_sync)?.isVisible = showImages
+        toolbar.menu.findItem(R.id.action_clear)?.isVisible = showImages
 
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
@@ -225,12 +234,52 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        val tint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
+        val tint: TintStyle = TintStyle.LiquidGlass()
 
-        recyclerCards.adapter = CardsAdapter(items, tint) { index ->
-            if (lm.isFocused(index)) { lm.clearFocus(); return@CardsAdapter }
-            val delta = lm.offsetTo(index)
-            if (delta == 0) lm.focus(index) else recyclerCards.smoothScrollBy(0, delta)
+        cardsAdapter = CardsAdapter(items, tint) { index -> handleCardTap(index) }
+        recyclerCards.adapter = cardsAdapter
+        applyModeToLayout()
+    }
+
+    private fun handleCardTap(index: Int) {
+        if (!this::cardsAdapter.isInitialized || cardsAdapter.itemCount == 0) return
+        val target = index.coerceIn(0, cardsAdapter.itemCount - 1)
+        when (cardMode) {
+            CardMode.OVERVIEW -> setCardMode(CardMode.READING, target)
+            CardMode.READING -> {
+                val focused = lm.currentFocusedIndex()
+                if (focused != null && focused == target) {
+                    setCardMode(CardMode.OVERVIEW)
+                } else {
+                    setCardMode(CardMode.READING, target)
+                }
+            }
+        }
+    }
+
+    private fun applyModeToLayout(anchorIndex: Int? = null) {
+        val mode = when (cardMode) {
+            CardMode.OVERVIEW -> RightRailFlowLayoutManager.PresentationMode.OVERVIEW
+            CardMode.READING -> RightRailFlowLayoutManager.PresentationMode.READING
+        }
+        val count = if (this::cardsAdapter.isInitialized) cardsAdapter.itemCount else recyclerCards.adapter?.itemCount ?: 0
+        val clampedAnchor = if (mode == RightRailFlowLayoutManager.PresentationMode.READING && anchorIndex != null && count > 0) {
+            anchorIndex.coerceIn(0, count - 1)
+        } else null
+        lm.setPresentationMode(mode, clampedAnchor)
+    }
+
+    private fun setCardMode(mode: CardMode, anchorIndex: Int? = null) {
+        cardMode = mode
+        val count = if (this::cardsAdapter.isInitialized) cardsAdapter.itemCount else 0
+        if (mode == CardMode.READING && count > 0) {
+            val fallback = lm.currentFocusedIndex() ?: lm.nearestIndex()
+            val target = (anchorIndex ?: fallback).coerceIn(0, count - 1)
+            val delta = lm.offsetTo(target)
+            if (delta != 0) recyclerCards.smoothScrollBy(0, delta)
+            applyModeToLayout(target)
+        } else {
+            applyModeToLayout(null)
         }
     }
 
