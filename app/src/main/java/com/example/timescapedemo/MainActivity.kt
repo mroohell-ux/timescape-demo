@@ -7,7 +7,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.view.GestureDetector
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -19,6 +21,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GestureDetectorCompat
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -26,13 +29,14 @@ import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSnapHelper
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import org.json.JSONArray
@@ -53,15 +57,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flowPager: ViewPager2
     private lateinit var recyclerImages: RecyclerView
     private lateinit var flowBar: View
-    private lateinit var flowChipGroup: ChipGroup
+    private lateinit var flowNavigator: RecyclerView
     private lateinit var addFlowButton: FloatingActionButton
 
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private lateinit var flowAdapter: FlowPagerAdapter
+    private lateinit var flowNavAdapter: FlowNavAdapter
+    private lateinit var flowNavLayoutManager: LinearLayoutManager
+    private lateinit var flowNavSnapHelper: LinearSnapHelper
 
     private val selectedImages: MutableList<BgImage> = mutableListOf()
     private val flows: MutableList<CardFlow> = mutableListOf()
     private val flowControllers: MutableMap<Long, FlowPageController> = mutableMapOf()
+
+    private var navScrollInProgressByPager: Boolean = false
+    private var pagerChangeFromNav: Boolean = false
 
     private val cardTint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
 
@@ -124,7 +134,7 @@ class MainActivity : AppCompatActivity() {
         flowPager = findViewById(R.id.flowPager)
         recyclerImages = findViewById(R.id.recyclerImages)
         flowBar = findViewById(R.id.flowBar)
-        flowChipGroup = findViewById(R.id.flowChips)
+        flowNavigator = findViewById(R.id.flowNavigator)
         addFlowButton = findViewById(R.id.buttonAddFlow)
 
         toolbarBasePaddingTop = toolbar.paddingTop
@@ -141,6 +151,7 @@ class MainActivity : AppCompatActivity() {
 
         flowAdapter = FlowPagerAdapter()
         setupFlowPager()
+        setupFlowNavigator()
 
         recyclerImages.layoutManager = GridLayoutManager(this, 3)
         imagesAdapter = SelectedImagesAdapter { img ->
@@ -164,8 +175,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         flowAdapter.notifyDataSetChanged()
-        renderFlowChips()
-        updateChipSelection(flowPager.currentItem)
+        flowNavAdapter.notifyDataSetChanged()
+        updateNavSelection(flowPager.currentItem)
+        scrollNavTo(flowPager.currentItem, false)
         updateToolbarSubtitle()
 
         switchTo(currentTab)
@@ -227,10 +239,68 @@ class MainActivity : AppCompatActivity() {
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
-                updateChipSelection(position)
+                updateNavSelection(position)
+                if (!pagerChangeFromNav) {
+                    scrollNavTo(position, true)
+                }
+                pagerChangeFromNav = false
                 updateToolbarSubtitle()
             }
         })
+    }
+
+    private fun setupFlowNavigator() {
+        flowNavLayoutManager = object : LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false) {
+            override fun calculateExtraLayoutSpace(state: RecyclerView.State, extraLayoutSpace: IntArray) {
+                super.calculateExtraLayoutSpace(state, extraLayoutSpace)
+                val space = (flowNavigator.width * 0.75f).roundToInt()
+                extraLayoutSpace[0] = space
+                extraLayoutSpace[1] = space
+            }
+        }
+        flowNavigator.layoutManager = flowNavLayoutManager
+        flowNavigator.itemAnimator = null
+        flowNavigator.setHasFixedSize(false)
+        flowNavAdapter = FlowNavAdapter()
+        flowNavigator.adapter = flowNavAdapter
+        flowNavigator.clipToPadding = false
+        flowNavigator.clipChildren = false
+        flowNavSnapHelper = object : LinearSnapHelper() {
+            override fun findTargetSnapPosition(layoutManager: RecyclerView.LayoutManager, velocityX: Int, velocityY: Int): Int {
+                if (flowNavAdapter.itemCount == 0) return RecyclerView.NO_POSITION
+                val target = super.findTargetSnapPosition(layoutManager, velocityX, velocityY)
+                return target.coerceIn(0, flowNavAdapter.itemCount - 1)
+            }
+        }
+        flowNavSnapHelper.attachToRecyclerView(flowNavigator)
+        flowNavigator.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                super.onScrollStateChanged(recyclerView, newState)
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    if (navScrollInProgressByPager) {
+                        navScrollInProgressByPager = false
+                    } else {
+                        val layoutManager = recyclerView.layoutManager ?: return
+                        val snapView = flowNavSnapHelper.findSnapView(layoutManager) ?: return
+                        val position = layoutManager.getPosition(snapView)
+                        if (position != RecyclerView.NO_POSITION) {
+                            if (position != flowPager.currentItem) {
+                                pagerChangeFromNav = true
+                                flowPager.setCurrentItem(position, true)
+                            }
+                            updateNavSelection(position)
+                        }
+                    }
+                }
+                updateNavTransforms()
+            }
+
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                updateNavTransforms()
+            }
+        })
+        flowNavigator.post { updateNavTransforms() }
     }
 
     private fun setupToolbarActionsFor(tab: Tab) {
@@ -290,34 +360,53 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateToolbarSubtitle() {
         toolbar.subtitle = when (currentTab) {
-            Tab.CARDS -> currentFlow()?.name ?: ""
+            Tab.CARDS -> ""
             Tab.IMAGES -> getString(R.string.images_subtitle)
         }
     }
 
-    private fun updateChipSelection(position: Int) {
-        for (i in 0 until flowChipGroup.childCount) {
-            val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
-            chip.isChecked = i == position
+    private fun updateNavSelection(position: Int) {
+        if (!this::flowNavAdapter.isInitialized) return
+        if (flows.isEmpty()) return
+        val clamped = position.coerceIn(0, flows.lastIndex)
+        flowNavAdapter.updateSelection(clamped)
+        flowNavigator.post { updateNavTransforms() }
+    }
+
+    private fun scrollNavTo(position: Int, smooth: Boolean) {
+        if (flows.isEmpty()) return
+        if (position !in flows.indices) return
+        if (smooth) {
+            navScrollInProgressByPager = true
+            flowNavigator.smoothScrollToPosition(position)
+        } else {
+            flowNavigator.scrollToPosition(position)
+            flowNavigator.post { updateNavTransforms() }
         }
     }
 
-    private fun renderFlowChips() {
-        flowChipGroup.removeAllViews()
-        val density = resources.displayMetrics.density
-        flows.forEachIndexed { index, flow ->
-            val chip = Chip(this).apply {
-                text = flow.name
-                isCheckable = true
-                isCheckedIconVisible = false
-                setEnsureMinTouchTargetSize(false)
-                minHeight = (36 * density).roundToInt()
-                textSize = 14f
-                setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
-                isChecked = index == flowPager.currentItem
-                setOnClickListener { flowPager.setCurrentItem(index, true) }
-            }
-            flowChipGroup.addView(chip)
+    private fun selectFlowFromNav(position: Int) {
+        if (position !in flows.indices) return
+        pagerChangeFromNav = true
+        flowPager.setCurrentItem(position, true)
+        updateNavSelection(position)
+        navScrollInProgressByPager = true
+        flowNavigator.smoothScrollToPosition(position)
+    }
+
+    private fun updateNavTransforms() {
+        if (!this::flowNavigator.isInitialized) return
+        val centerX = flowNavigator.width / 2f
+        if (centerX <= 0f) return
+        for (i in 0 until flowNavigator.childCount) {
+            val child = flowNavigator.getChildAt(i) ?: continue
+            val childCenter = (child.left + child.right) / 2f
+            val distance = abs(childCenter - centerX)
+            val ratio = 1f - (distance / centerX).coerceIn(0f, 1f)
+            val scale = 0.9f + ratio * 0.15f
+            child.scaleX = scale
+            child.scaleY = scale
+            child.alpha = 0.6f + ratio * 0.4f
         }
     }
 
@@ -348,17 +437,128 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun showRenameFlowDialog(flow: CardFlow) {
+        val input = EditText(this).apply {
+            setText(flow.name)
+            setSelection(text.length)
+            hint = getString(R.string.dialog_flow_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+        val container = FrameLayout(this).apply {
+            val padding = (24 * resources.displayMetrics.density).roundToInt()
+            setPadding(padding, padding / 2, padding, padding / 2)
+            addView(input, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_rename_flow_title)
+            .setView(container)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val updated = input.text.toString().trim().ifBlank { flow.name }
+                renameFlow(flow, updated)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun addFlow(name: String) {
         val flow = CardFlow(id = nextFlowId++, name = name)
         flows += flow
         flowAdapter.notifyItemInserted(flows.lastIndex)
-        renderFlowChips()
+        flowNavAdapter.notifyItemInserted(flows.lastIndex)
         flowPager.post {
             flowPager.setCurrentItem(flows.lastIndex, true)
             updateToolbarSubtitle()
         }
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
+    }
+
+    private fun renameFlow(flow: CardFlow, name: String) {
+        if (flow.name == name) return
+        flow.name = name
+        val index = flows.indexOfFirst { it.id == flow.id }
+        if (index >= 0) {
+            flowNavAdapter.notifyItemChanged(index)
+            flowAdapter.notifyItemChanged(index)
+            updateNavSelection(index)
+            scrollNavTo(index, false)
+        }
+        saveState()
+        snackbar(getString(R.string.snackbar_renamed_flow, name))
+    }
+
+    private inner class FlowNavAdapter : RecyclerView.Adapter<FlowNavAdapter.NavVH>() {
+        private var selectedIndex: Int = 0
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): NavVH {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_flow_nav, parent, false)
+            return NavVH(view)
+        }
+
+        override fun onBindViewHolder(holder: NavVH, position: Int) {
+            holder.bind(flows[position], position == selectedIndex)
+        }
+
+        override fun getItemCount(): Int = flows.size
+
+        fun updateSelection(index: Int) {
+            val previous = selectedIndex
+            selectedIndex = index
+            if (previous != index && previous in 0 until itemCount) {
+                notifyItemChanged(previous)
+            }
+            if (index in 0 until itemCount) {
+                notifyItemChanged(index)
+            }
+        }
+
+        inner class NavVH(view: View) : RecyclerView.ViewHolder(view) {
+            private val card = view.findViewById<MaterialCardView>(R.id.flowNavCard)
+            private val label = view.findViewById<TextView>(R.id.flowNavLabel)
+            private val gestureDetector = GestureDetectorCompat(view.context, object : GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    val pos = bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        itemView.performClick()
+                        selectFlowFromNav(pos)
+                    }
+                    return true
+                }
+
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    val pos = bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        flows.getOrNull(pos)?.let { showRenameFlowDialog(it) }
+                    }
+                    return true
+                }
+            })
+
+            init {
+                view.setOnTouchListener { _, event ->
+                    gestureDetector.onTouchEvent(event)
+                    false
+                }
+                view.setOnClickListener {
+                    val pos = bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        selectFlowFromNav(pos)
+                    }
+                }
+            }
+
+            fun bind(flow: CardFlow, selected: Boolean) {
+                label.text = flow.name
+                val density = itemView.resources.displayMetrics.density
+                card.strokeWidth = if (selected) (3 * density).roundToInt() else (1 * density).roundToInt()
+                card.cardElevation = if (selected) 6f * density else 0f
+                card.alpha = if (selected) 1f else 0.7f
+                label.alpha = if (selected) 1f else 0.7f
+            }
+        }
     }
 
     private fun currentFlow(): CardFlow? = flows.getOrNull(flowPager.currentItem)
@@ -399,7 +599,6 @@ class MainActivity : AppCompatActivity() {
         val controller = flowControllers[flow.id]
         if (controller != null) {
             controller.adapter.submitList(flow.cards.toList())
-            controller.nameView.text = flow.name
             if (scrollToTop) {
                 controller.layoutManager.clearFocus()
                 controller.recycler.scrollToPosition(0)
@@ -799,7 +998,6 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
-            val nameView = view.findViewById<TextView>(R.id.flowName)
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
@@ -812,7 +1010,7 @@ class MainActivity : AppCompatActivity() {
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
             )
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, nameView, layoutManager, adapter)
+            holder = FlowVH(view, recycler, layoutManager, adapter)
             return holder
         }
 
@@ -831,7 +1029,6 @@ class MainActivity : AppCompatActivity() {
         inner class FlowVH(
             view: View,
             val recycler: RecyclerView,
-            private val nameView: TextView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter
         ) : RecyclerView.ViewHolder(view) {
@@ -840,8 +1037,7 @@ class MainActivity : AppCompatActivity() {
             fun bind(flow: CardFlow) {
                 boundFlowId?.let { flowControllers.remove(it) }
                 boundFlowId = flow.id
-                nameView.text = flow.name
-                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter, nameView)
+                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter)
                 adapter.submitList(flow.cards.toList())
                 layoutManager.clearFocus()
             }
@@ -871,8 +1067,7 @@ class MainActivity : AppCompatActivity() {
         val flowId: Long,
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
-        val adapter: CardsAdapter,
-        val nameView: TextView
+        val adapter: CardsAdapter
     )
 
     companion object {
