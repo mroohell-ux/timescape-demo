@@ -1,7 +1,5 @@
 package com.example.timescapedemo
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -16,16 +14,14 @@ import android.text.format.DateUtils
 import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.MotionEvent
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
 import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.RecyclerView
-import kotlin.math.max
-import kotlin.math.min
 
 data class CardItem(
     val id: Long,
@@ -63,12 +59,6 @@ class CardsAdapter(
     private val items = mutableListOf<CardItem>()
     private val blockedUris = mutableSetOf<Uri>()
 
-    private sealed class LuminanceSource {
-        data object None : LuminanceSource()
-        data class Resource(val resId: Int) : LuminanceSource()
-        data class FromUri(val uri: Uri) : LuminanceSource()
-    }
-
     fun submitList(newItems: List<CardItem>) {
         items.clear()
         items.addAll(newItems)
@@ -76,9 +66,6 @@ class CardsAdapter(
         blockedUris.retainAll(activeUris)
         notifyDataSetChanged()
     }
-
-    // Cache luminance by key (drawable id or uri string)
-    private val luminanceCache = mutableMapOf<String, Float>()
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
@@ -121,34 +108,28 @@ class CardsAdapter(
         holder.snippet.text = item.snippet
 
         // ---- Bind background image (drawable or Uri) ----
-        val (luminanceKey, luminanceSource) = when (val b = item.bg) {
+        when (val b = item.bg) {
             is BgImage.Res -> {
                 holder.bg.setImageResource(b.id)
-                "res:${b.id}" to LuminanceSource.Resource(b.id)
             }
             is BgImage.UriRef -> {
                 if (blockedUris.contains(b.uri)) {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                    PLACEHOLDER_KEY to LuminanceSource.Resource(PLACEHOLDER_RES_ID)
                 } else when (loadImageFromUriSafely(holder.bg, b.uri)) {
                     LoadResult.Success -> {
                         blockedUris.remove(b.uri)
-                        "uri:${b.uri}" to LuminanceSource.FromUri(b.uri)
                     }
                     LoadResult.PermissionDenied -> {
                         blockedUris.add(b.uri)
                         holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                        PLACEHOLDER_KEY to LuminanceSource.Resource(PLACEHOLDER_RES_ID)
                     }
                     LoadResult.TemporaryFailure -> {
                         holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                        PLACEHOLDER_KEY to LuminanceSource.Resource(PLACEHOLDER_RES_ID)
                     }
                 }
             }
             null -> {
                 holder.bg.setImageDrawable(null)
-                "none" to LuminanceSource.None
             }
         }
 
@@ -161,29 +142,12 @@ class CardsAdapter(
         // Apply NON-GLASS tint directly to image
         applyTintToImage(holder.bg, tint, baseEffect)
 
-        // ---- Adaptive readability (local scrim + text color swap) ----
-        val lum = luminanceCache.getOrPut(luminanceKey) {
-            when (luminanceSource) {
-                is LuminanceSource.Resource -> computeAvgLuminanceFromRes(holder.itemView, luminanceSource.resId)
-                is LuminanceSource.FromUri -> computeAvgLuminanceFromUri(holder.itemView, luminanceSource.uri)
-                LuminanceSource.None -> DEFAULT_LUMINANCE
-            }
-        }
-        val isBright = lum >= 0.55f
-
-        holder.textScrim.alpha = if (isBright) 0.40f else 0.12f
-
-        if (isBright) {
-            holder.title.setTextColor(0xFF111111.toInt())
-            holder.snippet.setTextColor(0xE0000000.toInt())
-            holder.time.setTextColor(0x99000000.toInt())
-            clearShadow(holder.title, holder.snippet)
-        } else {
-            holder.title.setTextColor(0xFFFFFFFF.toInt())
-            holder.snippet.setTextColor(0xF2FFFFFF.toInt())
-            holder.time.setTextColor(0xCCFFFFFF.toInt())
-            addShadow(holder.title, holder.snippet)
-        }
+        // ---- Consistent readability styling ----
+        holder.textScrim.alpha = 0.45f
+        holder.title.setTextColor(Color.WHITE)
+        holder.snippet.setTextColor(Color.WHITE)
+        holder.time.setTextColor(0xF2FFFFFF.toInt())
+        addShadow(holder.title, holder.snippet)
     }
 
     override fun getItemCount(): Int = items.size
@@ -239,70 +203,6 @@ class CardsAdapter(
 
     // --- Text helpers ---
     private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(4f, 0f, 1f, 0x66000000) } }
-    private fun clearShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(0f, 0f, 0f, 0) } }
-
-    // --- Luminance helpers (fast, downsampled) ---
-    private fun computeAvgLuminanceFromRes(root: View, resId: Int): Float {
-        val opts = BitmapFactory.Options().apply {
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-            inSampleSize = 32
-        }
-        val bmp = BitmapFactory.decodeResource(root.context.resources, resId, opts) ?: return 0.5f
-        val v = averageLum(bmp); bmp.recycle(); return v
-    }
-    private fun computeAvgLuminanceFromUri(root: View, uri: Uri): Float {
-        val cr = root.context.contentResolver
-        val opts = BitmapFactory.Options().apply {
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-            inSampleSize = 32
-        }
-        val stream = try {
-            cr.openInputStream(uri)
-        } catch (se: SecurityException) {
-            Log.w(TAG, "No permission to read uri for luminance: $uri", se)
-            return DEFAULT_LUMINANCE
-        } catch (fnf: java.io.FileNotFoundException) {
-            Log.w(TAG, "Missing file for luminance uri: $uri", fnf)
-            return DEFAULT_LUMINANCE
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to open uri for luminance: $uri", e)
-            return DEFAULT_LUMINANCE
-        }
-        stream?.use { input ->
-            val bmp = try {
-                BitmapFactory.decodeStream(input, null, opts)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to decode luminance for uri: $uri", e)
-                null
-            } ?: return DEFAULT_LUMINANCE
-            val value = averageLum(bmp)
-            bmp.recycle()
-            return value
-        }
-        return DEFAULT_LUMINANCE
-    }
-    private fun averageLum(bmp: Bitmap): Float {
-        val w = bmp.width
-        val h = bmp.height
-        val stepX = max(1, w / 24)
-        val stepY = max(1, h / 24)
-        var sum = 0f; var n = 0
-        var y = 0
-        while (y < h) {
-            var x = 0
-            while (x < w) {
-                val c = bmp.getPixel(x, y)
-                val r = Color.red(c) / 255f
-                val g = Color.green(c) / 255f
-                val b = Color.blue(c) / 255f
-                sum += 0.2126f * r + 0.7152f * g + 0.0722f * b
-                n++; x += stepX
-            }
-            y += stepY
-        }
-        val avg = if (n > 0) sum / n else 0.5f
-        return min(1f, max(0f, avg))
-    }
 
     // --- Color matrices ---
     private fun colorizeMatrix(@ColorInt color: Int, amount: Float): ColorMatrix {
@@ -354,9 +254,7 @@ class CardsAdapter(
     @Suppress("ConstPropertyName")
     private companion object {
         private const val TAG = "CardsAdapter"
-        private const val DEFAULT_LUMINANCE = 0.5f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
-        private val PLACEHOLDER_KEY = "res:$PLACEHOLDER_RES_ID"
 
         private enum class LoadResult { Success, TemporaryFailure, PermissionDenied }
 

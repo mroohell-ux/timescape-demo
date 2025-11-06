@@ -34,20 +34,20 @@ class RightRailFlowLayoutManager(
     private val bottomInsetPx: Int = 0,
 
     // Visual tuning
-    private val minEdgeScale: Float = 0.66f,
+    private val minEdgeScale: Float = 0.72f,
     private val edgeAlphaMin: Float = 0.30f,
-    private val depthScaleDrop: Float = 0.06f,
+    private val depthScaleDrop: Float = 0.05f,
 
     // Horizontal rail shaping (controls inflow/outflow direction)
-    private val edgeRightShiftPx: Int = 96,     // far cards to the RIGHT by this many px
-    private val centerLeftShiftPx: Int = 48,    // center card to the LEFT by this many px
-    private val railCurvePow: Float = 1.2f,     // curvature; 1 = linear, >1 stronger S-curve
+    private val edgeRightShiftPx: Int = 48,     // far cards to the RIGHT by this many px
+    private val centerLeftShiftPx: Int = 0,     // center card stays centered on the rail
+    private val railCurvePow: Float = 1.1f,     // curvature; 1 = linear, >1 stronger S-curve
 
     // S-curve styling
     private val curveRotationRadiusItems: Float = 4.5f,
-    private val curveRotationPow: Float = 1.18f,
-    private val curveMaxRotationDeg: Float = 11f,
-    private val curveExtraRightShiftPx: Int = 54
+    private val curveRotationPow: Float = 1.12f,
+    private val curveMaxRotationDeg: Float = 9f,
+    private val curveExtraRightShiftPx: Int = 32
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
 
     // focus animation state

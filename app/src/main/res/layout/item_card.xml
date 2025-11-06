@@ -46,7 +46,10 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="20dp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
@@ -57,8 +60,10 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="12h ago"
-                android:textColor="#88555555"
-                android:textSize="12sp"/>
+                android:textColor="#FFFFFFFF"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.02"/>
 
             <!-- Title stays one line and autoshrinks so numbers never clip -->
             <TextView
@@ -68,11 +73,12 @@
                 android:layout_marginTop="6dp"
                 android:text="Contact"
                 android:textStyle="bold"
+                android:textColor="#FFFFFFFF"
                 android:ellipsize="end"
                 android:maxLines="1"
                 app:autoSizeTextType="uniform"
-                app:autoSizeMinTextSize="18sp"
-                app:autoSizeMaxTextSize="27sp"
+                app:autoSizeMinTextSize="26sp"
+                app:autoSizeMaxTextSize="36sp"
                 app:autoSizeStepGranularity="1sp"/>
 
             <TextView
@@ -81,7 +87,9 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="Snippet"
-                android:textSize="14sp"
+                android:textColor="#FFFFFFFF"
+                android:textSize="20sp"
+                android:lineSpacingExtra="4dp"
                 android:ellipsize="end"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
