@@ -2,6 +2,7 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_app_light_optimistic">
@@ -35,9 +36,7 @@
             android:layout_height="match_parent"
             android:clipChildren="false"
             android:clipToPadding="false"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="120dp"/>
+            android:paddingBottom="96dp"/>
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recyclerImages"
@@ -53,11 +52,13 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_margin="16dp"
-        android:padding="12dp"
-        app:cardBackgroundColor="#E61F1F1F"
-        app:cardCornerRadius="26dp"
-        app:cardElevation="8dp">
+        android:layout_margin="12dp"
+        android:padding="8dp"
+        app:cardBackgroundColor="@color/flow_bar_surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="4dp"
+        app:strokeColor="@color/flow_bar_stroke"
+        app:strokeWidth="1dp">
 
         <LinearLayout
             android:layout_width="match_parent"

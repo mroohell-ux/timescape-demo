@@ -13,13 +13,18 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.applyCanvas
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import androidx.core.view.updateLayoutParams
+import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
@@ -43,6 +48,7 @@ class MainActivity : AppCompatActivity() {
 
     private enum class Tab { CARDS, IMAGES }
 
+    private lateinit var rootLayout: CoordinatorLayout
     private lateinit var toolbar: MaterialToolbar
     private lateinit var flowPager: ViewPager2
     private lateinit var recyclerImages: RecyclerView
@@ -62,6 +68,17 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var currentTab: Tab = Tab.CARDS
+
+    private var toolbarBasePaddingTop: Int = 0
+    private var pagerBasePaddingStart: Int = 0
+    private var pagerBasePaddingTop: Int = 0
+    private var pagerBasePaddingEnd: Int = 0
+    private var pagerBasePaddingBottom: Int = 0
+    private var imagesBasePaddingStart: Int = 0
+    private var imagesBasePaddingTop: Int = 0
+    private var imagesBasePaddingEnd: Int = 0
+    private var imagesBasePaddingBottom: Int = 0
+    private var flowBarBaseMarginBottom: Int = 0
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -102,12 +119,25 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        rootLayout = findViewById(R.id.rootLayout)
         toolbar = findViewById(R.id.toolbar)
         flowPager = findViewById(R.id.flowPager)
         recyclerImages = findViewById(R.id.recyclerImages)
         flowBar = findViewById(R.id.flowBar)
         flowChipGroup = findViewById(R.id.flowChips)
         addFlowButton = findViewById(R.id.buttonAddFlow)
+
+        toolbarBasePaddingTop = toolbar.paddingTop
+        pagerBasePaddingStart = flowPager.paddingStart
+        pagerBasePaddingTop = flowPager.paddingTop
+        pagerBasePaddingEnd = flowPager.paddingEnd
+        pagerBasePaddingBottom = flowPager.paddingBottom
+        imagesBasePaddingStart = recyclerImages.paddingStart
+        imagesBasePaddingTop = recyclerImages.paddingTop
+        imagesBasePaddingEnd = recyclerImages.paddingEnd
+        imagesBasePaddingBottom = recyclerImages.paddingBottom
+        flowBarBaseMarginBottom =
+            (flowBar.layoutParams as? CoordinatorLayout.LayoutParams)?.bottomMargin ?: 0
 
         flowAdapter = FlowPagerAdapter()
         setupFlowPager()
@@ -139,6 +169,28 @@ class MainActivity : AppCompatActivity() {
         updateToolbarSubtitle()
 
         switchTo(currentTab)
+
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            toolbar.updatePadding(top = toolbarBasePaddingTop + systemBars.top)
+            flowPager.setPaddingRelative(
+                pagerBasePaddingStart,
+                pagerBasePaddingTop + systemBars.top,
+                pagerBasePaddingEnd,
+                pagerBasePaddingBottom + systemBars.bottom
+            )
+            recyclerImages.setPaddingRelative(
+                imagesBasePaddingStart,
+                imagesBasePaddingTop + systemBars.top,
+                imagesBasePaddingEnd,
+                imagesBasePaddingBottom + systemBars.bottom
+            )
+            flowBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
+                bottomMargin = flowBarBaseMarginBottom + systemBars.bottom
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(rootLayout)
 
         onBackPressedDispatcher.addCallback(this) {
             if (currentTab == Tab.IMAGES) {
@@ -317,15 +369,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createLayoutManager(): RightRailFlowLayoutManager {
-        val density = resources.displayMetrics.density
-        val baseSide = (380 * density).roundToInt()
-        val focusSide = (380 * density).roundToInt()
-        val pitch = (focusSide * 0.26f).roundToInt()
+        val metrics = resources.displayMetrics
+        val density = metrics.density
+        val horizontalInsetPx = (32 * density).roundToInt()
+        val minSidePx = (320 * density).roundToInt()
+        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
+        val baseSide = availableWidth
+        val focusSide = availableWidth
+        val pitch = (availableWidth * 0.26f).roundToInt()
         return RightRailFlowLayoutManager(
             baseSidePx = baseSide,
             focusSidePx = focusSide,
             itemPitchPx = pitch,
-            rightInsetPx = (16 * density).roundToInt()
+            rightInsetPx = (8 * density).roundToInt()
         )
     }
 
