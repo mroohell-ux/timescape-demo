@@ -8,12 +8,14 @@
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
     <string name="menu_add_flow">Add flow</string>
-    <string name="menu_open_images">Images</string>
-    <string name="menu_close_images">Back to cards</string>
-    <string name="menu_add_image">Add image</string>
-    <string name="menu_sync_drawables">Sync drawable bg_*</string>
-    <string name="menu_clear_images">Clear images</string>
-    <string name="images_subtitle">Images</string>
+    <string name="drawer_card_backgrounds">Card backgrounds</string>
+    <string name="drawer_add_images">Add background images</string>
+    <string name="drawer_sync_images">Sync drawable backgrounds</string>
+    <string name="drawer_clear_images">Clear all</string>
+    <string name="drawer_app_background">App background</string>
+    <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
+    <string name="drawer_pick_app_background">Choose app background</string>
+    <string name="drawer_reset_app_background">Use default background</string>
     <string name="dialog_add_flow_title">Add flow</string>
     <string name="dialog_flow_name_hint">Flow name</string>
     <string name="dialog_create">Create</string>
@@ -22,4 +24,11 @@
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
     <string name="content_desc_add_flow">Add a new flow</string>
+    <string name="snackbar_removed_image">Removed 1 image</string>
+    <string name="snackbar_removed_image_reset_app_background">Removed image and reset app background</string>
+    <string name="snackbar_no_images_to_clear">No images to clear</string>
+    <string name="snackbar_cleared_all_images">Cleared all images</string>
+    <string name="snackbar_app_background_updated">App background updated</string>
+    <string name="snackbar_app_background_reset">App background reset</string>
+    <string name="snackbar_app_background_failed">Couldn't load that background</string>
 </resources>

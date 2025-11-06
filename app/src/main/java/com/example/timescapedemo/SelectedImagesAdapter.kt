@@ -9,7 +9,8 @@ import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
 
 class SelectedImagesAdapter(
-    private val onDelete: (BgImage) -> Unit
+    private val onDelete: (BgImage) -> Unit,
+    private val onSelect: ((BgImage) -> Unit)? = null
 ) : RecyclerView.Adapter<SelectedImagesAdapter.VH>() {
 
     private val data = mutableListOf<BgImage>()
@@ -28,16 +29,16 @@ class SelectedImagesAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = data[position]
-        holder.bind(item, onDelete)
+        holder.bind(item, onDelete, onSelect)
     }
 
     override fun getItemCount(): Int = data.size
 
-    class VH(root: ViewGroup) : RecyclerView.ViewHolder(root) {
+    class VH(private val root: ViewGroup) : RecyclerView.ViewHolder(root) {
         private val thumb: ImageView = root.findViewById(R.id.thumb)
         private val btnDelete: ImageButton = root.findViewById(R.id.btnDelete)
 
-        fun bind(img: BgImage, onDelete: (BgImage) -> Unit) {
+        fun bind(img: BgImage, onDelete: (BgImage) -> Unit, onSelect: ((BgImage) -> Unit)?) {
             when (img) {
                 is BgImage.Res -> thumb.setImageResource(img.id)
                 is BgImage.UriRef -> {
@@ -65,6 +66,15 @@ class SelectedImagesAdapter(
                 }
             }
             btnDelete.setOnClickListener { onDelete(img) }
+            if (onSelect != null) {
+                root.isClickable = true
+                root.isFocusable = true
+                root.setOnClickListener { onSelect(img) }
+            } else {
+                root.setOnClickListener(null)
+                root.isClickable = false
+                root.isFocusable = false
+            }
         }
 
         private companion object {
