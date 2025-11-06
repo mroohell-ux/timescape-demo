@@ -389,7 +389,7 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_add_flow_first))
             return
         }
-        showCardEditor(initialTitle = "", initialSnippet = "") { title, snippet ->
+        showCardEditor(initialTitle = "", initialSnippet = "", onSave = { title, snippet ->
             val finalTitle = title.trim().ifBlank { "New Contact" }
             val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
             val card = CardItem(
@@ -402,7 +402,7 @@ class MainActivity : AppCompatActivity() {
             refreshFlow(flow, scrollToTop = true)
             saveState()
             snackbar("Added card")
-        }
+        })
     }
 
     private fun editCard(flow: CardFlow, index: Int) {
