@@ -519,7 +519,7 @@ class MainActivity : AppCompatActivity() {
             private val card = view.findViewById<MaterialCardView>(R.id.flowNavCard)
             private val label = view.findViewById<TextView>(R.id.flowNavLabel)
             private val gestureDetector = GestureDetectorCompat(view.context, object : GestureDetector.SimpleOnGestureListener() {
-                override fun onSingleTapConfirmed(e: MotionEvent?): Boolean {
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                     val pos = bindingAdapterPosition
                     if (pos != RecyclerView.NO_POSITION) {
                         itemView.performClick()
@@ -528,7 +528,7 @@ class MainActivity : AppCompatActivity() {
                     return true
                 }
 
-                override fun onDoubleTap(e: MotionEvent?): Boolean {
+                override fun onDoubleTap(e: MotionEvent): Boolean {
                     val pos = bindingAdapterPosition
                     if (pos != RecyclerView.NO_POSITION) {
                         flows.getOrNull(pos)?.let { showRenameFlowDialog(it) }
