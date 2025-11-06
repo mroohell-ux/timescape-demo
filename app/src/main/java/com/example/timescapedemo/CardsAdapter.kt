@@ -1,5 +1,6 @@
 package com.example.timescapedemo
 
+import android.content.res.ColorStateList
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -20,13 +21,16 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import androidx.core.content.ContextCompat
 import androidx.core.view.GestureDetectorCompat
+import androidx.core.widget.ImageViewCompat
 import androidx.recyclerview.widget.RecyclerView
 
 data class CardItem(
     val id: Long,
     var title: String,
     var snippet: String,
+    var network: SocialNetwork = SocialNetwork.FACEBOOK,
     var bg: BgImage? = null,
     var updatedAt: Long = System.currentTimeMillis()
 )
@@ -50,9 +54,15 @@ class CardsAdapter(
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val time: TextView = v.findViewById(R.id.time)
         val title: TextView = v.findViewById(R.id.title)
-        val snippet: TextView = v.findViewById(R.id.snippet)
+        val status: TextView = v.findViewById(R.id.status)
         val bg: ImageView = v.findViewById(R.id.bgImage)
-        val textScrim: View = v.findViewById(R.id.textScrim)
+        val portrait: ImageView = v.findViewById(R.id.portraitImage)
+        val networkIcon: ImageView = v.findViewById(R.id.networkIcon)
+        val glassTint: View = v.findViewById(R.id.glassTint)
+        val glassHighlight: View = v.findViewById(R.id.glassHighlight)
+        val depthFog: View = v.findViewById(R.id.depthFog)
+        val layerShadow: View = v.findViewById(R.id.layerShadow)
+        val contentBackground: View = v.findViewById(R.id.card_content)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -84,6 +94,8 @@ class CardsAdapter(
             }
         })
         v.isClickable = true
+        val density = v.resources.displayMetrics.density
+        v.cameraDistance = 12000f * density
         v.setOnTouchListener { view, event ->
             val handled = vh.gestureDetector.onTouchEvent(event)
             if (!handled && event.action == MotionEvent.ACTION_UP) {
@@ -105,7 +117,7 @@ class CardsAdapter(
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
         holder.title.text = item.title
-        holder.snippet.text = item.snippet
+        holder.status.text = item.snippet
 
         // ---- Bind background image (drawable or Uri) ----
         when (val b = item.bg) {
@@ -133,6 +145,8 @@ class CardsAdapter(
             }
         }
 
+        syncPortrait(holder)
+
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -143,11 +157,17 @@ class CardsAdapter(
         applyTintToImage(holder.bg, tint, baseEffect)
 
         // ---- Consistent readability styling ----
-        holder.textScrim.alpha = 0.45f
+        holder.glassTint.alpha = 0.88f
+        holder.glassHighlight.alpha = 0.75f
+        holder.layerShadow.alpha = 0.35f
+        holder.contentBackground.alpha = 0.55f
+        tintNetworkIcon(holder, item.network)
+        holder.networkIcon.contentDescription = item.network.name
+        holder.depthFog.alpha = 0f
         holder.title.setTextColor(Color.WHITE)
-        holder.snippet.setTextColor(Color.WHITE)
-        holder.time.setTextColor(0xF2FFFFFF.toInt())
-        addShadow(holder.title, holder.snippet)
+        holder.status.setTextColor(0xE6FFFFFF.toInt())
+        holder.time.setTextColor(0xCCFFFFFF.toInt())
+        addShadow(holder.title, holder.status, holder.time)
     }
 
     override fun getItemCount(): Int = items.size
@@ -202,7 +222,24 @@ class CardsAdapter(
     }
 
     // --- Text helpers ---
-    private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(4f, 0f, 1f, 0x66000000) } }
+    private fun tintNetworkIcon(holder: VH, network: SocialNetwork) {
+        holder.networkIcon.setImageResource(network.iconRes)
+        val color = ContextCompat.getColor(holder.networkIcon.context, network.accentColorRes)
+        ImageViewCompat.setImageTintList(holder.networkIcon, ColorStateList.valueOf(color))
+    }
+
+    private fun syncPortrait(holder: VH) {
+        val drawable = holder.bg.drawable
+        if (drawable == null) {
+            holder.portrait.setImageDrawable(null)
+            return
+        }
+        val clone = drawable.constantState?.newDrawable(holder.portrait.resources)?.mutate() ?: drawable
+        holder.portrait.setImageDrawable(clone)
+        holder.portrait.alpha = 0.96f
+    }
+
+    private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(6f, 0f, 2f, 0x55000000) } }
 
     // --- Color matrices ---
     private fun colorizeMatrix(@ColorInt color: Int, amount: Float): ColorMatrix {

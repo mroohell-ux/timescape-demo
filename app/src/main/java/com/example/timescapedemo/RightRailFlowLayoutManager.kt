@@ -152,7 +152,7 @@ class RightRailFlowLayoutManager(
 
     private fun applyTextByGain(child: View, gain: Float, focused: Boolean) {
         val title = child.findViewById<TextView>(R.id.title)
-        val snippet = child.findViewById<TextView>(R.id.snippet)
+        val status = child.findViewById<TextView>(R.id.status)
 
         // Text grows a bit near center; we no longer clamp max lines (height is capped globally)
         if (focused) {
@@ -161,8 +161,8 @@ class RightRailFlowLayoutManager(
             val titleSp = 21f + 5f * gain
             title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
         }
-        // Leave snippet lines unconstrained; overall height is capped by MaxHeightLinearLayout.
-        snippet?.maxLines = Integer.MAX_VALUE
+        // Leave status lines unconstrained; overall height is capped by MaxHeightLinearLayout.
+        status?.maxLines = Integer.MAX_VALUE
     }
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
@@ -224,17 +224,39 @@ class RightRailFlowLayoutManager(
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
             // Alpha / depth (z-order so nearer items render above)
-            child.alpha = 0.92f + 0.08f * gain
             val dIdx = abs(nearestY - py) / itemPitchPx
-            val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
-            child.scaleX = depthS
-            child.scaleY = depthS
+            val depthS = max(0.92f, 1f - depthScaleDrop * dIdx)
+            val perspective = (1f - gain).coerceIn(0f, 1f)
+            val direction = if (py < cy) -1f else 1f
             val scatter = computeScatterOffsets(i, gain, isSelected)
-            child.translationX = scatter.shiftX
-            child.translationY = scatter.shiftY
+
+            val perspectiveScaleX = depthS * (1f - 0.18f * perspective)
+            val perspectiveScaleY = depthS * (1f - 0.08f * perspective)
+            child.scaleX = perspectiveScaleX
+            child.scaleY = perspectiveScaleY
+            child.alpha = 0.55f + 0.45f * gain
+
+            val rise = perspective * 46f * direction
+            val lateralSkew = -direction * 28f * perspective
+            child.translationX = scatter.shiftX + lateralSkew
+            child.translationY = scatter.shiftY + rise
+
             child.rotation = curve.rotationDeg + scatter.rotationDeg
-            val z = if (isSelected) 6000f else (1000f - dist / 10f)
-            child.translationZ = z; child.elevation = z
+            child.rotationY = direction * perspective.pow(0.85f) * 34f
+            child.rotationX = -perspective * 6f
+            child.pivotX = if (direction > 0f) w.toFloat() else 0f
+            child.pivotY = h * 0.35f
+
+            val focusFade = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
+            child.findViewById<View>(R.id.depthFog)?.alpha = (0.12f + perspective * 0.7f) * focusFade
+            child.findViewById<View>(R.id.layerShadow)?.alpha = 0.22f + perspective * 0.45f
+            child.findViewById<View>(R.id.glassHighlight)?.alpha = 0.35f + 0.55f * gain
+            child.findViewById<View>(R.id.glassTint)?.alpha = 0.72f + 0.2f * gain
+            child.findViewById<View>(R.id.card_content)?.alpha = 0.42f + 0.3f * gain
+
+            val z = if (isSelected) 8200f else (1800f - dist * 0.9f)
+            child.translationZ = z
+            child.elevation = z
         }
     }
 
@@ -285,13 +307,13 @@ class RightRailFlowLayoutManager(
         val waveB = cos(secondaryPhase)
         val waveC = sin(tertiaryPhase + waveB * 0.35f)
 
-        val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
+        val scatterStrength = (0.08f + (1f - gain) * 0.72f).coerceIn(0f, 1f)
         val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
         val amount = scatterStrength * focusDamp
 
-        val shiftX = (waveA * 14f + waveB * 8f) * amount
-        val shiftY = (waveB * 6f + waveC * 10f) * amount
-        val rotation = (waveA * 2.6f + waveC * 1.1f) * amount
+        val shiftX = (waveA * 10f + waveB * 6f) * amount
+        val shiftY = (waveB * 4f + waveC * 7f) * amount
+        val rotation = (waveA * 2.1f + waveC * 0.9f) * amount
 
         return ScatterOffsets(shiftX, shiftY, rotation)
     }
