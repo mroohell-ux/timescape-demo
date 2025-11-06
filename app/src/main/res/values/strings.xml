@@ -5,4 +5,21 @@
     <string name="dialog_save">Save</string>
     <string name="dialog_title_hint">Title</string>
     <string name="dialog_snippet_hint">Details</string>
+    <string name="dialog_delete">Delete</string>
+    <string name="menu_add_card">Add card</string>
+    <string name="menu_add_flow">Add flow</string>
+    <string name="menu_open_images">Images</string>
+    <string name="menu_close_images">Back to cards</string>
+    <string name="menu_add_image">Add image</string>
+    <string name="menu_sync_drawables">Sync drawable bg_*</string>
+    <string name="menu_clear_images">Clear images</string>
+    <string name="images_subtitle">Images</string>
+    <string name="dialog_add_flow_title">Add flow</string>
+    <string name="dialog_flow_name_hint">Flow name</string>
+    <string name="dialog_create">Create</string>
+    <string name="default_flow_name">Flow %1$d</string>
+    <string name="snackbar_added_flow">Added flow "%1$s"</string>
+    <string name="snackbar_deleted_card">Card deleted</string>
+    <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
+    <string name="content_desc_add_flow">Add a new flow</string>
 </resources>

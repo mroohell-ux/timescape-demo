@@ -29,13 +29,15 @@
         android:layout_height="match_parent"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerCards"
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/flowPager"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipChildren="false"
             android:clipToPadding="false"
-            android:paddingBottom="84dp"/>
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="120dp"/>
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recyclerImages"
@@ -46,16 +48,50 @@
             android:clipToPadding="false"/>
     </FrameLayout>
 
-    <!-- Bottom navigation on a soft translucent pill -->
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/bottomBar"
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/flowBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:elevation="6dp"
-        app:menu="@menu/menu_bottom_nav"
-        app:backgroundTint="#CCFFFFFF"
-    app:itemIconTint="#333333"
-    app:itemTextColor="#333333"
-    app:labelVisibilityMode="labeled"/>
+        android:layout_margin="16dp"
+        android:padding="12dp"
+        app:cardBackgroundColor="#E61F1F1F"
+        app:cardCornerRadius="26dp"
+        app:cardElevation="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/flowChips"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingEnd="8dp"
+                    app:singleLine="true"
+                    app:singleSelection="true"
+                    app:selectionRequired="false"/>
+            </HorizontalScrollView>
+
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/buttonAddFlow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:contentDescription="@string/content_desc_add_flow"
+                app:tint="@android:color/white"
+                app:fabSize="mini"
+                app:srcCompat="@android:drawable/ic_input_add"/>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

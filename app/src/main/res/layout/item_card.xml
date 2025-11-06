@@ -57,8 +57,9 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="12h ago"
-                android:textColor="#E6FFFFFF"
-                android:textSize="14sp"/>
+                android:textColor="#FFFFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
 
             <!-- Title stays one line and autoshrinks so numbers never clip -->
             <TextView
@@ -72,8 +73,8 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 app:autoSizeTextType="uniform"
-                app:autoSizeMinTextSize="20sp"
-                app:autoSizeMaxTextSize="29sp"
+                app:autoSizeMinTextSize="24sp"
+                app:autoSizeMaxTextSize="34sp"
                 app:autoSizeStepGranularity="1sp"/>
 
             <TextView
@@ -82,8 +83,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="Snippet"
-                android:textColor="#F2FFFFFF"
-                android:textSize="16sp"
+                android:textColor="#FFFFFFFF"
+                android:textSize="18sp"
                 android:ellipsize="end"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>

@@ -2,27 +2,39 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- Cards tab -->
     <item
         android:id="@+id/action_add_card"
-        android:title="Add card"
-        android:icon="@android:drawable/ic_input_add"
+        android:title="@string/menu_add_card"
+        android:icon="@android:drawable/ic_menu_edit"
         app:showAsAction="ifRoom"/>
 
-    <!-- Shown only on Images tab -->
     <item
-        android:id="@+id/action_pick"
-        android:title="Add"
+        android:id="@+id/action_add_flow"
+        android:title="@string/menu_add_flow"
         android:icon="@android:drawable/ic_menu_add"
         app:showAsAction="ifRoom"/>
+
+    <item
+        android:id="@+id/action_toggle_images"
+        android:title="@string/menu_open_images"
+        android:icon="@android:drawable/ic_menu_gallery"
+        app:showAsAction="ifRoom"/>
+
+    <item
+        android:id="@+id/action_pick"
+        android:title="@string/menu_add_image"
+        android:icon="@android:drawable/ic_menu_add"
+        app:showAsAction="ifRoom"/>
+
     <item
         android:id="@+id/action_sync"
-        android:title="Sync drawable bg_*"
+        android:title="@string/menu_sync_drawables"
         android:icon="@android:drawable/ic_popup_sync"
         app:showAsAction="ifRoom"/>
+
     <item
         android:id="@+id/action_clear"
-        android:title="Clear all"
+        android:title="@string/menu_clear_images"
         android:icon="@android:drawable/ic_menu_delete"
         app:showAsAction="never"/>
 
