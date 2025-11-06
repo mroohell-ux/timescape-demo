@@ -152,7 +152,7 @@ class RightRailFlowLayoutManager(
 
     private fun applyTextByGain(child: View, gain: Float, focused: Boolean) {
         val title = child.findViewById<TextView>(R.id.title)
-        val snippet = child.findViewById<TextView>(R.id.snippet)
+        val status = child.findViewById<TextView>(R.id.status)
 
         // Text grows a bit near center; we no longer clamp max lines (height is capped globally)
         if (focused) {
@@ -161,8 +161,8 @@ class RightRailFlowLayoutManager(
             val titleSp = 21f + 5f * gain
             title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
         }
-        // Leave snippet lines unconstrained; overall height is capped by MaxHeightLinearLayout.
-        snippet?.maxLines = Integer.MAX_VALUE
+        // Leave status lines unconstrained; overall height is capped by MaxHeightLinearLayout.
+        status?.maxLines = Integer.MAX_VALUE
     }
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
