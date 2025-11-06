@@ -1,9 +1,6 @@
 <resources>
     <!-- Bright, optimistic look -->
     <style name="Theme.TimescapeDemo" parent="Theme.Material3.Light.NoActionBar">
-        <!-- Paint the whole window with our pastel background -->
-        <item name="android:windowBackground">@drawable/bg_app_light_optimistic</item>
-
         <!-- Edge-to-edge with dark icons (because background is light) -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

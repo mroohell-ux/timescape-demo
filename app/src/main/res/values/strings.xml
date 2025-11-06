@@ -8,12 +8,6 @@
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
     <string name="menu_add_flow">Add flow</string>
-    <string name="menu_open_images">Images</string>
-    <string name="menu_close_images">Back to cards</string>
-    <string name="menu_add_image">Add image</string>
-    <string name="menu_sync_drawables">Sync drawable bg_*</string>
-    <string name="menu_clear_images">Clear images</string>
-    <string name="images_subtitle">Images</string>
     <string name="dialog_add_flow_title">Add flow</string>
     <string name="dialog_flow_name_hint">Flow name</string>
     <string name="dialog_create">Create</string>
@@ -21,5 +15,14 @@
     <string name="snackbar_added_flow">Added flow "%1$s"</string>
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
-    <string name="content_desc_add_flow">Add a new flow</string>
+    <string name="drawer_header_card_backgrounds">Card backgrounds</string>
+    <string name="drawer_action_add_card_images">Add card backgrounds</string>
+    <string name="drawer_action_sync_drawables">Include project backgrounds</string>
+    <string name="drawer_action_clear_card_images">Clear card backgrounds</string>
+    <string name="drawer_header_app_background">App background</string>
+    <string name="drawer_action_change_app_background">Change app background</string>
+    <string name="drawer_action_reset_app_background">Reset app background</string>
+    <string name="snackbar_app_background_updated">Updated app background</string>
+    <string name="snackbar_app_background_cleared">App background reset</string>
+    <string name="snackbar_app_background_failed">Couldn't load that background</string>
 </resources>
