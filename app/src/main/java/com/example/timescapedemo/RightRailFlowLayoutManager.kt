@@ -41,7 +41,13 @@ class RightRailFlowLayoutManager(
     // Horizontal rail shaping (controls inflow/outflow direction)
     private val edgeRightShiftPx: Int = 96,     // far cards to the RIGHT by this many px
     private val centerLeftShiftPx: Int = 48,    // center card to the LEFT by this many px
-    private val railCurvePow: Float = 1.2f      // curvature; 1 = linear, >1 stronger S-curve
+    private val railCurvePow: Float = 1.2f,     // curvature; 1 = linear, >1 stronger S-curve
+
+    // S-curve styling
+    private val curveRotationRadiusItems: Float = 4.5f,
+    private val curveRotationPow: Float = 1.18f,
+    private val curveMaxRotationDeg: Float = 11f,
+    private val curveExtraRightShiftPx: Int = 54
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
 
     // focus animation state
@@ -52,6 +58,11 @@ class RightRailFlowLayoutManager(
 
     // scroll state
     private var scrollYPx = 0f
+
+    private data class CurvePlacement(
+        val extraX: Float,
+        val rotationDeg: Float
+    )
 
     private data class ScatterOffsets(
         val shiftX: Float,
@@ -160,8 +171,15 @@ class RightRailFlowLayoutManager(
         val yT = yTop(); val yB = yBottom()
 
         // Visible window of indices
-        val firstIdx = max(0, floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt())
-        val lastIdx  = min(itemCount - 1, ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt())
+        val layoutOverscan = 3
+        val firstIdx = max(
+            0,
+            floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
+        )
+        val lastIdx = min(
+            itemCount - 1,
+            ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
+        )
 
         // Size growth radius (how quickly a card "blooms" near center)
         val focusRadiusPx = itemPitchPx * 0.95f
@@ -184,7 +202,8 @@ class RightRailFlowLayoutManager(
             // ---- X rail shaping: edges right, center left (S-curve) ----
             val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
             val toLeft  = gain * centerLeftShiftPx
-            val px = baseX + toRight - toLeft
+            val curve = computeCurvePlacement(py, cy)
+            val px = baseX + toRight - toLeft + curve.extraX
 
             val isSelected = (selectedIndex == i)
 
@@ -213,7 +232,7 @@ class RightRailFlowLayoutManager(
             val scatter = computeScatterOffsets(i, gain, isSelected)
             child.translationX = scatter.shiftX
             child.translationY = scatter.shiftY
-            child.rotation = scatter.rotationDeg
+            child.rotation = curve.rotationDeg + scatter.rotationDeg
             val z = if (isSelected) 6000f else (1000f - dist / 10f)
             child.translationZ = z; child.elevation = z
         }
@@ -237,6 +256,19 @@ class RightRailFlowLayoutManager(
         val desired = yTop() + targetPosition * itemPitchPx - screenCenter()
         val dir = if (desired > scrollYPx) 1f else -1f
         return PointF(0f, dir)
+    }
+
+    private fun computeCurvePlacement(py: Float, centerY: Float): CurvePlacement {
+        if (itemPitchPx == 0) return CurvePlacement(0f, 0f)
+
+        val signedStepsFromCenter = (py - centerY) / itemPitchPx
+        val direction = if (signedStepsFromCenter >= 0f) 1f else -1f
+        val magnitude = abs(signedStepsFromCenter) / curveRotationRadiusItems
+        val eased = magnitude.coerceAtMost(1f).pow(curveRotationPow)
+        val rotation = -direction * eased * curveMaxRotationDeg
+        val extraRight = eased * curveExtraRightShiftPx
+
+        return CurvePlacement(extraRight, rotation)
     }
 
     private fun computeScatterOffsets(
