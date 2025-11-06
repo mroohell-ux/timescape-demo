@@ -17,8 +17,10 @@
     <string name="dialog_add_flow_title">Add flow</string>
     <string name="dialog_flow_name_hint">Flow name</string>
     <string name="dialog_create">Create</string>
+    <string name="dialog_rename_flow_title">Rename flow</string>
     <string name="default_flow_name">Flow %1$d</string>
     <string name="snackbar_added_flow">Added flow "%1$s"</string>
+    <string name="snackbar_renamed_flow">Renamed flow to "%1$s"</string>
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
     <string name="content_desc_add_flow">Add a new flow</string>

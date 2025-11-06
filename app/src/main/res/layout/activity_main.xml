@@ -53,7 +53,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:layout_margin="12dp"
-        android:padding="8dp"
+        android:padding="12dp"
         app:cardBackgroundColor="@color/flow_bar_surface"
         app:cardCornerRadius="24dp"
         app:cardElevation="4dp"
@@ -66,22 +66,16 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <HorizontalScrollView
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/flowNavigator"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="96dp"
                 android:layout_weight="1"
+                android:clipToPadding="false"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
                 android:overScrollMode="never"
-                android:scrollbars="none">
-
-                <com.google.android.material.chip.ChipGroup
-                    android:id="@+id/flowChips"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingEnd="8dp"
-                    app:singleLine="true"
-                    app:singleSelection="true"
-                    app:selectionRequired="false"/>
-            </HorizontalScrollView>
+                android:scrollbars="none"/>
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/buttonAddFlow"
@@ -89,9 +83,9 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
                 android:contentDescription="@string/content_desc_add_flow"
-                app:tint="@android:color/white"
                 app:fabSize="mini"
-                app:srcCompat="@android:drawable/ic_input_add"/>
+                app:srcCompat="@android:drawable/ic_input_add"
+                app:tint="@android:color/white"/>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
