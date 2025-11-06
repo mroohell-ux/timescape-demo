@@ -94,8 +94,11 @@ class MainActivity : AppCompatActivity() {
 
         // Cards layout manager
         val d = resources.displayMetrics.density
-        val baseSide = (380 * d).toInt()
-        val focusSide = (380 * d).toInt()
+        val screenWidthPx = resources.displayMetrics.widthPixels
+        val horizontalGutterPx = (32 * d).roundToInt()
+        val minCardWidthPx = (280 * d).roundToInt()
+        val baseSide = (screenWidthPx - horizontalGutterPx).coerceAtLeast(minCardWidthPx)
+        val focusSide = baseSide
         val pitch = (focusSide * 0.26f).toInt()
         lm = RightRailFlowLayoutManager(
             baseSidePx = baseSide,
