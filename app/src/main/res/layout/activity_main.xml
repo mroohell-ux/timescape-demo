@@ -22,9 +22,8 @@
                 android:layout_height="?attr/actionBarSize"
                 android:background="@android:color/transparent"
                 app:titleCentered="false"
-                app:titleTextColor="#111111"
-                app:navigationIconTint="#111111"
-                app:menu="@menu/menu_main"/>
+                app:titleTextColor="@color/toolbar_foreground"
+                app:navigationIconTint="@color/toolbar_foreground"/>
         </com.google.android.material.appbar.AppBarLayout>
 
         <FrameLayout
