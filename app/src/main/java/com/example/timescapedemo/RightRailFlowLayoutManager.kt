@@ -171,8 +171,15 @@ class RightRailFlowLayoutManager(
         val yT = yTop(); val yB = yBottom()
 
         // Visible window of indices
-        val firstIdx = max(0, floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt())
-        val lastIdx  = min(itemCount - 1, ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt())
+        val layoutOverscan = 3
+        val firstIdx = max(
+            0,
+            floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
+        )
+        val lastIdx = min(
+            itemCount - 1,
+            ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
+        )
 
         // Size growth radius (how quickly a card "blooms" near center)
         val focusRadiusPx = itemPitchPx * 0.95f
@@ -258,7 +265,7 @@ class RightRailFlowLayoutManager(
         val direction = if (signedStepsFromCenter >= 0f) 1f else -1f
         val magnitude = abs(signedStepsFromCenter) / curveRotationRadiusItems
         val eased = magnitude.coerceAtMost(1f).pow(curveRotationPow)
-        val rotation = direction * eased * curveMaxRotationDeg
+        val rotation = -direction * eased * curveMaxRotationDeg
         val extraRight = eased * curveExtraRightShiftPx
 
         return CurvePlacement(extraRight, rotation)
