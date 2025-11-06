@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Deep ocean base -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="270"
+                android:startColor="#0F1433"
+                android:centerColor="#132F6B"
+                android:endColor="#0A1C46"/>
+        </shape>
+    </item>
+
+    <!-- Soft wave sweeping from bottom-left -->
+    <item android:gravity="bottom|start">
+        <shape android:shape="rectangle">
+            <size android:width="1200dp" android:height="900dp"/>
+            <gradient
+                android:type="radial"
+                android:centerX="8%"
+                android:centerY="88%"
+                android:gradientRadius="780dp"
+                android:startColor="#332C7BFF"
+                android:endColor="#002C7BFF"/>
+        </shape>
+    </item>
+
+    <!-- Secondary wave from top-right -->
+    <item android:gravity="top|end">
+        <shape android:shape="rectangle">
+            <size android:width="1100dp" android:height="820dp"/>
+            <gradient
+                android:type="radial"
+                android:centerX="85%"
+                android:centerY="12%"
+                android:gradientRadius="720dp"
+                android:startColor="#332768FF"
+                android:endColor="#002768FF"/>
+        </shape>
+    </item>
+
+    <!-- Glossy drift across center -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="315"
+                android:startColor="#1A8AD7FF"
+                android:centerColor="#052057FF"
+                android:endColor="#00000000"/>
+        </shape>
+    </item>
+</layer-list>

@@ -4,4 +4,8 @@
     <color name="white">#FFFFFFFF</color>
     <color name="flow_bar_surface">#CCFFFFFF</color>
     <color name="flow_bar_stroke">#33FFFFFF</color>
+    <color name="network_facebook">#1877F2</color>
+    <color name="network_instagram">#E1306C</color>
+    <color name="network_linkedin">#0A66C2</color>
+    <color name="network_twitter">#1D9BF0</color>
 </resources>

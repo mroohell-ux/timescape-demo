@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
     private val flows: MutableList<CardFlow> = mutableListOf()
     private val flowControllers: MutableMap<Long, FlowPageController> = mutableMapOf()
 
-    private val cardTint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
+    private val cardTint: TintStyle = TintStyle.Colorize(color = Color.parseColor("#3D7BFF"), amount = 0.42f)
 
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
@@ -374,9 +374,9 @@ class MainActivity : AppCompatActivity() {
         val horizontalInsetPx = (32 * density).roundToInt()
         val minSidePx = (320 * density).roundToInt()
         val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
-        val baseSide = availableWidth
-        val focusSide = availableWidth
-        val pitch = (availableWidth * 0.26f).roundToInt()
+        val baseSide = (availableWidth * 0.84f).roundToInt()
+        val focusSide = (availableWidth * 0.94f).roundToInt()
+        val pitch = (baseSide * 0.32f).roundToInt()
         return RightRailFlowLayoutManager(
             baseSidePx = baseSide,
             focusSidePx = focusSide,
@@ -419,21 +419,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureSeedCards(flow: CardFlow): Boolean {
         if (flow.cards.isNotEmpty()) return false
-        val variants = listOf(
-            "Ping me when you’re free.",
-            "Grows toward center. Two neighbors overlap a bit.",
-            "This is a slightly longer body so you can see the card stretch beyond a couple of lines.",
-            "Here’s a longer description to show adaptive height. Tap to focus; tap again to defocus.",
-            "Long body to approach the 2/3 screen-height cap.",
-            "EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height.EXTREMELY LONG CONTENT — intentionally capped by parent height."
+        val names = listOf(
+            "Avery Chen",
+            "Mateo Ruiz",
+            "Lina Torres",
+            "Noah Patel",
+            "Mika Ito",
+            "Jonah Brooks",
+            "Camille Dubois",
+            "Zoe King"
+        )
+        val statuses = listOf(
+            "Boarding now—see you soon!",
+            "Sunrise shoot delivered. Thoughts?",
+            "Deck finalized. Ready for sign-off tonight.",
+            "Going live in 10 minutes—link’s in bio!",
+            "Prototype build is rendering. Coffee run?",
+            "DM me your availability; press brief moved up.",
+            "Pinned the new concept—feedback welcome.",
+            "Streaming set complete. Posting highlights soon."
+        )
+        val networks = listOf(
+            SocialNetwork.INSTAGRAM,
+            SocialNetwork.FACEBOOK,
+            SocialNetwork.LINKEDIN,
+            SocialNetwork.TWITTER
         )
         repeat(30) { i ->
+            val now = System.currentTimeMillis()
             flow.cards += CardItem(
                 id = nextCardId++,
-                title = "Contact $i",
-                snippet = variants[i % variants.size],
+                title = names[i % names.size],
+                snippet = statuses[i % statuses.size],
+                network = networks[i % networks.size],
                 bg = BgImage.Res(R.drawable.bg_placeholder),
-                updatedAt = System.currentTimeMillis() - (i * 90L * 60L * 1000L)
+                updatedAt = now - (i * 90L * 60L * 1000L)
             )
         }
         return true
@@ -448,10 +468,13 @@ class MainActivity : AppCompatActivity() {
         showCardEditor(initialTitle = "", initialSnippet = "", onSave = { title, snippet ->
             val finalTitle = title.trim().ifBlank { "New Contact" }
             val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
+            val allNetworks = SocialNetwork.values()
+            val network = allNetworks[(nextCardId % allNetworks.size).toInt()]
             val card = CardItem(
                 id = nextCardId++,
                 title = finalTitle,
                 snippet = finalSnippet,
+                network = network,
                 updatedAt = System.currentTimeMillis()
             )
             flow.cards += card
@@ -658,6 +681,7 @@ class MainActivity : AppCompatActivity() {
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
+                                network = SocialNetwork.fromRaw(cardObj.optString("network")),
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
                             )
                         }
@@ -685,6 +709,7 @@ class MainActivity : AppCompatActivity() {
                             id = if (id >= 0) id else ++highestCardId,
                             title = obj.optString("title"),
                             snippet = obj.optString("snippet"),
+                            network = SocialNetwork.fromRaw(obj.optString("network")),
                             updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                         )
                     }
@@ -752,6 +777,7 @@ class MainActivity : AppCompatActivity() {
                 obj.put("id", card.id)
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
+                obj.put("network", card.network.name)
                 obj.put("updatedAt", card.updatedAt)
                 cardsArray.put(obj)
             }

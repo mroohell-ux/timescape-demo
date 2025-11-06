@@ -5,92 +5,160 @@
     android:id="@+id/card"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:clipToOutline="true"
+    android:clipChildren="false"
+    android:clipToPadding="false"
     app:cardUseCompatPadding="false"
-    app:cardCornerRadius="20dp"
-    app:cardElevation="8dp"
+    app:cardCornerRadius="26dp"
+    app:cardElevation="18dp"
     app:cardBackgroundColor="@android:color/transparent"
     app:strokeWidth="0dp">
 
-    <!-- ConstraintLayout so bg layer doesn't affect measured height -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Pure background image. We blur/adjust it in the adapter. No glass/tint here. -->
         <ImageView
             android:id="@+id/bgImage"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:scaleType="centerCrop"
             android:contentDescription="@null"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent"
+            android:scaleType="centerCrop"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
 
-        <!-- LOCAL scrim: very light, only beneath the text block for readability -->
         <View
-            android:id="@+id/textScrim"
+            android:id="@+id/depthFog"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:background="@drawable/text_scrim"
-            app:layout_constraintStart_toStartOf="@id/card_content"
-            app:layout_constraintEnd_toEndOf="@id/card_content"
-            app:layout_constraintTop_toTopOf="@id/card_content"
-            app:layout_constraintBottom_toBottomOf="@id/card_content" />
+            android:alpha="0.0"
+            android:background="@drawable/depth_fog_overlay"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
 
-        <!-- Content drives height; LayoutManager caps to 2/3 screen -->
+        <View
+            android:id="@+id/layerShadow"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:alpha="0.4"
+            android:background="@drawable/card_layer_shadow"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+        <View
+            android:id="@+id/glassTint"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_glass_tint"
+            android:alpha="0.9"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+        <View
+            android:id="@+id/glassHighlight"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@drawable/card_gloss_highlight"
+            android:alpha="0.8"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/portraitImage"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_marginStart="18dp"
+            android:layout_marginEnd="18dp"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="18dp"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@+id/card_content"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintHorizontal_weight="1"
+            app:shapeAppearanceOverlay="@style/ShapeAppearanceOverlay.Timescape.CardPortrait"/>
+
         <com.example.timescapedemo.MaxHeightLinearLayout
             android:id="@+id/card_content"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="18dp"
+            android:layout_marginEnd="18dp"
             android:orientation="vertical"
             android:paddingStart="20dp"
             android:paddingEnd="20dp"
             android:paddingTop="20dp"
             android:paddingBottom="20dp"
-            app:layout_constraintStart_toStartOf="parent"
+            android:background="@drawable/text_scrim"
+            app:layout_constraintStart_toEndOf="@id/portraitImage"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent">
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintHorizontal_bias="1"
+            app:layout_constraintWidth_default="wrap"
+            app:layout_constraintWidth_min="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Avery Chen"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:ellipsize="end"/>
+
+                <ImageView
+                    android:id="@+id/networkIcon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginStart="12dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_network_facebook"/>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Status update placeholder"
+                android:textColor="#E5FFFFFF"
+                android:textSize="18sp"
+                android:lineSpacingExtra="4dp"
+                android:maxLines="3"
+                android:ellipsize="end"/>
 
             <TextView
                 android:id="@+id/time"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="12h ago"
-                android:textColor="#FFFFFFFF"
-                android:textSize="17sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.02"/>
-
-            <!-- Title stays one line and autoshrinks so numbers never clip -->
-            <TextView
-                android:id="@+id/title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Contact"
-                android:textStyle="bold"
-                android:textColor="#FFFFFFFF"
-                android:ellipsize="end"
-                android:maxLines="1"
-                app:autoSizeTextType="uniform"
-                app:autoSizeMinTextSize="26sp"
-                app:autoSizeMaxTextSize="36sp"
-                app:autoSizeStepGranularity="1sp"/>
-
-            <TextView
-                android:id="@+id/snippet"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Snippet"
-                android:textColor="#FFFFFFFF"
-                android:textSize="20sp"
-                android:lineSpacingExtra="4dp"
-                android:ellipsize="end"/>
+                android:layout_marginTop="12dp"
+                android:text="5m ago"
+                android:textColor="#CCFFFFFF"
+                android:textSize="15sp"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
