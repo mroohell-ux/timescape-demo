@@ -3,6 +3,8 @@ package com.example.timescapedemo
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.*
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,28 +14,30 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
+import androidx.core.view.GravityCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
+import androidx.drawerlayout.widget.DrawerLayout
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,15 +50,18 @@ import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
-    private enum class Tab { CARDS, IMAGES }
-
+    private lateinit var drawerLayout: DrawerLayout
     private lateinit var rootLayout: CoordinatorLayout
     private lateinit var toolbar: MaterialToolbar
     private lateinit var flowPager: ViewPager2
     private lateinit var recyclerImages: RecyclerView
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
-    private lateinit var addFlowButton: FloatingActionButton
+    private lateinit var buttonPickImages: MaterialButton
+    private lateinit var buttonSyncProjectImages: MaterialButton
+    private lateinit var buttonClearImages: MaterialButton
+    private lateinit var buttonPickAppBackground: MaterialButton
+    private lateinit var buttonClearAppBackground: MaterialButton
 
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private lateinit var flowAdapter: FlowPagerAdapter
@@ -67,18 +74,16 @@ class MainActivity : AppCompatActivity() {
 
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
-    private var currentTab: Tab = Tab.CARDS
+    private var appBackground: BgImage? = null
+    private var initialFlowIndex: Int = 0
 
     private var toolbarBasePaddingTop: Int = 0
     private var pagerBasePaddingStart: Int = 0
     private var pagerBasePaddingTop: Int = 0
     private var pagerBasePaddingEnd: Int = 0
     private var pagerBasePaddingBottom: Int = 0
-    private var imagesBasePaddingStart: Int = 0
-    private var imagesBasePaddingTop: Int = 0
-    private var imagesBasePaddingEnd: Int = 0
-    private var imagesBasePaddingBottom: Int = 0
     private var flowBarBaseMarginBottom: Int = 0
+    private var drawerBasePaddingTop: Int = 0
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -115,29 +120,56 @@ class MainActivity : AppCompatActivity() {
             } else snackbar("No photos selected")
         }
 
+    private val pickAppBackground =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) {
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: SecurityException) { }
+                updateAppBackground(BgImage.UriRef(uri), announce = true)
+            } else snackbar("No photos selected")
+        }
+
+    private val openAppBackground =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: SecurityException) { }
+                updateAppBackground(BgImage.UriRef(uri), announce = true)
+            } else snackbar("No photos selected")
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        drawerLayout = findViewById(R.id.drawerLayout)
         rootLayout = findViewById(R.id.rootLayout)
         toolbar = findViewById(R.id.toolbar)
         flowPager = findViewById(R.id.flowPager)
         recyclerImages = findViewById(R.id.recyclerImages)
         flowBar = findViewById(R.id.flowBar)
         flowChipGroup = findViewById(R.id.flowChips)
-        addFlowButton = findViewById(R.id.buttonAddFlow)
+        buttonPickImages = findViewById(R.id.buttonPickImages)
+        buttonSyncProjectImages = findViewById(R.id.buttonSyncProjectImages)
+        buttonClearImages = findViewById(R.id.buttonClearImages)
+        buttonPickAppBackground = findViewById(R.id.buttonPickAppBackground)
+        buttonClearAppBackground = findViewById(R.id.buttonClearAppBackground)
+        val drawerContent = findViewById<View>(R.id.drawerContent)
 
         toolbarBasePaddingTop = toolbar.paddingTop
         pagerBasePaddingStart = flowPager.paddingStart
         pagerBasePaddingTop = flowPager.paddingTop
         pagerBasePaddingEnd = flowPager.paddingEnd
         pagerBasePaddingBottom = flowPager.paddingBottom
-        imagesBasePaddingStart = recyclerImages.paddingStart
-        imagesBasePaddingTop = recyclerImages.paddingTop
-        imagesBasePaddingEnd = recyclerImages.paddingEnd
-        imagesBasePaddingBottom = recyclerImages.paddingBottom
         flowBarBaseMarginBottom =
             (flowBar.layoutParams as? CoordinatorLayout.LayoutParams)?.bottomMargin ?: 0
+        drawerBasePaddingTop = drawerContent.paddingTop
 
         flowAdapter = FlowPagerAdapter()
         setupFlowPager()
@@ -152,9 +184,61 @@ class MainActivity : AppCompatActivity() {
         }
         recyclerImages.adapter = imagesAdapter
 
-        addFlowButton.setOnClickListener { showAddFlowDialog() }
+        buttonPickImages.setOnClickListener {
+            launchPicker()
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        buttonSyncProjectImages.setOnClickListener {
+            syncFromProjectDrawables()
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        buttonClearImages.setOnClickListener {
+            val hadImages = selectedImages.isNotEmpty()
+            selectedImages.clear()
+            imagesAdapter.submit(selectedImages)
+            refreshAllFlows()
+            saveState()
+            if (hadImages) snackbar("Cleared all images")
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        buttonPickAppBackground.setOnClickListener {
+            launchAppBackgroundPicker()
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        buttonClearAppBackground.setOnClickListener {
+            if (appBackground != null) {
+                updateAppBackground(null, announce = true)
+            }
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        toolbar.navigationIcon = AppCompatResources.getDrawable(this, R.drawable.ic_menu_24)
+        toolbar.setNavigationOnClickListener {
+            drawerLayout.openDrawer(GravityCompat.START)
+        }
+        toolbar.title = ""
+        toolbar.subtitle = null
+
+        toolbar.menu.clear()
+        menuInflater.inflate(R.menu.menu_main, toolbar.menu)
+        toolbar.setOnMenuItemClickListener { mi ->
+            when (mi.itemId) {
+                R.id.action_add_card -> {
+                    showAddCardDialog(); true
+                }
+                R.id.action_add_flow -> {
+                    showAddFlowDialog(); true
+                }
+                else -> false
+            }
+        }
 
         loadState()
+        applyAppBackground()
 
         if (selectedImages.isEmpty()) {
             syncFromProjectDrawables(announce = false)
@@ -164,11 +248,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         flowAdapter.notifyDataSetChanged()
+        if (flows.isNotEmpty()) {
+            val targetIndex = initialFlowIndex.coerceIn(0, flows.lastIndex)
+            if (flowPager.currentItem != targetIndex) {
+                flowPager.setCurrentItem(targetIndex, false)
+            }
+        }
         renderFlowChips()
         updateChipSelection(flowPager.currentItem)
-        updateToolbarSubtitle()
-
-        switchTo(currentTab)
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -179,12 +266,7 @@ class MainActivity : AppCompatActivity() {
                 pagerBasePaddingEnd,
                 pagerBasePaddingBottom + systemBars.bottom
             )
-            recyclerImages.setPaddingRelative(
-                imagesBasePaddingStart,
-                imagesBasePaddingTop + systemBars.top,
-                imagesBasePaddingEnd,
-                imagesBasePaddingBottom + systemBars.bottom
-            )
+            drawerContent.updatePadding(top = drawerBasePaddingTop + systemBars.top)
             flowBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
                 bottomMargin = flowBarBaseMarginBottom + systemBars.bottom
             }
@@ -193,8 +275,8 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(rootLayout)
 
         onBackPressedDispatcher.addCallback(this) {
-            if (currentTab == Tab.IMAGES) {
-                switchTo(Tab.CARDS)
+            if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                drawerLayout.closeDrawer(GravityCompat.START)
                 return@addCallback
             }
             val controller = currentController()
@@ -228,71 +310,8 @@ class MainActivity : AppCompatActivity() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
                 updateChipSelection(position)
-                updateToolbarSubtitle()
             }
         })
-    }
-
-    private fun setupToolbarActionsFor(tab: Tab) {
-        toolbar.menu.clear()
-        menuInflater.inflate(R.menu.menu_main, toolbar.menu)
-
-        val showImagesActions = (tab == Tab.IMAGES)
-        toolbar.menu.findItem(R.id.action_pick)?.isVisible = showImagesActions
-        toolbar.menu.findItem(R.id.action_sync)?.isVisible = showImagesActions
-        toolbar.menu.findItem(R.id.action_clear)?.isVisible = showImagesActions
-
-        val showCardActions = (tab == Tab.CARDS)
-        toolbar.menu.findItem(R.id.action_add_card)?.isVisible = showCardActions
-        toolbar.menu.findItem(R.id.action_add_flow)?.isVisible = showCardActions
-
-        toolbar.menu.findItem(R.id.action_toggle_images)?.let { item ->
-            if (tab == Tab.CARDS) {
-                item.setIcon(android.R.drawable.ic_menu_gallery)
-                item.title = getString(R.string.menu_open_images)
-            } else {
-                item.setIcon(android.R.drawable.ic_menu_revert)
-                item.title = getString(R.string.menu_close_images)
-            }
-        }
-
-        toolbar.setOnMenuItemClickListener { mi ->
-            when (mi.itemId) {
-                R.id.action_add_card -> { showAddCardDialog(); true }
-                R.id.action_add_flow -> { showAddFlowDialog(); true }
-                R.id.action_toggle_images -> {
-                    val target = if (currentTab == Tab.CARDS) Tab.IMAGES else Tab.CARDS
-                    switchTo(target)
-                    true
-                }
-                R.id.action_pick -> { launchPicker(); true }
-                R.id.action_sync -> { syncFromProjectDrawables(); true }
-                R.id.action_clear -> {
-                    selectedImages.clear()
-                    imagesAdapter.submit(selectedImages)
-                    refreshAllFlows()
-                    saveState()
-                    snackbar("Cleared all images"); true
-                }
-                else -> false
-            }
-        }
-    }
-
-    private fun switchTo(tab: Tab) {
-        currentTab = tab
-        flowPager.visibility = if (tab == Tab.CARDS) View.VISIBLE else View.GONE
-        flowBar.visibility = if (tab == Tab.CARDS) View.VISIBLE else View.GONE
-        recyclerImages.visibility = if (tab == Tab.IMAGES) View.VISIBLE else View.GONE
-        setupToolbarActionsFor(tab)
-        updateToolbarSubtitle()
-    }
-
-    private fun updateToolbarSubtitle() {
-        toolbar.subtitle = when (currentTab) {
-            Tab.CARDS -> currentFlow()?.name ?: ""
-            Tab.IMAGES -> getString(R.string.images_subtitle)
-        }
     }
 
     private fun updateChipSelection(position: Int) {
@@ -355,7 +374,6 @@ class MainActivity : AppCompatActivity() {
         renderFlowChips()
         flowPager.post {
             flowPager.setCurrentItem(flows.lastIndex, true)
-            updateToolbarSubtitle()
         }
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
@@ -399,7 +417,6 @@ class MainActivity : AppCompatActivity() {
         val controller = flowControllers[flow.id]
         if (controller != null) {
             controller.adapter.submitList(flow.cards.toList())
-            controller.nameView.text = flow.name
             if (scrollToTop) {
                 controller.layoutManager.clearFocus()
                 controller.recycler.scrollToPosition(0)
@@ -511,6 +528,58 @@ class MainActivity : AppCompatActivity() {
         } else {
             openDocs.launch(arrayOf("image/*"))
         }
+    }
+
+    private fun launchAppBackgroundPicker() {
+        if (isPhotoPickerAvailable()) {
+            pickAppBackground.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        } else {
+            openAppBackground.launch(arrayOf("image/*"))
+        }
+    }
+
+    private fun updateAppBackground(bg: BgImage?, announce: Boolean) {
+        appBackground = bg
+        val applied = applyAppBackground()
+        saveState()
+        if (announce) {
+            when {
+                bg == null -> snackbar(getString(R.string.snackbar_app_background_cleared))
+                applied -> snackbar(getString(R.string.snackbar_app_background_updated))
+                else -> snackbar(getString(R.string.snackbar_app_background_failed))
+            }
+        }
+    }
+
+    private fun applyAppBackground(): Boolean {
+        return when (val bg = appBackground) {
+            is BgImage.Res -> {
+                rootLayout.setBackgroundResource(bg.id)
+                true
+            }
+            is BgImage.UriRef -> {
+                val drawable = loadAppBackgroundDrawable(bg.uri)
+                if (drawable != null) {
+                    rootLayout.background = drawable
+                    true
+                } else {
+                    appBackground = null
+                    rootLayout.setBackgroundResource(R.drawable.bg_app_light_optimistic)
+                    false
+                }
+            }
+            null -> {
+                rootLayout.setBackgroundResource(R.drawable.bg_app_light_optimistic)
+                true
+            }
+        }
+    }
+
+    private fun loadAppBackgroundDrawable(uri: Uri): BitmapDrawable? = try {
+        val bitmap = decodeBitmapSafe(BgImage.UriRef(uri), targetMaxEdge = 2048) ?: return null
+        BitmapDrawable(resources, bitmap)
+    } catch (_: Exception) {
+        null
     }
 
     private fun syncFromProjectDrawables(announce: Boolean = true) {
@@ -738,6 +807,30 @@ class MainActivity : AppCompatActivity() {
                 selectedImages.clear()
             }
         }
+
+        initialFlowIndex = if (flows.isNotEmpty()) {
+            prefs.getInt(KEY_SELECTED_FLOW_INDEX, 0).coerceIn(0, flows.lastIndex)
+        } else 0
+
+        val appBgJson = prefs.getString(KEY_APP_BACKGROUND, null)
+        appBackground = if (!appBgJson.isNullOrBlank()) {
+            try {
+                val obj = JSONObject(appBgJson)
+                when (obj.optString("type")) {
+                    "res" -> {
+                        val id = obj.optInt("id")
+                        if (id != 0) BgImage.Res(id) else null
+                    }
+                    "uri" -> {
+                        val value = obj.optString("value")
+                        if (!value.isNullOrBlank()) BgImage.UriRef(Uri.parse(value)) else null
+                    }
+                    else -> null
+                }
+            } catch (_: Exception) {
+                null
+            }
+        } else null
     }
 
     private fun saveState() {
@@ -782,6 +875,22 @@ class MainActivity : AppCompatActivity() {
             putString(KEY_IMAGES, imagesArray.toString())
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
+            putInt(KEY_SELECTED_FLOW_INDEX, flowPager.currentItem)
+            when (val bg = appBackground) {
+                null -> remove(KEY_APP_BACKGROUND)
+                is BgImage.Res -> {
+                    val obj = JSONObject()
+                    obj.put("type", "res")
+                    obj.put("id", bg.id)
+                    putString(KEY_APP_BACKGROUND, obj.toString())
+                }
+                is BgImage.UriRef -> {
+                    val obj = JSONObject()
+                    obj.put("type", "uri")
+                    obj.put("value", bg.uri.toString())
+                    putString(KEY_APP_BACKGROUND, obj.toString())
+                }
+            }
             remove(KEY_CARDS)
             apply()
         }
@@ -799,7 +908,6 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
-            val nameView = view.findViewById<TextView>(R.id.flowName)
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
@@ -812,7 +920,7 @@ class MainActivity : AppCompatActivity() {
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
             )
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, nameView, layoutManager, adapter)
+            holder = FlowVH(view, recycler, layoutManager, adapter)
             return holder
         }
 
@@ -831,7 +939,6 @@ class MainActivity : AppCompatActivity() {
         inner class FlowVH(
             view: View,
             val recycler: RecyclerView,
-            private val nameView: TextView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter
         ) : RecyclerView.ViewHolder(view) {
@@ -840,8 +947,7 @@ class MainActivity : AppCompatActivity() {
             fun bind(flow: CardFlow) {
                 boundFlowId?.let { flowControllers.remove(it) }
                 boundFlowId = flow.id
-                nameView.text = flow.name
-                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter, nameView)
+                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter)
                 adapter.submitList(flow.cards.toList())
                 layoutManager.clearFocus()
             }
@@ -871,8 +977,7 @@ class MainActivity : AppCompatActivity() {
         val flowId: Long,
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
-        val adapter: CardsAdapter,
-        val nameView: TextView
+        val adapter: CardsAdapter
     )
 
     companion object {
@@ -882,5 +987,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_FLOWS = "flows"
         private const val KEY_NEXT_CARD_ID = "next_card_id"
         private const val KEY_NEXT_FLOW_ID = "next_flow_id"
+        private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
+        private const val KEY_APP_BACKGROUND = "app_background"
     }
 }
