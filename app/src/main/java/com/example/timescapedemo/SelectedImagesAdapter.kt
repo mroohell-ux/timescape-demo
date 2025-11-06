@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.ImageButton
@@ -42,12 +43,32 @@ class SelectedImagesAdapter(
                 is BgImage.UriRef -> {
                     // basic decode (sufficient for thumbs)
                     val ctx = thumb.context
-                    val input = ctx.contentResolver.openInputStream(img.uri)
-                    val bmp = input?.use { BitmapFactory.decodeStream(it) }
-                    if (bmp != null) thumb.setImageBitmap(bmp) else thumb.setImageDrawable(null)
+                    val bmp = try {
+                        ctx.contentResolver.openInputStream(img.uri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream)
+                        }
+                    } catch (se: SecurityException) {
+                        Log.w(TAG, "Missing permission for uri thumb: ${img.uri}", se)
+                        null
+                    } catch (fnf: java.io.FileNotFoundException) {
+                        Log.w(TAG, "Missing file for uri thumb: ${img.uri}", fnf)
+                        null
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to decode uri thumb: ${img.uri}", e)
+                        null
+                    }
+                    if (bmp != null) {
+                        thumb.setImageBitmap(bmp)
+                    } else {
+                        thumb.setImageResource(R.drawable.bg_placeholder)
+                    }
                 }
             }
             btnDelete.setOnClickListener { onDelete(img) }
+        }
+
+        private companion object {
+            private const val TAG = "SelectedImagesAdapter"
         }
     }
 }

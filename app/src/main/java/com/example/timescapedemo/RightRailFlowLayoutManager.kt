@@ -9,12 +9,14 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Timescape-like vertical flow with variable-height cards:
@@ -50,6 +52,12 @@ class RightRailFlowLayoutManager(
 
     // scroll state
     private var scrollYPx = 0f
+
+    private data class ScatterOffsets(
+        val shiftX: Float,
+        val shiftY: Float,
+        val rotationDeg: Float
+    )
 
     override fun canScrollVertically() = true
     override fun canScrollHorizontally() = false
@@ -159,6 +167,9 @@ class RightRailFlowLayoutManager(
         val focusRadiusPx = itemPitchPx * 0.95f
         val heightCap = (height * 2f / 3f).roundToInt()
 
+        val nearest = nearestIndex()
+        val nearestY = yT + nearest * itemPitchPx - scrollYPx
+
         for (i in firstIdx..lastIdx) {
             val child = recycler.getViewForPosition(i)
             addView(child)
@@ -194,15 +205,15 @@ class RightRailFlowLayoutManager(
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
             // Alpha / depth (z-order so nearer items render above)
-            val alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
             child.alpha = 0.92f + 0.08f * gain
-
-            val centerIdxY = yT + nearestIndex() * itemPitchPx - scrollYPx
-            val dIdx = abs(centerIdxY - py) / itemPitchPx
+            val dIdx = abs(nearestY - py) / itemPitchPx
             val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
             child.scaleX = depthS
             child.scaleY = depthS
-            child.rotation = 0f
+            val scatter = computeScatterOffsets(i, gain, isSelected)
+            child.translationX = scatter.shiftX
+            child.translationY = scatter.shiftY
+            child.rotation = scatter.rotationDeg
             val z = if (isSelected) 6000f else (1000f - dist / 10f)
             child.translationZ = z; child.elevation = z
         }
@@ -226,5 +237,30 @@ class RightRailFlowLayoutManager(
         val desired = yTop() + targetPosition * itemPitchPx - screenCenter()
         val dir = if (desired > scrollYPx) 1f else -1f
         return PointF(0f, dir)
+    }
+
+    private fun computeScatterOffsets(
+        index: Int,
+        gain: Float,
+        isSelected: Boolean
+    ): ScatterOffsets {
+        val normalizedScroll = scrollYPx / itemPitchPx
+        val basePhase = index * 0.83f + normalizedScroll * 0.9f
+        val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
+        val tertiaryPhase = (index + normalizedScroll) * 0.55f
+
+        val waveA = sin(basePhase)
+        val waveB = cos(secondaryPhase)
+        val waveC = sin(tertiaryPhase + waveB * 0.35f)
+
+        val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
+        val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
+        val amount = scatterStrength * focusDamp
+
+        val shiftX = (waveA * 14f + waveB * 8f) * amount
+        val shiftY = (waveB * 6f + waveC * 10f) * amount
+        val rotation = (waveA * 2.6f + waveC * 1.1f) * amount
+
+        return ScatterOffsets(shiftX, shiftY, rotation)
     }
 }

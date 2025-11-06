@@ -13,6 +13,7 @@ import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
+import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.View
@@ -60,10 +61,19 @@ class CardsAdapter(
     }
 
     private val items = mutableListOf<CardItem>()
+    private val blockedUris = mutableSetOf<Uri>()
+
+    private sealed class LuminanceSource {
+        data object None : LuminanceSource()
+        data class Resource(val resId: Int) : LuminanceSource()
+        data class FromUri(val uri: Uri) : LuminanceSource()
+    }
 
     fun submitList(newItems: List<CardItem>) {
         items.clear()
         items.addAll(newItems)
+        val activeUris = newItems.mapNotNull { (it.bg as? BgImage.UriRef)?.uri }.toSet()
+        blockedUris.retainAll(activeUris)
         notifyDataSetChanged()
     }
 
@@ -111,10 +121,35 @@ class CardsAdapter(
         holder.snippet.text = item.snippet
 
         // ---- Bind background image (drawable or Uri) ----
-        when (val b = item.bg) {
-            is BgImage.Res    -> holder.bg.setImageResource(b.id)
-            is BgImage.UriRef -> holder.bg.setImageURI(b.uri)
-            null              -> holder.bg.setImageDrawable(null)
+        val (luminanceKey, luminanceSource) = when (val b = item.bg) {
+            is BgImage.Res -> {
+                holder.bg.setImageResource(b.id)
+                "res:${b.id}" to LuminanceSource.Resource(b.id)
+            }
+            is BgImage.UriRef -> {
+                if (blockedUris.contains(b.uri)) {
+                    holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                    PLACEHOLDER_KEY to LuminanceSource.Resource(PLACEHOLDER_RES_ID)
+                } else when (loadImageFromUriSafely(holder.bg, b.uri)) {
+                    LoadResult.Success -> {
+                        blockedUris.remove(b.uri)
+                        "uri:${b.uri}" to LuminanceSource.FromUri(b.uri)
+                    }
+                    LoadResult.PermissionDenied -> {
+                        blockedUris.add(b.uri)
+                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                        PLACEHOLDER_KEY to LuminanceSource.Resource(PLACEHOLDER_RES_ID)
+                    }
+                    LoadResult.TemporaryFailure -> {
+                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                        PLACEHOLDER_KEY to LuminanceSource.Resource(PLACEHOLDER_RES_ID)
+                    }
+                }
+            }
+            null -> {
+                holder.bg.setImageDrawable(null)
+                "none" to LuminanceSource.None
+            }
         }
 
         // Base blur (keeps transparency)
@@ -127,16 +162,11 @@ class CardsAdapter(
         applyTintToImage(holder.bg, tint, baseEffect)
 
         // ---- Adaptive readability (local scrim + text color swap) ----
-        val key = when (val b = item.bg) {
-            is BgImage.Res    -> "res:${b.id}"
-            is BgImage.UriRef -> "uri:${b.uri}"
-            null              -> "none"
-        }
-        val lum = luminanceCache.getOrPut(key) {
-            when (val bg = item.bg) {
-                is BgImage.Res    -> computeAvgLuminanceFromRes(holder.itemView, bg.id)
-                is BgImage.UriRef -> computeAvgLuminanceFromUri(holder.itemView, bg.uri)
-                else -> 0.5f
+        val lum = luminanceCache.getOrPut(luminanceKey) {
+            when (luminanceSource) {
+                is LuminanceSource.Resource -> computeAvgLuminanceFromRes(holder.itemView, luminanceSource.resId)
+                is LuminanceSource.FromUri -> computeAvgLuminanceFromUri(holder.itemView, luminanceSource.uri)
+                LuminanceSource.None -> DEFAULT_LUMINANCE
             }
         }
         val isBright = lum >= 0.55f
@@ -226,11 +256,30 @@ class CardsAdapter(
             inPreferredConfig = Bitmap.Config.ARGB_8888
             inSampleSize = 32
         }
-        cr.openInputStream(uri)?.use { stream ->
-            val bmp = BitmapFactory.decodeStream(stream, null, opts) ?: return 0.5f
-            val v = averageLum(bmp); bmp.recycle(); return v
+        val stream = try {
+            cr.openInputStream(uri)
+        } catch (se: SecurityException) {
+            Log.w(TAG, "No permission to read uri for luminance: $uri", se)
+            return DEFAULT_LUMINANCE
+        } catch (fnf: java.io.FileNotFoundException) {
+            Log.w(TAG, "Missing file for luminance uri: $uri", fnf)
+            return DEFAULT_LUMINANCE
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to open uri for luminance: $uri", e)
+            return DEFAULT_LUMINANCE
         }
-        return 0.5f
+        stream?.use { input ->
+            val bmp = try {
+                BitmapFactory.decodeStream(input, null, opts)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to decode luminance for uri: $uri", e)
+                null
+            } ?: return DEFAULT_LUMINANCE
+            val value = averageLum(bmp)
+            bmp.recycle()
+            return value
+        }
+        return DEFAULT_LUMINANCE
     }
     private fun averageLum(bmp: Bitmap): Float {
         val w = bmp.width
@@ -304,6 +353,32 @@ class CardsAdapter(
     }
     @Suppress("ConstPropertyName")
     private companion object {
+        private const val TAG = "CardsAdapter"
+        private const val DEFAULT_LUMINANCE = 0.5f
+        private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
+        private val PLACEHOLDER_KEY = "res:$PLACEHOLDER_RES_ID"
+
+        private enum class LoadResult { Success, TemporaryFailure, PermissionDenied }
+
+        private fun loadImageFromUriSafely(target: ImageView, uri: Uri): LoadResult {
+            return try {
+                target.setImageURI(uri)
+                if (target.drawable != null) {
+                    LoadResult.Success
+                } else {
+                    LoadResult.TemporaryFailure
+                }
+            } catch (se: SecurityException) {
+                Log.w(TAG, "Missing permission for uri: $uri", se)
+                target.setImageDrawable(null)
+                LoadResult.PermissionDenied
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to bind uri: $uri", e)
+                target.setImageDrawable(null)
+                LoadResult.TemporaryFailure
+            }
+        }
+
         private const val DUOTONE_SHADER = """
             uniform shader content;
             uniform float amount;
