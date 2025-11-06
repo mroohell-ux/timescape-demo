@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import android.graphics.*
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.view.Gravity
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
 import androidx.activity.result.PickVisualMediaRequest
@@ -84,6 +88,8 @@ class MainActivity : AppCompatActivity() {
     private var pagerBasePaddingBottom: Int = 0
     private var flowBarBaseMarginBottom: Int = 0
     private var drawerBasePaddingTop: Int = 0
+
+    private val defaultAppBackgroundPrototype: Drawable by lazy { createDefaultAppBackground() }
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -170,6 +176,8 @@ class MainActivity : AppCompatActivity() {
         flowBarBaseMarginBottom =
             (flowBar.layoutParams as? CoordinatorLayout.LayoutParams)?.bottomMargin ?: 0
         drawerBasePaddingTop = drawerContent.paddingTop
+
+        rootLayout.background = obtainDefaultAppBackground()
 
         flowAdapter = FlowPagerAdapter()
         setupFlowPager()
@@ -554,8 +562,15 @@ class MainActivity : AppCompatActivity() {
     private fun applyAppBackground(): Boolean {
         return when (val bg = appBackground) {
             is BgImage.Res -> {
-                rootLayout.setBackgroundResource(bg.id)
-                true
+                val drawable = AppCompatResources.getDrawable(this, bg.id)
+                if (drawable != null) {
+                    rootLayout.background = drawable.mutate()
+                    true
+                } else {
+                    appBackground = null
+                    rootLayout.background = obtainDefaultAppBackground()
+                    false
+                }
             }
             is BgImage.UriRef -> {
                 val drawable = loadAppBackgroundDrawable(bg.uri)
@@ -564,14 +579,54 @@ class MainActivity : AppCompatActivity() {
                     true
                 } else {
                     appBackground = null
-                    rootLayout.setBackgroundResource(R.drawable.bg_app_light_optimistic)
+                    rootLayout.background = obtainDefaultAppBackground()
                     false
                 }
             }
             null -> {
-                rootLayout.setBackgroundResource(R.drawable.bg_app_light_optimistic)
+                rootLayout.background = obtainDefaultAppBackground()
                 true
             }
+        }
+    }
+
+    private fun obtainDefaultAppBackground(): Drawable {
+        val state = defaultAppBackgroundPrototype.constantState
+        return state?.newDrawable()?.mutate() ?: createDefaultAppBackground()
+    }
+
+    private fun createDefaultAppBackground(): Drawable {
+        val density = resources.displayMetrics.density
+        val overlaySize = (900f * density).roundToInt()
+
+        fun radial(startColor: Int, endColor: Int, centerX: Float, centerY: Float, radiusDp: Float): GradientDrawable {
+            return GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                gradientType = GradientDrawable.RADIAL_GRADIENT
+                colors = intArrayOf(startColor, endColor)
+                gradientRadius = radiusDp * density
+                setGradientCenter(centerX, centerY)
+                setSize(overlaySize, overlaySize)
+            }
+        }
+
+        val base = GradientDrawable(
+            GradientDrawable.Orientation.TR_BL,
+            intArrayOf(0xFFFDFBFFu.toInt(), 0xFFF2F7FFu.toInt())
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+        }
+
+        val warmGlow = radial(0x4DFFD89A, 0x00FFD89A, 0.78f, 0.10f, 520f)
+        val mintBloom = radial(0x40A8FFE0, 0x00A8FFE0, 0.16f, 0.86f, 560f)
+        val scrim = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(0x0D000000)
+        }
+
+        return LayerDrawable(arrayOf(base, warmGlow, mintBloom, scrim)).apply {
+            setLayerGravity(1, Gravity.TOP or Gravity.END)
+            setLayerGravity(2, Gravity.BOTTOM or Gravity.START)
         }
     }
 
