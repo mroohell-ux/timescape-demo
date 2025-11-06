@@ -34,7 +34,6 @@ class RightRailFlowLayoutManager(
     private val bottomInsetPx: Int = 0,
 
     // Visual tuning
-    private val minEdgeScale: Float = 0.66f,
     private val edgeAlphaMin: Float = 0.30f,
     private val depthScaleDrop: Float = 0.06f,
 
@@ -138,8 +137,10 @@ class RightRailFlowLayoutManager(
         layoutAll(recycler)
     }
 
-    private fun measureCardWithWidthAndCap(child: View, widthPx: Int, maxHeightPx: Int) {
-        // Width = exact, height = wrap_content; child caps itself via MaxHeightLinearLayout
+    private val collapsedHeightFraction = 0.62f
+    private val collapsedSnippetLines = 3
+
+    private fun measureCardExpanded(child: View, widthPx: Int, maxHeightPx: Int) {
         val lp = child.layoutParams
         if (lp.width != widthPx || lp.height != RecyclerView.LayoutParams.WRAP_CONTENT) {
             lp.width = widthPx
@@ -150,19 +151,28 @@ class RightRailFlowLayoutManager(
         measureChildWithMargins(child, 0, 0)
     }
 
-    private fun applyTextByGain(child: View, gain: Float, focused: Boolean) {
+    private fun measureCardCollapsed(child: View, widthPx: Int, heightPx: Int) {
+        val lp = child.layoutParams
+        if (lp.width != widthPx || lp.height != heightPx) {
+            lp.width = widthPx
+            lp.height = heightPx
+            child.layoutParams = lp
+        }
+        child.findViewById<MaxHeightLinearLayout>(R.id.card_content)?.setMaxHeightPx(heightPx)
+        measureChildWithMargins(child, 0, 0)
+    }
+
+    private fun applyTextForState(child: View, focused: Boolean) {
         val title = child.findViewById<TextView>(R.id.title)
         val snippet = child.findViewById<TextView>(R.id.snippet)
 
-        // Text grows a bit near center; we no longer clamp max lines (height is capped globally)
         if (focused) {
             title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
+            snippet?.maxLines = Integer.MAX_VALUE
         } else {
-            val titleSp = 21f + 5f * gain
-            title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
+            title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f)
+            snippet?.maxLines = collapsedSnippetLines
         }
-        // Leave snippet lines unconstrained; overall height is capped by MaxHeightLinearLayout.
-        snippet?.maxLines = Integer.MAX_VALUE
     }
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
@@ -184,6 +194,7 @@ class RightRailFlowLayoutManager(
         // Size growth radius (how quickly a card "blooms" near center)
         val focusRadiusPx = itemPitchPx * 0.95f
         val heightCap = (height * 2f / 3f).roundToInt()
+        val collapsedHeight = (baseSidePx * collapsedHeightFraction).roundToInt().coerceAtLeast(1)
 
         val nearest = nearestIndex()
         val nearestY = yT + nearest * itemPitchPx - scrollYPx
@@ -208,14 +219,16 @@ class RightRailFlowLayoutManager(
             val isSelected = (selectedIndex == i)
 
             // Width: far small -> base -> (if selected) focused
-            val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
-            var side = (edgeSide + (baseSidePx - edgeSide) * interp.getInterpolation(gain)).roundToInt()
+            var side = baseSidePx
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
 
-            // Measure: fixed width, wrap-content height, capped to 2/3 screen
-            measureCardWithWidthAndCap(child, side, heightCap)
+            if (isSelected && focusProgress > 0f) {
+                measureCardExpanded(child, side, heightCap)
+            } else {
+                measureCardCollapsed(child, side, collapsedHeight)
+            }
 
-            applyTextByGain(child, gain, isSelected && focusProgress > 0.5f)
+            applyTextForState(child, isSelected && focusProgress > 0.5f)
 
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
