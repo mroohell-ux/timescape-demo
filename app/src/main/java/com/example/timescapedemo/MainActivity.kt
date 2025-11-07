@@ -306,7 +306,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateToolbarSubtitle() {
-        toolbar.subtitle = currentFlow()?.name ?: ""
+        toolbar.subtitle = ""
     }
 
     private fun updateChipSelection(position: Int) {
