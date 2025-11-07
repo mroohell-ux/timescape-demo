@@ -23,7 +23,6 @@
     <string name="snackbar_added_flow">Added flow "%1$s"</string>
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
-    <string name="content_desc_add_flow">Add a new flow</string>
     <string name="snackbar_removed_image">Removed 1 image</string>
     <string name="snackbar_removed_image_reset_app_background">Removed image and reset app background</string>
     <string name="snackbar_no_images_to_clear">No images to clear</string>
