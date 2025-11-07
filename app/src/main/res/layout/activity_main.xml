@@ -64,9 +64,8 @@
                 android:orientation="horizontal">
 
                 <HorizontalScrollView
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:overScrollMode="never"
                     android:scrollbars="none">
 
@@ -80,15 +79,6 @@
                         app:selectionRequired="false"/>
                 </HorizontalScrollView>
 
-                <com.google.android.material.floatingactionbutton.FloatingActionButton
-                    android:id="@+id/buttonAddFlow"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:contentDescription="@string/content_desc_add_flow"
-                    app:tint="@android:color/white"
-                    app:fabSize="mini"
-                    app:srcCompat="@android:drawable/ic_input_add"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

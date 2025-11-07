@@ -11,20 +11,4 @@
         android:clipToPadding="false"
         android:paddingBottom="24dp"/>
 
-    <TextView
-        android:id="@+id/flowName"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="16dp"
-        android:background="@drawable/bg_flow_label"
-        android:paddingLeft="16dp"
-        android:paddingTop="8dp"
-        android:paddingRight="16dp"
-        android:paddingBottom="8dp"
-        android:text="Flow"
-        android:textColor="#FFFFFFFF"
-        android:textSize="16sp"
-        android:textStyle="bold"/>
-
 </FrameLayout>

@@ -14,7 +14,6 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
@@ -39,7 +38,6 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import org.json.JSONArray
@@ -59,7 +57,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flowPager: ViewPager2
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
-    private lateinit var addFlowButton: FloatingActionButton
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -82,6 +79,7 @@ class MainActivity : AppCompatActivity() {
 
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
+    private var selectedFlowIndex: Int = 0
 
     private var toolbarBasePaddingTop: Int = 0
     private var pagerBasePaddingStart: Int = 0
@@ -150,7 +148,8 @@ class MainActivity : AppCompatActivity() {
         flowPager = findViewById(R.id.flowPager)
         flowBar = findViewById(R.id.flowBar)
         flowChipGroup = findViewById(R.id.flowChips)
-        addFlowButton = findViewById(R.id.buttonAddFlow)
+
+        toolbar.title = ""
 
         val header = navigationView.getHeaderView(0)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
@@ -214,8 +213,6 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
         }
 
-        addFlowButton.setOnClickListener { showAddFlowDialog() }
-
         loadState()
 
         if (selectedImages.isEmpty()) {
@@ -228,8 +225,13 @@ class MainActivity : AppCompatActivity() {
         applyAppBackground()
 
         flowAdapter.notifyDataSetChanged()
+        val initialIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
+        if (flowPager.currentItem != initialIndex) {
+            flowPager.setCurrentItem(initialIndex, false)
+        }
+        selectedFlowIndex = initialIndex
         renderFlowChips()
-        updateChipSelection(flowPager.currentItem)
+        updateChipSelection(initialIndex)
         updateToolbarSubtitle()
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
@@ -283,6 +285,8 @@ class MainActivity : AppCompatActivity() {
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
+                selectedFlowIndex = position
+                prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, position).apply()
                 updateChipSelection(position)
                 updateToolbarSubtitle()
             }
@@ -409,7 +413,6 @@ class MainActivity : AppCompatActivity() {
         val controller = flowControllers[flow.id]
         if (controller != null) {
             controller.adapter.submitList(flow.cards.toList())
-            controller.nameView.text = flow.name
             if (scrollToTop) {
                 controller.layoutManager.clearFocus()
                 controller.recycler.scrollToPosition(0)
@@ -833,6 +836,12 @@ class MainActivity : AppCompatActivity() {
                 null
             }
         } else null
+
+        selectedFlowIndex = if (flows.isEmpty()) {
+            0
+        } else {
+            prefs.getInt(KEY_SELECTED_FLOW_INDEX, 0).coerceIn(0, flows.lastIndex)
+        }
     }
 
     private fun saveState() {
@@ -896,6 +905,8 @@ class MainActivity : AppCompatActivity() {
             else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
+            val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
+            putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             remove(KEY_CARDS)
             apply()
         }
@@ -913,7 +924,6 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
-            val nameView = view.findViewById<TextView>(R.id.flowName)
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
@@ -926,7 +936,7 @@ class MainActivity : AppCompatActivity() {
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
             )
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, nameView, layoutManager, adapter)
+            holder = FlowVH(view, recycler, layoutManager, adapter)
             return holder
         }
 
@@ -945,7 +955,6 @@ class MainActivity : AppCompatActivity() {
         inner class FlowVH(
             view: View,
             val recycler: RecyclerView,
-            private val nameView: TextView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter
         ) : RecyclerView.ViewHolder(view) {
@@ -954,8 +963,7 @@ class MainActivity : AppCompatActivity() {
             fun bind(flow: CardFlow) {
                 boundFlowId?.let { flowControllers.remove(it) }
                 boundFlowId = flow.id
-                nameView.text = flow.name
-                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter, nameView)
+                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter)
                 adapter.submitList(flow.cards.toList())
                 layoutManager.clearFocus()
             }
@@ -985,8 +993,7 @@ class MainActivity : AppCompatActivity() {
         val flowId: Long,
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
-        val adapter: CardsAdapter,
-        val nameView: TextView
+        val adapter: CardsAdapter
     )
 
     companion object {
@@ -994,6 +1001,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_CARDS = "cards"
         private const val KEY_IMAGES = "images"
         private const val KEY_FLOWS = "flows"
+        private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
         private const val KEY_APP_BACKGROUND = "app_background"
         private const val KEY_NEXT_CARD_ID = "next_card_id"
         private const val KEY_NEXT_FLOW_ID = "next_flow_id"
