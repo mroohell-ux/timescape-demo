@@ -60,7 +60,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
-    private lateinit var drawerSyncImagesButton: MaterialButton
     private lateinit var drawerClearImagesButton: MaterialButton
     private lateinit var drawerPickAppBackgroundButton: MaterialButton
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
@@ -154,7 +153,6 @@ class MainActivity : AppCompatActivity() {
         val header = navigationView.getHeaderView(0)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
-        drawerSyncImagesButton = header.findViewById(R.id.buttonDrawerSyncImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
         drawerPickAppBackgroundButton = header.findViewById(R.id.buttonDrawerPickAppBackground)
         drawerResetAppBackgroundButton = header.findViewById(R.id.buttonDrawerResetAppBackground)
@@ -194,7 +192,6 @@ class MainActivity : AppCompatActivity() {
         drawerRecyclerImages.adapter = imagesAdapter
 
         drawerAddImagesButton.setOnClickListener { launchPicker() }
-        drawerSyncImagesButton.setOnClickListener { syncFromProjectDrawables() }
         drawerClearImagesButton.setOnClickListener {
             if (selectedImages.isEmpty()) {
                 snackbar(getString(R.string.snackbar_no_images_to_clear))
@@ -215,12 +212,8 @@ class MainActivity : AppCompatActivity() {
 
         loadState()
 
-        if (selectedImages.isEmpty()) {
-            syncFromProjectDrawables(announce = false)
-        } else {
-            imagesAdapter.submit(selectedImages)
-            refreshAllFlows()
-        }
+        imagesAdapter.submit(selectedImages)
+        refreshAllFlows()
 
         applyAppBackground()
 
@@ -602,45 +595,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return true
-    }
-
-    private fun syncFromProjectDrawables(announce: Boolean = true) {
-        val before = selectedImages.toList()
-        val res = resources
-        val pkg = packageName
-        val found = mutableListOf<BgImage.Res>()
-
-        var gap = 0
-        for (i in 0..199) {
-            val id = res.getIdentifier("bg_$i", "drawable", pkg)
-            if (id != 0) { found += BgImage.Res(id); gap = 0 } else { gap++; if (i > 20 && gap > 20) break }
-        }
-        if (found.isEmpty()) {
-            val skip = listOf("gradient", "scrim", "placeholder")
-            for (f in R.drawable::class.java.fields) {
-                val n = f.name
-                if (n.startsWith("bg_") && skip.none { word -> n.contains(word) }) {
-                    try { found += BgImage.Res(f.getInt(null)) } catch (_: Exception) { }
-                }
-            }
-        }
-
-        val currentSet = selectedImages.toMutableSet()
-        currentSet.addAll(found)
-        selectedImages.clear()
-        selectedImages.addAll(currentSet)
-        selectedImages.sortBy { (it as? BgImage.Res)?.id ?: Int.MAX_VALUE }
-
-        imagesAdapter.submit(selectedImages)
-        refreshAllFlows()
-
-        val changed = before != selectedImages
-        if (changed) {
-            saveState()
-            if (announce) snackbar("Synced ${found.size} drawable image(s)")
-        } else if (announce) {
-            snackbar("Project images are already up to date")
-        }
     }
 
     private fun makeCircularPreview(img: BgImage, sizePx: Int): Bitmap? = try {
