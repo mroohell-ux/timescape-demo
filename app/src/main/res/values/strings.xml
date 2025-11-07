@@ -10,7 +10,6 @@
     <string name="menu_add_flow">Add flow</string>
     <string name="drawer_card_backgrounds">Card backgrounds</string>
     <string name="drawer_add_images">Add background images</string>
-    <string name="drawer_sync_images">Sync drawable backgrounds</string>
     <string name="drawer_clear_images">Clear all</string>
     <string name="drawer_app_background">App background</string>
     <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
