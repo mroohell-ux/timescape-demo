@@ -40,8 +40,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clipChildren="false"
-                android:clipToPadding="false"
-                android:paddingBottom="96dp"/>
+                android:clipToPadding="false"/>
         </FrameLayout>
 
         <com.google.android.material.card.MaterialCardView
