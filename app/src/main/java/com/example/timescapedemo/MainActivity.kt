@@ -884,6 +884,9 @@ class MainActivity : AppCompatActivity() {
                 appBackgroundObj.put("type", "uri")
                 appBackgroundObj.put("value", bg.uri.toString())
             }
+            null -> {
+                // no-op: app background is cleared
+            }
         }
 
         with(prefs.edit()) {
