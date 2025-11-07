@@ -14,28 +14,4 @@
         android:icon="@android:drawable/ic_menu_add"
         app:showAsAction="ifRoom"/>
 
-    <item
-        android:id="@+id/action_toggle_images"
-        android:title="@string/menu_open_images"
-        android:icon="@android:drawable/ic_menu_gallery"
-        app:showAsAction="ifRoom"/>
-
-    <item
-        android:id="@+id/action_pick"
-        android:title="@string/menu_add_image"
-        android:icon="@android:drawable/ic_menu_add"
-        app:showAsAction="ifRoom"/>
-
-    <item
-        android:id="@+id/action_sync"
-        android:title="@string/menu_sync_drawables"
-        android:icon="@android:drawable/ic_popup_sync"
-        app:showAsAction="ifRoom"/>
-
-    <item
-        android:id="@+id/action_clear"
-        android:title="@string/menu_clear_images"
-        android:icon="@android:drawable/ic_menu_delete"
-        app:showAsAction="never"/>
-
 </menu>
