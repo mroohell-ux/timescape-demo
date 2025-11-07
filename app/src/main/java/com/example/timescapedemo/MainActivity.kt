@@ -24,6 +24,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
@@ -138,6 +139,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
 
         drawerLayout = findViewById(R.id.drawerLayout)
@@ -147,6 +149,15 @@ class MainActivity : AppCompatActivity() {
         flowPager = findViewById(R.id.flowPager)
         flowBar = findViewById(R.id.flowBar)
         flowChipGroup = findViewById(R.id.flowChips)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+        }
+        WindowCompat.getInsetsController(window, rootLayout).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
 
         toolbar.title = ""
 
@@ -232,9 +243,9 @@ class MainActivity : AppCompatActivity() {
             toolbar.updatePadding(top = toolbarBasePaddingTop + systemBars.top)
             flowPager.setPaddingRelative(
                 pagerBasePaddingStart,
-                pagerBasePaddingTop + systemBars.top,
+                pagerBasePaddingTop,
                 pagerBasePaddingEnd,
-                pagerBasePaddingBottom + systemBars.bottom
+                pagerBasePaddingBottom
             )
             flowBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
                 bottomMargin = flowBarBaseMarginBottom + systemBars.bottom
