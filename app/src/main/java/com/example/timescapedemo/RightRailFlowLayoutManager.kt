@@ -58,6 +58,7 @@ class RightRailFlowLayoutManager(
 
     // scroll state
     private var scrollYPx = 0f
+    private var pendingRestore: PendingRestore? = null
 
     private data class CurvePlacement(
         val extraX: Float,
@@ -68,6 +69,11 @@ class RightRailFlowLayoutManager(
         val shiftX: Float,
         val shiftY: Float,
         val rotationDeg: Float
+    )
+
+    private data class PendingRestore(
+        val index: Int,
+        val focus: Boolean
     )
 
     override fun canScrollVertically() = true
@@ -135,6 +141,9 @@ class RightRailFlowLayoutManager(
     override fun onLayoutChildren(recycler: RecyclerView.Recycler, state: RecyclerView.State) {
         detachAndScrapAttachedViews(recycler)
         if (itemCount == 0 || width == 0 || height == 0) return
+        pendingRestore?.let {
+            if (applyRestore(it.index, it.focus)) pendingRestore = null
+        }
         layoutAll(recycler)
     }
 
@@ -250,6 +259,32 @@ class RightRailFlowLayoutManager(
         detachAndScrapAttachedViews(recycler)
         layoutAll(recycler)
         return consumed
+    }
+
+    fun restoreState(index: Int, focus: Boolean) {
+        if (applyRestore(index, focus)) {
+            pendingRestore = null
+            requestLayout()
+        } else {
+            pendingRestore = PendingRestore(index, focus)
+            requestLayout()
+        }
+    }
+
+    private fun applyRestore(index: Int, focus: Boolean): Boolean {
+        if (itemCount == 0 || width == 0 || height == 0) return false
+        val clamped = index.coerceIn(0, max(0, itemCount - 1))
+        val desired = yTop() + clamped * itemPitchPx - screenCenter()
+        scrollYPx = desired.coerceIn(minScroll(), maxScroll())
+        focusAnimator?.cancel()
+        if (focus) {
+            selectedIndex = clamped
+            focusProgress = 1f
+        } else {
+            selectedIndex = null
+            focusProgress = 0f
+        }
+        return true
     }
 
     override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {

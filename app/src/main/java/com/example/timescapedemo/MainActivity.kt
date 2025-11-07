@@ -411,12 +411,14 @@ class MainActivity : AppCompatActivity() {
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
+        if (scrollToTop) {
+            flow.lastViewedCardIndex = 0
+            flow.lastViewedCardId = flow.cards.firstOrNull()?.id
+            flow.lastViewedCardFocused = false
+        }
         if (controller != null) {
             controller.adapter.submitList(flow.cards.toList())
-            if (scrollToTop) {
-                controller.layoutManager.clearFocus()
-                controller.recycler.scrollToPosition(0)
-            }
+            controller.restoreState(flow)
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
             if (index >= 0) flowAdapter.notifyItemChanged(index)
@@ -427,6 +429,18 @@ class MainActivity : AppCompatActivity() {
         flows.forEach { flow ->
             val shouldScroll = scrollToTopCurrent && flow == currentFlow()
             refreshFlow(flow, shouldScroll)
+        }
+    }
+
+    private fun persistControllerState(flowId: Long) {
+        val flow = flows.firstOrNull { it.id == flowId } ?: return
+        flowControllers[flowId]?.captureState(flow)
+    }
+
+    private fun captureVisibleFlowStates() {
+        flowControllers.forEach { (id, controller) ->
+            val flow = flows.firstOrNull { it.id == id } ?: return@forEach
+            controller.captureState(flow)
         }
     }
 
@@ -449,6 +463,9 @@ class MainActivity : AppCompatActivity() {
                 updatedAt = System.currentTimeMillis() - (i * 90L * 60L * 1000L)
             )
         }
+        flow.lastViewedCardIndex = 0
+        flow.lastViewedCardId = flow.cards.firstOrNull()?.id
+        flow.lastViewedCardFocused = false
         return true
     }
 
@@ -736,6 +753,13 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
                     }
+                    val hasLastId = obj.has("lastViewedCardId") && !obj.isNull("lastViewedCardId")
+                    flow.lastViewedCardId = if (hasLastId) {
+                        obj.optLong("lastViewedCardId", -1L).takeIf { it >= 0 }
+                    } else null
+                    val savedIndex = obj.optInt("lastViewedCardIndex", 0)
+                    flow.lastViewedCardIndex = savedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
+                    flow.lastViewedCardFocused = obj.optBoolean("lastViewedCardFocused", false)
                     flows += flow
                 }
             } catch (_: Exception) {
@@ -845,6 +869,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveState() {
+        captureVisibleFlowStates()
         val flowsArray = JSONArray()
         flows.forEach { flow ->
             val flowObj = JSONObject()
@@ -860,6 +885,13 @@ class MainActivity : AppCompatActivity() {
                 cardsArray.put(obj)
             }
             flowObj.put("cards", cardsArray)
+            if (flow.lastViewedCardId != null) {
+                flowObj.put("lastViewedCardId", flow.lastViewedCardId)
+            } else {
+                flowObj.put("lastViewedCardId", JSONObject.NULL)
+            }
+            flowObj.put("lastViewedCardIndex", flow.lastViewedCardIndex)
+            flowObj.put("lastViewedCardFocused", flow.lastViewedCardFocused)
             flowsArray.put(flowObj)
         }
 
@@ -948,7 +980,10 @@ class MainActivity : AppCompatActivity() {
         override fun getItemCount(): Int = flows.size
 
         override fun onViewRecycled(holder: FlowVH) {
-            holder.boundFlowId?.let { flowControllers.remove(it) }
+            holder.boundFlowId?.let {
+                persistControllerState(it)
+                flowControllers.remove(it)
+            }
             super.onViewRecycled(holder)
         }
 
@@ -961,11 +996,15 @@ class MainActivity : AppCompatActivity() {
             var boundFlowId: Long? = null
 
             fun bind(flow: CardFlow) {
-                boundFlowId?.let { flowControllers.remove(it) }
+                boundFlowId?.let {
+                    persistControllerState(it)
+                    flowControllers.remove(it)
+                }
                 boundFlowId = flow.id
-                flowControllers[flow.id] = FlowPageController(flow.id, recycler, layoutManager, adapter)
+                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter)
+                flowControllers[flow.id] = controller
                 adapter.submitList(flow.cards.toList())
-                layoutManager.clearFocus()
+                controller.restoreState(flow)
             }
 
             fun onCardTapped(index: Int) {
@@ -989,12 +1028,46 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private data class FlowPageController(
+    private inner class FlowPageController(
         val flowId: Long,
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
         val adapter: CardsAdapter
-    )
+    ) {
+        fun restoreState(flow: CardFlow) {
+            if (adapter.itemCount == 0) {
+                layoutManager.restoreState(0, false)
+                flow.lastViewedCardIndex = 0
+                flow.lastViewedCardId = null
+                flow.lastViewedCardFocused = false
+                return
+            }
+            val indexById = flow.lastViewedCardId?.let { id ->
+                flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 }
+            }
+            val resolvedIndex = indexById ?: flow.lastViewedCardIndex
+            val clampedIndex = resolvedIndex.coerceIn(0, adapter.itemCount - 1)
+            val cardId = adapter.getItem(clampedIndex)?.id
+            flow.lastViewedCardIndex = clampedIndex
+            flow.lastViewedCardId = cardId
+            val shouldFocus = flow.lastViewedCardFocused && indexById != null
+            layoutManager.restoreState(clampedIndex, shouldFocus)
+            flow.lastViewedCardFocused = shouldFocus
+        }
+
+        fun captureState(flow: CardFlow) {
+            if (adapter.itemCount == 0) {
+                flow.lastViewedCardIndex = 0
+                flow.lastViewedCardId = null
+                flow.lastViewedCardFocused = false
+                return
+            }
+            val nearest = layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            flow.lastViewedCardIndex = nearest
+            flow.lastViewedCardId = adapter.getItem(nearest)?.id
+            flow.lastViewedCardFocused = layoutManager.isFocused(nearest)
+        }
+    }
 
     companion object {
         private const val PREFS_NAME = "timescape_state"
