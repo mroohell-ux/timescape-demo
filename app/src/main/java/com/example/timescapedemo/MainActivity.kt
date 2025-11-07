@@ -243,9 +243,9 @@ class MainActivity : AppCompatActivity() {
             toolbar.updatePadding(top = toolbarBasePaddingTop + systemBars.top)
             flowPager.setPaddingRelative(
                 pagerBasePaddingStart,
-                pagerBasePaddingTop + systemBars.top,
+                pagerBasePaddingTop,
                 pagerBasePaddingEnd,
-                pagerBasePaddingBottom + systemBars.bottom
+                pagerBasePaddingBottom
             )
             flowBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
                 bottomMargin = flowBarBaseMarginBottom + systemBars.bottom
