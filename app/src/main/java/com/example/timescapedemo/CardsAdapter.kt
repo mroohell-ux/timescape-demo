@@ -125,7 +125,6 @@ class CardsAdapter(
         holder.backgroundImage.setImageDrawable(null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             holder.backgroundImage.setRenderEffect(null)
-            holder.card.setBackgroundBlurRadius(0)
         }
     }
 
@@ -188,7 +187,6 @@ class CardsAdapter(
                 blurEffect = it
             }
             holder.backgroundImage.setRenderEffect(effect)
-            holder.card.setBackgroundBlurRadius(BACKGROUND_BLUR_RADIUS)
         }
     }
 
@@ -196,7 +194,6 @@ class CardsAdapter(
         holder.backgroundImage.setImageDrawable(null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             holder.backgroundImage.setRenderEffect(null)
-            holder.card.setBackgroundBlurRadius(0)
         }
     }
 
@@ -245,7 +242,6 @@ class CardsAdapter(
 
     private companion object {
         private const val BLUR_RADIUS = 28f
-        private const val BACKGROUND_BLUR_RADIUS = 50
         private val HEADLINE_COLOR = ColorUtils.setAlphaComponent(Color.BLACK, (0.87f * 255).toInt())
         private val BODY_COLOR = ColorUtils.setAlphaComponent(Color.BLACK, (0.75f * 255).toInt())
         private val META_COLOR = ColorUtils.setAlphaComponent(Color.BLACK, (0.6f * 255).toInt())
