@@ -147,9 +147,15 @@ class RightRailFlowLayoutManager(
         layoutAll(recycler)
     }
 
-    private fun measureCardWithWidthAndCap(child: View, widthPx: Int, maxHeightPx: Int, cache: ChildCache) {
+    private fun measureCardWithWidthAndCap(
+        child: View,
+        widthPx: Int,
+        maxHeightPx: Int,
+        cache: ChildCache,
+        forceMeasure: Boolean
+    ) {
         val lp = child.layoutParams as RecyclerView.LayoutParams
-        var needsMeasure = child.isLayoutRequested
+        var needsMeasure = forceMeasure || child.isLayoutRequested
         if (lp.width != widthPx || lp.height != RecyclerView.LayoutParams.WRAP_CONTENT) {
             lp.width = widthPx
             lp.height = RecyclerView.LayoutParams.WRAP_CONTENT
@@ -169,7 +175,8 @@ class RightRailFlowLayoutManager(
         }
     }
 
-    private fun applyTextByGain(cache: ChildCache, gain: Float, focused: Boolean) {
+    private fun applyTextByGain(cache: ChildCache, gain: Float, focused: Boolean): Boolean {
+        var textChanged = false
         val title = cache.title
         val snippet = cache.snippet
 
@@ -180,6 +187,7 @@ class RightRailFlowLayoutManager(
                     title.setTextSize(TypedValue.COMPLEX_UNIT_SP, focusSize)
                     cache.lastTitleSp = focusSize
                     cache.lastTitleFocused = true
+                    textChanged = true
                 }
             } else {
                 val desiredSize = 21f + 5f * gain
@@ -192,6 +200,7 @@ class RightRailFlowLayoutManager(
                     title.setTextSize(TypedValue.COMPLEX_UNIT_SP, bucketed)
                     cache.lastTitleSp = bucketed
                     cache.lastTitleFocused = false
+                    textChanged = true
                 }
             }
         }
@@ -199,7 +208,10 @@ class RightRailFlowLayoutManager(
         if (snippet != null && cache.lastSnippetMaxLines != Integer.MAX_VALUE) {
             snippet.maxLines = Integer.MAX_VALUE
             cache.lastSnippetMaxLines = Integer.MAX_VALUE
+            textChanged = true
         }
+
+        return textChanged
     }
 
     private fun ensureCache(child: View): ChildCache {
@@ -274,10 +286,10 @@ class RightRailFlowLayoutManager(
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
 
             // Text size influences measurement, so adjust before measuring
-            applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
+            val textChanged = applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
 
             // Measure: fixed width, wrap-content height, capped to 2/3 screen
-            measureCardWithWidthAndCap(child, side, heightCap, cache)
+            measureCardWithWidthAndCap(child, side, heightCap, cache, textChanged)
 
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
