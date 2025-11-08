@@ -174,10 +174,25 @@ class RightRailFlowLayoutManager(
         val snippet = cache.snippet
 
         if (title != null) {
-            val desiredSize = if (focused) 27f else 21f + 5f * gain
-            if (!cache.lastTitleSp.isFinite() || abs(cache.lastTitleSp - desiredSize) > 0.05f) {
-                title.setTextSize(TypedValue.COMPLEX_UNIT_SP, desiredSize)
-                cache.lastTitleSp = desiredSize
+            if (focused) {
+                val focusSize = 27f
+                if (!cache.lastTitleFocused || abs(cache.lastTitleSp - focusSize) > 0.01f) {
+                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, focusSize)
+                    cache.lastTitleSp = focusSize
+                    cache.lastTitleFocused = true
+                }
+            } else {
+                val desiredSize = 21f + 5f * gain
+                val bucketed = (desiredSize * 4f).roundToInt() / 4f
+                if (
+                    cache.lastTitleFocused ||
+                    !cache.lastTitleSp.isFinite() ||
+                    abs(cache.lastTitleSp - bucketed) >= 0.25f
+                ) {
+                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, bucketed)
+                    cache.lastTitleSp = bucketed
+                    cache.lastTitleFocused = false
+                }
             }
         }
 
@@ -206,7 +221,8 @@ class RightRailFlowLayoutManager(
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
         var lastTitleSp: Float = Float.NaN,
-        var lastSnippetMaxLines: Int = -1
+        var lastSnippetMaxLines: Int = -1,
+        var lastTitleFocused: Boolean = false
     )
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
