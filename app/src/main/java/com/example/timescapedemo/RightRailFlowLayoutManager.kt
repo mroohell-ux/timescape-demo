@@ -273,10 +273,11 @@ class RightRailFlowLayoutManager(
             var side = (edgeSide + (baseSidePx - edgeSide) * interp.getInterpolation(gain)).roundToInt()
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
 
+            // Text size influences measurement, so adjust before measuring
+            applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
+
             // Measure: fixed width, wrap-content height, capped to 2/3 screen
             measureCardWithWidthAndCap(child, side, heightCap, cache)
-
-            applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
 
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
