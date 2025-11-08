@@ -13,6 +13,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -58,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flowPager: ViewPager2
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
+    private lateinit var flowChipScroll: HorizontalScrollView
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -144,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         flowPager = findViewById(R.id.flowPager)
         flowBar = findViewById(R.id.flowBar)
         flowChipGroup = findViewById(R.id.flowChips)
+        flowChipScroll = findViewById(R.id.flowChipScroll)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window.statusBarColor = Color.TRANSPARENT
@@ -313,6 +316,7 @@ class MainActivity : AppCompatActivity() {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
             chip.isChecked = i == position
         }
+        centerSelectedChip(position)
     }
 
     private fun renderFlowChips() {
@@ -331,6 +335,25 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { flowPager.setCurrentItem(index, true) }
             }
             flowChipGroup.addView(chip)
+        }
+        centerSelectedChip(flowPager.currentItem)
+    }
+
+    private fun centerSelectedChip(position: Int) {
+        if (position !in 0 until flowChipGroup.childCount) return
+        val chip = flowChipGroup.getChildAt(position) ?: return
+        flowChipScroll.post {
+            if (chip.parent == null) return@post
+            val scrollWidth = flowChipScroll.width
+            val chipWidth = chip.width
+            if (scrollWidth == 0 || chipWidth == 0) {
+                flowChipScroll.post { centerSelectedChip(position) }
+                return@post
+            }
+            val chipCenter = chip.left + chipWidth / 2
+            val target = chipCenter - scrollWidth / 2
+            val maxScroll = max(0, flowChipGroup.width - scrollWidth)
+            flowChipScroll.smoothScrollTo(target.coerceIn(0, maxScroll), 0)
         }
     }
 

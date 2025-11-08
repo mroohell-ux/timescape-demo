@@ -63,6 +63,7 @@
                 android:orientation="horizontal">
 
                 <HorizontalScrollView
+                    android:id="@+id/flowChipScroll"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:overScrollMode="never"
