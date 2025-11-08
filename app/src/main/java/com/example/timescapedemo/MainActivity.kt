@@ -95,6 +95,7 @@ class MainActivity : AppCompatActivity() {
     private val pickImages =
         registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
             if (!uris.isNullOrEmpty()) {
+                uris.forEach(::persistReadPermission)
                 selectedImages.addAll(uris.map { BgImage.UriRef(it) })
                 selectedImages.shuffle()
                 imagesAdapter.submit(selectedImages)
@@ -107,13 +108,7 @@ class MainActivity : AppCompatActivity() {
     private val openDocs =
         registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (!uris.isNullOrEmpty()) {
-                for (u in uris) {
-                    try {
-                        contentResolver.takePersistableUriPermission(
-                            u, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        )
-                    } catch (_: SecurityException) { }
-                }
+                uris.forEach(::persistReadPermission)
                 selectedImages.addAll(uris.map { BgImage.UriRef(it) })
                 selectedImages.shuffle()
                 imagesAdapter.submit(selectedImages)
@@ -556,11 +551,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleAppBackgroundUri(uri: Uri) {
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: SecurityException) { }
+        persistReadPermission(uri)
         setAppBackground(BgImage.UriRef(uri))
         drawerLayout.closeDrawer(GravityCompat.START)
+    }
+
+    private fun persistReadPermission(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // Provider did not grant persistable permissions (e.g. Photo Picker on API 34+).
+        } catch (_: IllegalArgumentException) {
+            // Uri cannot persist permissions; ignore since the grant isn't required in that case.
+        }
     }
 
     private fun setAppBackground(image: BgImage?, announce: Boolean = true, persist: Boolean = true) {
