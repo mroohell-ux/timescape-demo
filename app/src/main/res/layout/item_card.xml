@@ -61,7 +61,7 @@
                 android:layout_height="wrap_content"
                 android:text="12h ago"
                 android:textColor="#FFFFFFFF"
-                android:textSize="17sp"
+                android:textSize="15sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.02"/>
 
@@ -77,8 +77,8 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 app:autoSizeTextType="uniform"
-                app:autoSizeMinTextSize="26sp"
-                app:autoSizeMaxTextSize="36sp"
+                app:autoSizeMinTextSize="24sp"
+                app:autoSizeMaxTextSize="34sp"
                 app:autoSizeStepGranularity="1sp"/>
 
             <TextView
@@ -88,7 +88,7 @@
                 android:layout_marginTop="6dp"
                 android:text="Snippet"
                 android:textColor="#FFFFFFFF"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:lineSpacingExtra="4dp"
                 android:ellipsize="end"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
