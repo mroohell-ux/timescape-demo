@@ -76,8 +76,6 @@ class MainActivity : AppCompatActivity() {
     private val flows: MutableList<CardFlow> = mutableListOf()
     private val flowControllers: MutableMap<Long, FlowPageController> = mutableMapOf()
 
-    private val cardTint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
-
     private var appBackground: BgImage? = null
 
     private var nextCardId: Long = 0
@@ -1027,7 +1025,7 @@ class MainActivity : AppCompatActivity() {
 
             lateinit var holder: FlowVH
             val adapter = CardsAdapter(
-                cardTint,
+                blurRootProvider = { rootLayout },
                 onItemClick = { index -> holder.onCardTapped(index) },
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
             )

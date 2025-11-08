@@ -9,21 +9,33 @@
     app:cardUseCompatPadding="false"
     app:cardCornerRadius="20dp"
     app:cardElevation="8dp"
-    app:cardBackgroundColor="@android:color/transparent"
-    app:strokeWidth="0dp">
+    app:cardBackgroundColor="#80FFFFFF"
+    app:strokeWidth="1dp"
+    app:strokeColor="#40FFFFFF">
 
     <!-- ConstraintLayout so bg layer doesn't affect measured height -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Pure background image. We blur/adjust it in the adapter. No glass/tint here. -->
-        <ImageView
-            android:id="@+id/bgImage"
+        <!-- Dynamic blur layer to sample what's behind the card. -->
+        <eightbitlab.com.blurview.BlurView
+            android:id="@+id/blurLayer"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:scaleType="centerCrop"
             android:contentDescription="@null"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Subtle highlight to mimic glass catching the light. -->
+        <View
+            android:id="@+id/glassHighlight"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:alpha="0.4"
+            android:background="@drawable/glass_highlight"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
