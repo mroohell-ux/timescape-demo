@@ -147,32 +147,83 @@ class RightRailFlowLayoutManager(
         layoutAll(recycler)
     }
 
-    private fun measureCardWithWidthAndCap(child: View, widthPx: Int, maxHeightPx: Int) {
-        // Width = exact, height = wrap_content; child caps itself via MaxHeightLinearLayout
-        val lp = child.layoutParams
+    private fun measureCardWithWidthAndCap(child: View, widthPx: Int, maxHeightPx: Int, cache: ChildCache) {
+        val lp = child.layoutParams as RecyclerView.LayoutParams
+        var needsMeasure = child.isLayoutRequested
         if (lp.width != widthPx || lp.height != RecyclerView.LayoutParams.WRAP_CONTENT) {
             lp.width = widthPx
             lp.height = RecyclerView.LayoutParams.WRAP_CONTENT
             child.layoutParams = lp
+            needsMeasure = true
         }
-        child.findViewById<MaxHeightLinearLayout>(R.id.card_content)?.setMaxHeightPx(maxHeightPx)
-        measureChildWithMargins(child, 0, 0)
+
+        if (cache.lastMaxHeight != maxHeightPx) {
+            cache.container?.setMaxHeightPx(maxHeightPx)
+            cache.lastMaxHeight = maxHeightPx
+            needsMeasure = true
+        }
+
+        if (needsMeasure || cache.lastMeasuredWidth != widthPx) {
+            measureChildWithMargins(child, 0, 0)
+            cache.lastMeasuredWidth = widthPx
+        }
     }
 
-    private fun applyTextByGain(child: View, gain: Float, focused: Boolean) {
-        val title = child.findViewById<TextView>(R.id.title)
-        val snippet = child.findViewById<TextView>(R.id.snippet)
+    private fun applyTextByGain(cache: ChildCache, gain: Float, focused: Boolean) {
+        val title = cache.title
+        val snippet = cache.snippet
 
-        // Text grows a bit near center; we no longer clamp max lines (height is capped globally)
-        if (focused) {
-            title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
-        } else {
-            val titleSp = 21f + 5f * gain
-            title?.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp)
+        if (title != null) {
+            if (focused) {
+                val focusSize = 27f
+                if (!cache.lastTitleFocused || abs(cache.lastTitleSp - focusSize) > 0.01f) {
+                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, focusSize)
+                    cache.lastTitleSp = focusSize
+                    cache.lastTitleFocused = true
+                }
+            } else {
+                val desiredSize = 21f + 5f * gain
+                val bucketed = (desiredSize * 4f).roundToInt() / 4f
+                if (
+                    cache.lastTitleFocused ||
+                    !cache.lastTitleSp.isFinite() ||
+                    abs(cache.lastTitleSp - bucketed) >= 0.25f
+                ) {
+                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, bucketed)
+                    cache.lastTitleSp = bucketed
+                    cache.lastTitleFocused = false
+                }
+            }
         }
-        // Leave snippet lines unconstrained; overall height is capped by MaxHeightLinearLayout.
-        snippet?.maxLines = Integer.MAX_VALUE
+
+        if (snippet != null && cache.lastSnippetMaxLines != Integer.MAX_VALUE) {
+            snippet.maxLines = Integer.MAX_VALUE
+            cache.lastSnippetMaxLines = Integer.MAX_VALUE
+        }
     }
+
+    private fun ensureCache(child: View): ChildCache {
+        val existing = child.getTag(R.id.tag_card_cache) as? ChildCache
+        if (existing != null) return existing
+        val cache = ChildCache(
+            container = child.findViewById(R.id.card_content),
+            title = child.findViewById(R.id.title),
+            snippet = child.findViewById(R.id.snippet)
+        )
+        child.setTag(R.id.tag_card_cache, cache)
+        return cache
+    }
+
+    private data class ChildCache(
+        val container: MaxHeightLinearLayout?,
+        val title: TextView?,
+        val snippet: TextView?,
+        var lastMaxHeight: Int = -1,
+        var lastMeasuredWidth: Int = -1,
+        var lastTitleSp: Float = Float.NaN,
+        var lastSnippetMaxLines: Int = -1,
+        var lastTitleFocused: Boolean = false
+    )
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
         val cy = screenCenter()
@@ -200,6 +251,7 @@ class RightRailFlowLayoutManager(
         for (i in firstIdx..lastIdx) {
             val child = recycler.getViewForPosition(i)
             addView(child)
+            val cache = ensureCache(child)
 
             // Y position of item center for index i
             val py = yT + i * itemPitchPx - scrollYPx
@@ -222,9 +274,9 @@ class RightRailFlowLayoutManager(
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
 
             // Measure: fixed width, wrap-content height, capped to 2/3 screen
-            measureCardWithWidthAndCap(child, side, heightCap)
+            measureCardWithWidthAndCap(child, side, heightCap, cache)
 
-            applyTextByGain(child, gain, isSelected && focusProgress > 0.5f)
+            applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
 
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
