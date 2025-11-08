@@ -50,6 +50,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
@@ -487,8 +488,15 @@ class MainActivity : AppCompatActivity() {
         flow.cards.sortByDescending { it.updatedAt }
         val fallback: BgImage = BgImage.Res(R.drawable.bg_placeholder)
         val backgrounds = if (selectedImages.isNotEmpty()) selectedImages else listOf(fallback)
-        flow.cards.forEachIndexed { index, card ->
-            card.bg = backgrounds[index % backgrounds.size]
+        flow.cards.forEach { card ->
+            val chosenBg = if (selectedImages.isEmpty()) {
+                fallback
+            } else {
+                val seed = card.id * 31L + flow.id
+                val random = Random(seed)
+                backgrounds[random.nextInt(backgrounds.size)]
+            }
+            card.bg = chosenBg
         }
     }
 
