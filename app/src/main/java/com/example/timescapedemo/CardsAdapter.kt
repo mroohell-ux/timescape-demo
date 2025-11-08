@@ -138,7 +138,7 @@ class CardsAdapter(
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            baseEffect = RenderEffect.createBlurEffect(26f, 26f, Shader.TileMode.CLAMP)
+            baseEffect = RenderEffect.createBlurEffect(18f, 18f, Shader.TileMode.CLAMP)
         }
 
         // Apply NON-GLASS tint directly to image
