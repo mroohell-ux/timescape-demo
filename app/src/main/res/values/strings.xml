@@ -20,6 +20,10 @@
     <string name="dialog_create">Create</string>
     <string name="default_flow_name">Flow %1$d</string>
     <string name="snackbar_added_flow">Added flow "%1$s"</string>
+    <string name="snackbar_deleted_flow">Deleted flow "%1$s"</string>
+    <string name="snackbar_cannot_delete_last_flow">Keep at least one flow active.</string>
+    <string name="dialog_delete_flow_title">Delete "%1$s"?</string>
+    <string name="dialog_delete_flow_message">This will remove the flow and its cards.</string>
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
     <string name="snackbar_removed_image">Removed 1 image</string>

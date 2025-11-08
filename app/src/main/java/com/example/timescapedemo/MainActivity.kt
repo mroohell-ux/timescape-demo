@@ -84,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private var selectedFlowIndex: Int = 0
 
     private var toolbarBasePaddingTop: Int = 0
+    private var toolbarBasePaddingBottom: Int = 0
+    private var toolbarBaseHeight: Int = 0
     private var pagerBasePaddingStart: Int = 0
     private var pagerBasePaddingTop: Int = 0
     private var pagerBasePaddingEnd: Int = 0
@@ -168,6 +170,10 @@ class MainActivity : AppCompatActivity() {
         appBackgroundPreview = header.findViewById(R.id.imageAppBackgroundPreview)
 
         toolbarBasePaddingTop = toolbar.paddingTop
+        toolbarBasePaddingBottom = toolbar.paddingBottom
+        toolbarBaseHeight = toolbar.layoutParams.height.takeIf { it > 0 }
+            ?: toolbar.minimumHeight.takeIf { it > 0 }
+            ?: (56 * resources.displayMetrics.density).roundToInt()
         pagerBasePaddingStart = flowPager.paddingStart
         pagerBasePaddingTop = flowPager.paddingTop
         pagerBasePaddingEnd = flowPager.paddingEnd
@@ -232,13 +238,19 @@ class MainActivity : AppCompatActivity() {
             flowPager.setCurrentItem(initialIndex, false)
         }
         selectedFlowIndex = initialIndex
-        renderFlowChips()
+        renderFlowChips(initialIndex)
         updateChipSelection(initialIndex)
         updateToolbarSubtitle()
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            toolbar.updatePadding(top = toolbarBasePaddingTop + systemBars.top)
+            toolbar.updateLayoutParams<ViewGroup.LayoutParams> {
+                height = toolbarBaseHeight + systemBars.top
+            }
+            toolbar.updatePadding(
+                top = toolbarBasePaddingTop + systemBars.top,
+                bottom = toolbarBasePaddingBottom
+            )
             flowPager.setPaddingRelative(
                 pagerBasePaddingStart,
                 pagerBasePaddingTop,
@@ -319,7 +331,8 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(position)
     }
 
-    private fun renderFlowChips() {
+    private fun renderFlowChips(selectedIndex: Int = selectedFlowIndex) {
+        val safeIndex = selectedIndex.coerceIn(0, max(0, flows.lastIndex))
         flowChipGroup.removeAllViews()
         val density = resources.displayMetrics.density
         flows.forEachIndexed { index, flow ->
@@ -331,12 +344,16 @@ class MainActivity : AppCompatActivity() {
                 minHeight = (36 * density).roundToInt()
                 textSize = 14f
                 setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
-                isChecked = index == flowPager.currentItem
+                isChecked = index == safeIndex
                 setOnClickListener { flowPager.setCurrentItem(index, true) }
+                setOnLongClickListener {
+                    showDeleteFlowDialog(index)
+                    true
+                }
             }
             flowChipGroup.addView(chip)
         }
-        centerSelectedChip(flowPager.currentItem)
+        centerSelectedChip(safeIndex)
     }
 
     private fun centerSelectedChip(position: Int) {
@@ -388,13 +405,58 @@ class MainActivity : AppCompatActivity() {
         val flow = CardFlow(id = nextFlowId++, name = name)
         flows += flow
         flowAdapter.notifyItemInserted(flows.lastIndex)
-        renderFlowChips()
-        flowPager.post {
-            flowPager.setCurrentItem(flows.lastIndex, true)
-            updateToolbarSubtitle()
-        }
+        selectedFlowIndex = flows.lastIndex
+        renderFlowChips(selectedFlowIndex)
+        flowPager.setCurrentItem(flows.lastIndex, true)
+        updateToolbarSubtitle()
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
+    }
+
+    private fun showDeleteFlowDialog(index: Int) {
+        if (flows.size <= 1) {
+            snackbar(getString(R.string.snackbar_cannot_delete_last_flow))
+            return
+        }
+        val flow = flows.getOrNull(index) ?: return
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_delete_flow_title, flow.name))
+            .setMessage(getString(R.string.dialog_delete_flow_message, flow.name))
+            .setPositiveButton(R.string.dialog_delete) { _, _ -> removeFlow(index) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun removeFlow(index: Int) {
+        if (index !in flows.indices) return
+        if (flows.size <= 1) {
+            snackbar(getString(R.string.snackbar_cannot_delete_last_flow))
+            return
+        }
+        val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
+        val removed = flows.removeAt(index)
+        flowControllers.remove(removed.id)
+        flowAdapter.notifyItemRemoved(index)
+        val remainingLastIndex = flows.lastIndex
+        if (remainingLastIndex < 0) {
+            selectedFlowIndex = 0
+            renderFlowChips(0)
+            updateToolbarSubtitle()
+            saveState()
+            return
+        }
+        val target = when {
+            currentItem > remainingLastIndex -> remainingLastIndex
+            index <= currentItem && currentItem > 0 -> currentItem - 1
+            else -> currentItem.coerceIn(0, remainingLastIndex)
+        }
+        val safeTarget = target.coerceIn(0, remainingLastIndex)
+        selectedFlowIndex = safeTarget
+        renderFlowChips(safeTarget)
+        flowPager.setCurrentItem(safeTarget, false)
+        updateToolbarSubtitle()
+        saveState()
+        snackbar(getString(R.string.snackbar_deleted_flow, removed.name))
     }
 
     private fun currentFlow(): CardFlow? = flows.getOrNull(flowPager.currentItem)
