@@ -151,10 +151,10 @@ class CardsAdapter(
         val right = left + holder.card.width
         val bottom = top + holder.card.height
 
-        val clampedLeft = left.coerceIn(0, background.width)
-        val clampedTop = top.coerceIn(0, background.height)
-        val clampedRight = right.coerceIn(clampedLeft + 1, background.width)
-        val clampedBottom = bottom.coerceIn(clampedTop + 1, background.height)
+        val clampedLeft = left.coerceAtLeast(0)
+        val clampedTop = top.coerceAtLeast(0)
+        val clampedRight = right.coerceAtMost(background.width)
+        val clampedBottom = bottom.coerceAtMost(background.height)
 
         if (clampedLeft >= clampedRight || clampedTop >= clampedBottom) {
             clearBackground(holder)
