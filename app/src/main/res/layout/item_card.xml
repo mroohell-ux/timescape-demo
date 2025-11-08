@@ -18,11 +18,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
-        <!-- Dynamic blur layer to sample what's behind the card. -->
-        <eightbitlab.com.blurview.BlurView
-            android:id="@+id/blurLayer"
+        <!-- Background sample from the app wallpaper. -->
+        <ImageView
+            android:id="@+id/bgImage"
             android:layout_width="0dp"
             android:layout_height="0dp"
+            android:scaleType="centerCrop"
             android:contentDescription="@null"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
