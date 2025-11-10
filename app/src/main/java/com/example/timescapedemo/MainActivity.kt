@@ -15,6 +15,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
+import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
@@ -42,6 +43,7 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.slider.Slider
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileNotFoundException
@@ -68,6 +70,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerPickAppBackgroundButton: MaterialButton
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
+    private lateinit var cardFontSizeSlider: Slider
+    private lateinit var cardFontSizeValue: TextView
 
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private lateinit var flowAdapter: FlowPagerAdapter
@@ -83,6 +87,7 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+    private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
 
     private var toolbarBasePaddingTop: Int = 0
     private var toolbarBasePaddingBottom: Int = 0
@@ -140,6 +145,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
         setContentView(R.layout.activity_main)
 
         drawerLayout = findViewById(R.id.drawerLayout)
@@ -169,6 +175,16 @@ class MainActivity : AppCompatActivity() {
         drawerPickAppBackgroundButton = header.findViewById(R.id.buttonDrawerPickAppBackground)
         drawerResetAppBackgroundButton = header.findViewById(R.id.buttonDrawerResetAppBackground)
         appBackgroundPreview = header.findViewById(R.id.imageAppBackgroundPreview)
+        cardFontSizeSlider = header.findViewById(R.id.sliderCardFontSize)
+        cardFontSizeValue = header.findViewById(R.id.textCardFontSizeValue)
+        val sliderMin = cardFontSizeSlider.valueFrom
+        val sliderMax = cardFontSizeSlider.valueTo
+        val initialSliderValue = cardFontSizeSp.coerceIn(sliderMin, sliderMax)
+        cardFontSizeSlider.value = initialSliderValue
+        updateCardFontSize(initialSliderValue, fromUser = false)
+        cardFontSizeSlider.addOnChangeListener { _, value, fromUser ->
+            updateCardFontSize(value, fromUser)
+        }
 
         toolbarBasePaddingTop = toolbar.paddingTop
         toolbarBasePaddingBottom = toolbar.paddingBottom
@@ -230,6 +246,7 @@ class MainActivity : AppCompatActivity() {
 
         imagesAdapter.submit(selectedImages)
         refreshAllFlows()
+        applyCardFontSizeToAdapters()
 
         applyAppBackground()
 
@@ -549,7 +566,7 @@ class MainActivity : AppCompatActivity() {
         repeat(30) { i ->
             flow.cards += CardItem(
                 id = nextCardId++,
-                title = "Contact $i",
+                title = "",
                 snippet = variants[i % variants.size],
                 bg = BgImage.Res(R.drawable.bg_placeholder),
                 updatedAt = System.currentTimeMillis() - (i * 90L * 60L * 1000L)
@@ -567,12 +584,11 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_add_flow_first))
             return
         }
-        showCardEditor(initialTitle = "", initialSnippet = "", onSave = { title, snippet ->
-            val finalTitle = title.trim().ifBlank { "New Contact" }
+        showCardEditor(initialSnippet = "", isNew = true, onSave = { snippet ->
             val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
             val card = CardItem(
                 id = nextCardId++,
-                title = finalTitle,
+                title = "",
                 snippet = finalSnippet,
                 updatedAt = System.currentTimeMillis()
             )
@@ -585,10 +601,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun editCard(flow: CardFlow, index: Int) {
         val card = flow.cards.getOrNull(index) ?: return
-        showCardEditor(card.title, card.snippet, onSave = { newTitle, newSnippet ->
-            val titleValue = newTitle.trim()
+        showCardEditor(initialSnippet = card.snippet, isNew = false, onSave = { newSnippet ->
             val snippetValue = newSnippet.trim()
-            if (titleValue.isNotEmpty()) card.title = titleValue
             if (snippetValue.isNotEmpty()) card.snippet = snippetValue
             card.updatedAt = System.currentTimeMillis()
             refreshFlow(flow, scrollToTop = true)
@@ -603,22 +617,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCardEditor(
-        initialTitle: String,
         initialSnippet: String,
-        onSave: (title: String, snippet: String) -> Unit,
+        isNew: Boolean,
+        onSave: (snippet: String) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_card, null, false)
-        val titleInput = dialogView.findViewById<EditText>(R.id.inputTitle)
         val snippetInput = dialogView.findViewById<EditText>(R.id.inputSnippet)
-        titleInput.setText(initialTitle)
         snippetInput.setText(initialSnippet)
 
         val builder = AlertDialog.Builder(this)
-            .setTitle(if (initialTitle.isEmpty()) getString(R.string.dialog_add_card_title) else getString(R.string.dialog_edit_card_title))
+            .setTitle(if (isNew) getString(R.string.dialog_add_card_title) else getString(R.string.dialog_edit_card_title))
             .setView(dialogView)
             .setPositiveButton(R.string.dialog_save) { _, _ ->
-                onSave(titleInput.text.toString(), snippetInput.text.toString())
+                onSave(snippetInput.text.toString())
             }
             .setNegativeButton(android.R.string.cancel, null)
         if (onDelete != null) {
@@ -779,6 +791,32 @@ class MainActivity : AppCompatActivity() {
         val snack = Snackbar.make(findViewById(R.id.content), msg, Snackbar.LENGTH_SHORT)
         if (flowBar.isVisible) snack.anchorView = flowBar
         snack.show()
+    }
+
+    private fun updateCardFontSize(value: Float, fromUser: Boolean) {
+        val clamped = value.coerceIn(cardFontSizeSlider.valueFrom, cardFontSizeSlider.valueTo)
+        val changed = abs(cardFontSizeSp - clamped) >= 0.01f
+        cardFontSizeSp = clamped
+        updateCardFontSizeLabel()
+        if (changed) {
+            applyCardFontSizeToAdapters()
+            prefs.edit().putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp).apply()
+        }
+        if (!fromUser && cardFontSizeSlider.value != clamped) {
+            cardFontSizeSlider.value = clamped
+        }
+    }
+
+    private fun updateCardFontSizeLabel() {
+        if (::cardFontSizeValue.isInitialized) {
+            cardFontSizeValue.text = getString(R.string.drawer_card_font_size_value, cardFontSizeSp)
+        }
+    }
+
+    private fun applyCardFontSizeToAdapters() {
+        flowControllers.forEach { (_, controller) ->
+            controller.adapter.setBodyTextSize(cardFontSizeSp)
+        }
     }
 
     private fun loadState() {
@@ -1003,6 +1041,7 @@ class MainActivity : AppCompatActivity() {
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
             val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
+            putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             remove(KEY_CARDS)
             apply()
         }
@@ -1031,6 +1070,7 @@ class MainActivity : AppCompatActivity() {
                 onItemClick = { index -> holder.onCardTapped(index) },
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
             )
+            adapter.setBodyTextSize(cardFontSizeSp)
             recycler.adapter = adapter
             holder = FlowVH(view, recycler, layoutManager, adapter)
             return holder
@@ -1067,6 +1107,7 @@ class MainActivity : AppCompatActivity() {
                 boundFlowId = flow.id
                 val controller = FlowPageController(flow.id, recycler, layoutManager, adapter)
                 flowControllers[flow.id] = controller
+                adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.submitList(flow.cards.toList())
                 controller.restoreState(flow)
             }
@@ -1142,5 +1183,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_APP_BACKGROUND = "app_background"
         private const val KEY_NEXT_CARD_ID = "next_card_id"
         private const val KEY_NEXT_FLOW_ID = "next_flow_id"
+        private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
+        private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
     }
 }
