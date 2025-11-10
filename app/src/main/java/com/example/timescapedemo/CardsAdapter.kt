@@ -216,14 +216,6 @@ class CardsAdapter(
         notifyDataSetChanged()
     }
 
-    companion object {
-        private const val DEFAULT_BODY_TEXT_SIZE_SP = 18f
-        private const val MIN_BODY_TEXT_SIZE_SP = 12f
-        private const val MAX_BODY_TEXT_SIZE_SP = 32f
-        private const val TIME_SIZE_DELTA = 3f
-        private const val MIN_TIME_TEXT_SIZE_SP = 10f
-    }
-
     // --- Color matrices ---
     private fun colorizeMatrix(@ColorInt color: Int, amount: Float): ColorMatrix {
         val t = amount.coerceIn(0f, 1f)
@@ -273,6 +265,11 @@ class CardsAdapter(
     }
     @Suppress("ConstPropertyName")
     private companion object {
+        private const val DEFAULT_BODY_TEXT_SIZE_SP = 18f
+        private const val MIN_BODY_TEXT_SIZE_SP = 12f
+        private const val MAX_BODY_TEXT_SIZE_SP = 32f
+        private const val TIME_SIZE_DELTA = 3f
+        private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private const val TAG = "CardsAdapter"
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
 
