@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
@@ -14,6 +15,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ScrollView
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
@@ -62,7 +64,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flowPager: ViewPager2
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
-    private lateinit var flowChipScroll: HorizontalScrollView
+    private lateinit var flowChipScroll: View
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -304,11 +306,14 @@ class MainActivity : AppCompatActivity() {
         flowPager.offscreenPageLimit = 1
         flowPager.clipToPadding = false
         flowPager.clipChildren = false
+        flowPager.orientation =
+            if (isLandscape) ViewPager2.ORIENTATION_VERTICAL else ViewPager2.ORIENTATION_HORIZONTAL
         (flowPager.getChildAt(0) as? RecyclerView)?.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
         val transformer = CompositePageTransformer().apply {
             addTransformer(MarginPageTransformer((24 * density).roundToInt()))
             addTransformer { page, position ->
                 val scale = 0.9f + (1 - abs(position)) * 0.1f
+                page.scaleX = scale
                 page.scaleY = scale
                 page.alpha = 0.6f + (1 - abs(position)) * 0.4f
             }
@@ -379,16 +384,23 @@ class MainActivity : AppCompatActivity() {
         val chip = flowChipGroup.getChildAt(position) ?: return
         flowChipScroll.post {
             if (chip.parent == null) return@post
-            val scrollWidth = flowChipScroll.width
-            val chipWidth = chip.width
-            if (scrollWidth == 0 || chipWidth == 0) {
+            val scrollExtent = if (isLandscape) flowChipScroll.height else flowChipScroll.width
+            val chipExtent = if (isLandscape) chip.height else chip.width
+            if (scrollExtent == 0 || chipExtent == 0) {
                 flowChipScroll.post { centerSelectedChip(position) }
                 return@post
             }
-            val chipCenter = chip.left + chipWidth / 2
-            val target = chipCenter - scrollWidth / 2
-            val maxScroll = max(0, flowChipGroup.width - scrollWidth)
-            flowChipScroll.smoothScrollTo(target.coerceIn(0, maxScroll), 0)
+            val chipCenter = if (isLandscape) chip.top + chipExtent / 2 else chip.left + chipExtent / 2
+            val target = chipCenter - scrollExtent / 2
+            val maxScroll = if (isLandscape) {
+                max(0, flowChipGroup.height - scrollExtent)
+            } else {
+                max(0, flowChipGroup.width - scrollExtent)
+            }
+            when (flowChipScroll) {
+                is HorizontalScrollView -> flowChipScroll.smoothScrollTo(target.coerceIn(0, maxScroll), 0)
+                is ScrollView -> flowChipScroll.smoothScrollTo(0, target.coerceIn(0, maxScroll))
+            }
         }
     }
 
@@ -484,21 +496,40 @@ class MainActivity : AppCompatActivity() {
         return flowControllers[flow.id]
     }
 
-    private fun createLayoutManager(): RightRailFlowLayoutManager {
+    private val isLandscape: Boolean
+        get() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    private fun createLayoutManager(): FlowLayoutManager {
         val metrics = resources.displayMetrics
         val density = metrics.density
-        val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
-        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
-        val baseSide = availableWidth
-        val focusSide = availableWidth
-        val pitch = (availableWidth * 0.26f).roundToInt()
-        return RightRailFlowLayoutManager(
-            baseSidePx = baseSide,
-            focusSidePx = focusSide,
-            itemPitchPx = pitch,
-            rightInsetPx = (8 * density).roundToInt()
-        )
+        return if (isLandscape) {
+            val verticalInsetPx = (32 * density).roundToInt()
+            val minSidePx = (280 * density).roundToInt()
+            val availableHeight = (metrics.heightPixels - verticalInsetPx).coerceAtLeast(minSidePx)
+            val baseSide = availableHeight
+            val focusSide = (availableHeight * 1.05f).roundToInt()
+            val pitch = (24 * density).roundToInt()
+            HorizontalFlowLayoutManager(
+                this,
+                baseSidePx = baseSide,
+                focusSidePx = focusSide,
+                itemPitchPx = pitch,
+                bottomInsetPx = (12 * density).roundToInt()
+            )
+        } else {
+            val horizontalInsetPx = (32 * density).roundToInt()
+            val minSidePx = (320 * density).roundToInt()
+            val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
+            val baseSide = availableWidth
+            val focusSide = availableWidth
+            val pitch = (availableWidth * 0.26f).roundToInt()
+            RightRailFlowLayoutManager(
+                baseSidePx = baseSide,
+                focusSidePx = focusSide,
+                itemPitchPx = pitch,
+                rightInsetPx = (8 * density).roundToInt()
+            )
+        }
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
@@ -1060,7 +1091,7 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val layoutManager = createLayoutManager()
-            recycler.layoutManager = layoutManager
+            recycler.layoutManager = layoutManager as RecyclerView.LayoutManager
             recycler.setHasFixedSize(true)
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
@@ -1094,7 +1125,7 @@ class MainActivity : AppCompatActivity() {
         inner class FlowVH(
             view: View,
             val recycler: RecyclerView,
-            val layoutManager: RightRailFlowLayoutManager,
+            val layoutManager: FlowLayoutManager,
             val adapter: CardsAdapter
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
@@ -1121,7 +1152,7 @@ class MainActivity : AppCompatActivity() {
                     if (delta == 0) {
                         layoutManager.focus(index)
                     } else {
-                        recycler.smoothScrollBy(0, delta)
+                        layoutManager.scrollBy(recycler, delta)
                     }
                 }
             }
@@ -1136,7 +1167,7 @@ class MainActivity : AppCompatActivity() {
     private inner class FlowPageController(
         val flowId: Long,
         val recycler: RecyclerView,
-        val layoutManager: RightRailFlowLayoutManager,
+        val layoutManager: FlowLayoutManager,
         val adapter: CardsAdapter
     ) {
         fun restoreState(flow: CardFlow) {
