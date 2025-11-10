@@ -382,12 +382,13 @@ class MainActivity : AppCompatActivity() {
     private fun centerSelectedChip(position: Int) {
         if (position !in 0 until flowChipGroup.childCount) return
         val chip = flowChipGroup.getChildAt(position) ?: return
-        flowChipScroll.post {
+        val scroller = flowChipScroll
+        scroller.post {
             if (chip.parent == null) return@post
-            val scrollExtent = if (isLandscape) flowChipScroll.height else flowChipScroll.width
+            val scrollExtent = if (isLandscape) scroller.height else scroller.width
             val chipExtent = if (isLandscape) chip.height else chip.width
             if (scrollExtent == 0 || chipExtent == 0) {
-                flowChipScroll.post { centerSelectedChip(position) }
+                scroller.post { centerSelectedChip(position) }
                 return@post
             }
             val chipCenter = if (isLandscape) chip.top + chipExtent / 2 else chip.left + chipExtent / 2
@@ -397,9 +398,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 max(0, flowChipGroup.width - scrollExtent)
             }
-            when (flowChipScroll) {
-                is HorizontalScrollView -> flowChipScroll.smoothScrollTo(target.coerceIn(0, maxScroll), 0)
-                is ScrollView -> flowChipScroll.smoothScrollTo(0, target.coerceIn(0, maxScroll))
+            when (scroller) {
+                is HorizontalScrollView -> scroller.smoothScrollTo(target.coerceIn(0, maxScroll), 0)
+                is ScrollView -> scroller.smoothScrollTo(0, target.coerceIn(0, maxScroll))
             }
         }
     }
