@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <item name="tag_card_cache" type="id" />
+    <item name="tag_handwriting_path" type="id" />
+    <item name="tag_card_id" type="id" />
 </resources>

@@ -1,8 +1,5 @@
 package com.example.timescapedemo
 
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -117,27 +114,32 @@ class CardsAdapter(
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
         val handwritingContent = item.handwriting
-        val handwritingBitmap = handwritingContent?.path?.let {
-            loadHandwritingBitmap(holder.itemView.context, it)
-        }
-        val hasHandwriting = handwritingBitmap != null
-        holder.handwritingContainer.isVisible = hasHandwriting
-        holder.handwriting.isVisible = hasHandwriting
-        holder.cardContent.isVisible = !hasHandwriting
-        holder.textScrim.isVisible = !hasHandwriting
-        holder.time.isVisible = !hasHandwriting
-        holder.snippet.isVisible = !hasHandwriting
-        if (hasHandwriting) {
-            holder.snippet.text = ""
-            holder.handwriting.setImageBitmap(handwritingBitmap)
-            holder.handwriting.contentDescription = holder.itemView.context.getString(R.string.handwriting_card_content_desc)
-        } else {
-            val fallback = if (handwritingContent != null) {
-                if (item.snippet.isNotBlank()) item.snippet
-                else holder.itemView.context.getString(R.string.handwriting_card_missing)
-            } else item.snippet
-            holder.snippet.text = fallback
-            holder.handwriting.setImageDrawable(null)
+        val fallbackText = if (handwritingContent != null) {
+            if (item.snippet.isNotBlank()) item.snippet
+            else holder.itemView.context.getString(R.string.handwriting_card_missing)
+        } else item.snippet
+        holder.itemView.setTag(R.id.tag_card_id, item.id)
+        showHandwriting(holder, isVisible = false, fallbackText = fallbackText)
+        handwritingContent?.path?.let { path ->
+            HandwritingBitmapLoader.load(
+                context = holder.itemView.context,
+                path = path,
+                imageView = holder.handwriting
+            ) { bitmap ->
+                val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+                if (!isSameCard) return@load
+                if (bitmap != null) {
+                    holder.handwriting.setImageBitmap(bitmap)
+                    showHandwriting(holder, isVisible = true, fallbackText = fallbackText)
+                    holder.handwriting.contentDescription = holder.itemView.context.getString(R.string.handwriting_card_content_desc)
+                } else {
+                    holder.handwriting.setImageDrawable(null)
+                    showHandwriting(holder, isVisible = false, fallbackText = fallbackText)
+                    holder.handwriting.contentDescription = null
+                }
+            }
+        } ?: run {
+            HandwritingBitmapLoader.clear(holder.handwriting)
             holder.handwriting.contentDescription = null
         }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
@@ -186,13 +188,30 @@ class CardsAdapter(
         addShadow(holder.time, holder.snippet)
     }
 
-    private fun loadHandwritingBitmap(context: Context, path: String): Bitmap? {
-        return runCatching {
-            context.openFileInput(path).use { stream -> BitmapFactory.decodeStream(stream) }
-        }.getOrNull()
+    override fun getItemCount(): Int = items.size
+
+    override fun onViewRecycled(holder: VH) {
+        HandwritingBitmapLoader.clear(holder.handwriting)
+        holder.handwriting.contentDescription = null
+        holder.itemView.setTag(R.id.tag_card_id, null)
+        showHandwriting(holder, isVisible = false, fallbackText = holder.snippet.text ?: "")
+        super.onViewRecycled(holder)
     }
 
-    override fun getItemCount(): Int = items.size
+    private fun showHandwriting(holder: VH, isVisible: Boolean, fallbackText: CharSequence) {
+        holder.handwritingContainer.isVisible = isVisible
+        holder.handwriting.isVisible = isVisible
+        holder.cardContent.isVisible = !isVisible
+        holder.textScrim.isVisible = !isVisible
+        holder.time.isVisible = !isVisible
+        holder.snippet.isVisible = !isVisible
+        if (isVisible) {
+            holder.snippet.text = ""
+        } else {
+            holder.handwriting.setImageDrawable(null)
+            holder.snippet.text = fallbackText
+        }
+    }
 
     // ---------- Tint implementations ----------
     private fun applyTintToImage(iv: ImageView, style: TintStyle, baseEffect: RenderEffect?) {
