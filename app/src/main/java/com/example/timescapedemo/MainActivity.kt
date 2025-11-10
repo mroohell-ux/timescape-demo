@@ -812,7 +812,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun createChoiceChip(text: String, iconRes: Int? = null, iconTint: Int? = null): Chip {
-            val themedContext = ContextThemeWrapper(this, R.style.Widget_MaterialComponents_Chip_Choice)
+            val themedContext = ContextThemeWrapper(
+                this,
+                com.google.android.material.R.style.Widget_MaterialComponents_Chip_Choice
+            )
             return Chip(themedContext).apply {
                 id = View.generateViewId()
                 this.text = text
