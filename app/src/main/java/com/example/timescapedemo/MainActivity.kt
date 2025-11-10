@@ -331,6 +331,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_add_card -> { showAddCardDialog(); true }
+                R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
                 else -> false
             }
@@ -453,6 +454,9 @@ class MainActivity : AppCompatActivity() {
         }
         val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
+        removed.cards.forEach { card ->
+            card.handwritingPath?.let { deleteHandwritingFile(it) }
+        }
         flowControllers.remove(removed.id)
         flowAdapter.notifyItemRemoved(index)
         val remainingLastIndex = flows.lastIndex
@@ -599,21 +603,68 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun showAddHandwritingDialog() {
+        val flow = currentFlow()
+        if (flow == null) {
+            snackbar(getString(R.string.snackbar_add_flow_first))
+            return
+        }
+        showHandwritingDialog(
+            titleRes = R.string.dialog_add_handwriting_title,
+            existingPath = null,
+            onSave = { savedPath ->
+                val card = CardItem(
+                    id = nextCardId++,
+                    title = "",
+                    snippet = "",
+                    handwritingPath = savedPath,
+                    updatedAt = System.currentTimeMillis()
+                )
+                flow.cards += card
+                refreshFlow(flow, scrollToTop = true)
+                saveState()
+                snackbar(getString(R.string.snackbar_added_handwriting))
+            }
+        )
+    }
+
     private fun editCard(flow: CardFlow, index: Int) {
         val card = flow.cards.getOrNull(index) ?: return
-        showCardEditor(initialSnippet = card.snippet, isNew = false, onSave = { newSnippet ->
-            val snippetValue = newSnippet.trim()
-            if (snippetValue.isNotEmpty()) card.snippet = snippetValue
-            card.updatedAt = System.currentTimeMillis()
-            refreshFlow(flow, scrollToTop = true)
-            saveState()
-            snackbar("Card updated")
-        }, onDelete = {
-            flow.cards.remove(card)
-            refreshFlow(flow, scrollToTop = true)
-            saveState()
-            snackbar(getString(R.string.snackbar_deleted_card))
-        })
+        if (!card.handwritingPath.isNullOrBlank()) {
+            showHandwritingDialog(
+                titleRes = R.string.dialog_edit_handwriting_title,
+                existingPath = card.handwritingPath,
+                onSave = { savedPath ->
+                    card.handwritingPath = savedPath
+                    card.updatedAt = System.currentTimeMillis()
+                    refreshFlow(flow, scrollToTop = false)
+                    saveState()
+                    snackbar("Card updated")
+                },
+                onDelete = {
+                    card.handwritingPath?.let { deleteHandwritingFile(it) }
+                    flow.cards.removeAt(index)
+                    refreshFlow(flow, scrollToTop = true)
+                    saveState()
+                    snackbar(getString(R.string.snackbar_deleted_card))
+                }
+            )
+        } else {
+            showCardEditor(initialSnippet = card.snippet, isNew = false, onSave = { newSnippet ->
+                val snippetValue = newSnippet.trim()
+                if (snippetValue.isNotEmpty()) card.snippet = snippetValue
+                card.updatedAt = System.currentTimeMillis()
+                refreshFlow(flow, scrollToTop = true)
+                saveState()
+                snackbar("Card updated")
+            }, onDelete = {
+                card.handwritingPath?.let { deleteHandwritingFile(it) }
+                flow.cards.remove(card)
+                refreshFlow(flow, scrollToTop = true)
+                saveState()
+                snackbar(getString(R.string.snackbar_deleted_card))
+            })
+        }
     }
 
     private fun showCardEditor(
@@ -637,6 +688,63 @@ class MainActivity : AppCompatActivity() {
             builder.setNeutralButton(R.string.dialog_delete) { _, _ -> onDelete() }
         }
         builder.show()
+    }
+
+    private fun showHandwritingDialog(
+        titleRes: Int,
+        existingPath: String?,
+        onSave: (String) -> Unit,
+        onDelete: (() -> Unit)? = null
+    ) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
+        val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
+        val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
+        clearButton.setOnClickListener { handwritingView.clear() }
+        existingPath?.let { path ->
+            loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(titleRes))
+            .setView(dialogView)
+            .setPositiveButton(R.string.dialog_save, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .apply {
+                if (onDelete != null) {
+                    setNeutralButton(R.string.dialog_delete, null)
+                }
+            }
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                if (!handwritingView.hasDrawing()) {
+                    snackbar(getString(R.string.snackbar_handwriting_required))
+                    return@setOnClickListener
+                }
+                val bitmap = handwritingView.exportBitmap()
+                if (bitmap == null) {
+                    snackbar(getString(R.string.snackbar_handwriting_save_failed))
+                    return@setOnClickListener
+                }
+                val saved = saveHandwritingBitmap(bitmap, existingPath)
+                bitmap.recycle()
+                if (saved == null) {
+                    snackbar(getString(R.string.snackbar_handwriting_save_failed))
+                    return@setOnClickListener
+                }
+                onSave(saved)
+                dialog.dismiss()
+            }
+            onDelete?.let { deleteCallback ->
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                    deleteCallback()
+                    dialog.dismiss()
+                }
+            }
+        }
+
+        dialog.show()
     }
 
     private fun launchPicker() {
@@ -783,6 +891,25 @@ class MainActivity : AppCompatActivity() {
         contentResolver.openInputStream(uri)
     } catch (_: Exception) { null }
 
+    private fun saveHandwritingBitmap(bitmap: Bitmap, existingPath: String?): String? {
+        val filename = existingPath ?: "handwriting_${System.currentTimeMillis()}.png"
+        return runCatching {
+            openFileOutput(filename, MODE_PRIVATE).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            filename
+        }.getOrNull()
+    }
+
+    private fun loadHandwritingBitmap(path: String): Bitmap? =
+        runCatching {
+            openFileInput(path).use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+
+    private fun deleteHandwritingFile(path: String) {
+        runCatching { deleteFile(path) }
+    }
+
     private fun isPhotoPickerAvailable(): Boolean =
         if (Build.VERSION.SDK_INT >= 33) true
         else ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(this)
@@ -847,11 +974,13 @@ class MainActivity : AppCompatActivity() {
                             var cardId = cardObj.optLong("id", -1L)
                             if (cardId < 0) cardId = highestCardId + 1
                             highestCardId = max(highestCardId, cardId)
+                            val handwritingPath = cardObj.optString("handwritingPath", "").takeIf { it.isNotBlank() }
                             flow.cards += CardItem(
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
-                                updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
+                                updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
+                                handwritingPath = handwritingPath
                             )
                         }
                     }
@@ -885,7 +1014,8 @@ class MainActivity : AppCompatActivity() {
                             id = if (id >= 0) id else ++highestCardId,
                             title = obj.optString("title"),
                             snippet = obj.optString("snippet"),
-                            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
+                            handwritingPath = null
                         )
                     }
                 } catch (_: Exception) {
@@ -984,6 +1114,9 @@ class MainActivity : AppCompatActivity() {
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
                 obj.put("updatedAt", card.updatedAt)
+                if (!card.handwritingPath.isNullOrBlank()) {
+                    obj.put("handwritingPath", card.handwritingPath)
+                }
                 cardsArray.put(obj)
             }
             flowObj.put("cards", cardsArray)

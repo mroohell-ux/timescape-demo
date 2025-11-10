@@ -1,5 +1,7 @@
 package com.example.timescapedemo
 
+import android.content.Context
+import android.graphics.BitmapFactory
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -23,6 +25,7 @@ import androidx.annotation.ColorInt
 import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
+import androidx.core.view.isVisible
 import kotlin.math.abs
 
 data class CardItem(
@@ -30,7 +33,8 @@ data class CardItem(
     var title: String,
     var snippet: String,
     var bg: BgImage? = null,
-    var updatedAt: Long = System.currentTimeMillis()
+    var updatedAt: Long = System.currentTimeMillis(),
+    var handwritingPath: String? = null
 )
 
 /** Non-“glass” tint options that keep the card transparent. */
@@ -54,6 +58,7 @@ class CardsAdapter(
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -108,7 +113,25 @@ class CardsAdapter(
             DateUtils.MINUTE_IN_MILLIS,
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
-        holder.snippet.text = item.snippet
+        val handwritingBitmap = item.handwritingPath?.let {
+            loadHandwritingBitmap(holder.itemView.context, it)
+        }
+        val hasHandwriting = handwritingBitmap != null
+        holder.snippet.isVisible = !hasHandwriting
+        holder.handwriting.isVisible = hasHandwriting
+        if (hasHandwriting) {
+            holder.snippet.text = ""
+            holder.handwriting.setImageBitmap(handwritingBitmap)
+            holder.handwriting.contentDescription = holder.itemView.context.getString(R.string.handwriting_card_content_desc)
+        } else {
+            val fallback = if (!item.handwritingPath.isNullOrBlank()) {
+                if (item.snippet.isNotBlank()) item.snippet
+                else holder.itemView.context.getString(R.string.handwriting_card_missing)
+            } else item.snippet
+            holder.snippet.text = fallback
+            holder.handwriting.setImageDrawable(null)
+            holder.handwriting.contentDescription = null
+        }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
         holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
@@ -153,6 +176,12 @@ class CardsAdapter(
         holder.snippet.setTextColor(Color.WHITE)
         holder.time.setTextColor(0xF2FFFFFF.toInt())
         addShadow(holder.time, holder.snippet)
+    }
+
+    private fun loadHandwritingBitmap(context: Context, path: String): Bitmap? {
+        return runCatching {
+            context.openFileInput(path).use { stream -> BitmapFactory.decodeStream(stream) }
+        }.getOrNull()
     }
 
     override fun getItemCount(): Int = items.size

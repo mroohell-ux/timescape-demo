@@ -6,6 +6,7 @@
     <string name="dialog_snippet_hint">Details</string>
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
+    <string name="menu_add_handwriting">Add handwriting</string>
     <string name="menu_add_flow">Add flow</string>
     <string name="drawer_card_backgrounds">Card backgrounds</string>
     <string name="drawer_add_images">Add background images</string>
@@ -24,6 +25,9 @@
     <string name="dialog_delete_flow_title">Delete "%1$s"?</string>
     <string name="dialog_delete_flow_message">This will remove the flow and its cards.</string>
     <string name="snackbar_deleted_card">Card deleted</string>
+    <string name="snackbar_added_handwriting">Added handwriting card</string>
+    <string name="snackbar_handwriting_required">Draw something before saving.</string>
+    <string name="snackbar_handwriting_save_failed">Couldn't save that handwriting.</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
     <string name="snackbar_removed_image">Removed 1 image</string>
     <string name="snackbar_removed_image_reset_app_background">Removed image and reset app background</string>
@@ -34,4 +38,9 @@
     <string name="snackbar_app_background_failed">Couldn't load that background</string>
     <string name="drawer_card_font_size">Card font size</string>
     <string name="drawer_card_font_size_value">%1$.0fsp</string>
+    <string name="dialog_add_handwriting_title">Handwriting card</string>
+    <string name="dialog_edit_handwriting_title">Edit handwriting</string>
+    <string name="dialog_handwriting_clear">Clear</string>
+    <string name="handwriting_card_content_desc">Handwritten card content</string>
+    <string name="handwriting_card_missing">Handwriting preview unavailable</string>
 </resources>

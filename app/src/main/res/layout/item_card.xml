@@ -75,6 +75,16 @@
                 android:textSize="18sp"
                 android:lineSpacingExtra="4dp"
                 android:ellipsize="end"/>
+
+            <ImageView
+                android:id="@+id/handwritingImage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/handwriting_card_content_desc"
+                android:scaleType="fitCenter"
+                android:visibility="gone"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
