@@ -13,6 +13,7 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewParent
 import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
 import kotlin.collections.ArrayDeque
@@ -144,10 +145,20 @@ class HandwritingView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> touchStart(x, y)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                disallowParentIntercept(true)
+                touchStart(x, y)
+            }
             MotionEvent.ACTION_MOVE -> touchMove(x, y)
-            MotionEvent.ACTION_UP -> touchUp()
+            MotionEvent.ACTION_UP -> {
+                touchUp()
+                disallowParentIntercept(false)
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                touchCancel()
+                disallowParentIntercept(false)
+            }
         }
         invalidate()
         return true
@@ -336,6 +347,10 @@ class HandwritingView @JvmOverloads constructor(
         commitCurrentPath()
     }
 
+    private fun touchCancel() {
+        path.reset()
+    }
+
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
         val canvas = extraCanvas ?: return
@@ -460,5 +475,13 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun notifyContentChanged() {
         contentChangedListener?.invoke()
+    }
+
+    private fun disallowParentIntercept(disallow: Boolean) {
+        var viewParent: ViewParent? = parent
+        while (viewParent != null) {
+            viewParent.requestDisallowInterceptTouchEvent(disallow)
+            viewParent = viewParent.parent
+        }
     }
 }
