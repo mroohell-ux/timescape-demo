@@ -3,7 +3,6 @@
     <string name="dialog_add_card_title">Add card</string>
     <string name="dialog_edit_card_title">Edit card</string>
     <string name="dialog_save">Save</string>
-    <string name="dialog_title_hint">Title</string>
     <string name="dialog_snippet_hint">Details</string>
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
@@ -33,4 +32,6 @@
     <string name="snackbar_app_background_updated">App background updated</string>
     <string name="snackbar_app_background_reset">App background reset</string>
     <string name="snackbar_app_background_failed">Couldn't load that background</string>
+    <string name="drawer_card_font_size">Card font size</string>
+    <string name="drawer_card_font_size_value">%1$.0fsp</string>
 </resources>

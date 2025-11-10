@@ -2,7 +2,6 @@ package com.example.timescapedemo
 
 import android.animation.ValueAnimator
 import android.graphics.PointF
-import android.util.TypedValue
 import android.view.View
 import android.widget.TextView
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
@@ -175,35 +174,13 @@ class RightRailFlowLayoutManager(
         }
     }
 
-    private fun applyTextByGain(cache: ChildCache, gain: Float, focused: Boolean): Boolean {
+    private fun applyTextByGain(
+        cache: ChildCache,
+        @Suppress("UNUSED_PARAMETER") gain: Float,
+        @Suppress("UNUSED_PARAMETER") focused: Boolean
+    ): Boolean {
         var textChanged = false
-        val title = cache.title
         val snippet = cache.snippet
-
-        if (title != null) {
-            if (focused) {
-                val focusSize = 27f
-                if (!cache.lastTitleFocused || abs(cache.lastTitleSp - focusSize) > 0.01f) {
-                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, focusSize)
-                    cache.lastTitleSp = focusSize
-                    cache.lastTitleFocused = true
-                    textChanged = true
-                }
-            } else {
-                val desiredSize = 21f + 5f * gain
-                val bucketed = (desiredSize * 4f).roundToInt() / 4f
-                if (
-                    cache.lastTitleFocused ||
-                    !cache.lastTitleSp.isFinite() ||
-                    abs(cache.lastTitleSp - bucketed) >= 0.25f
-                ) {
-                    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, bucketed)
-                    cache.lastTitleSp = bucketed
-                    cache.lastTitleFocused = false
-                    textChanged = true
-                }
-            }
-        }
 
         if (snippet != null && cache.lastSnippetMaxLines != Integer.MAX_VALUE) {
             snippet.maxLines = Integer.MAX_VALUE
@@ -219,7 +196,6 @@ class RightRailFlowLayoutManager(
         if (existing != null) return existing
         val cache = ChildCache(
             container = child.findViewById(R.id.card_content),
-            title = child.findViewById(R.id.title),
             snippet = child.findViewById(R.id.snippet)
         )
         child.setTag(R.id.tag_card_cache, cache)
@@ -228,13 +204,10 @@ class RightRailFlowLayoutManager(
 
     private data class ChildCache(
         val container: MaxHeightLinearLayout?,
-        val title: TextView?,
         val snippet: TextView?,
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
-        var lastTitleSp: Float = Float.NaN,
-        var lastSnippetMaxLines: Int = -1,
-        var lastTitleFocused: Boolean = false
+        var lastSnippetMaxLines: Int = -1
     )
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {

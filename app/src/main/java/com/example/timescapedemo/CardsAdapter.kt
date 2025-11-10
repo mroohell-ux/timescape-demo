@@ -22,6 +22,8 @@ import android.widget.TextView
 import androidx.annotation.ColorInt
 import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.RecyclerView
+import android.util.TypedValue
+import kotlin.math.abs
 
 data class CardItem(
     val id: Long,
@@ -49,7 +51,6 @@ class CardsAdapter(
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val time: TextView = v.findViewById(R.id.time)
-        val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
@@ -58,6 +59,7 @@ class CardsAdapter(
 
     private val items = mutableListOf<CardItem>()
     private val blockedUris = mutableSetOf<Uri>()
+    private var bodyTextSizeSp: Float = DEFAULT_BODY_TEXT_SIZE_SP
 
     fun submitList(newItems: List<CardItem>) {
         items.clear()
@@ -106,8 +108,10 @@ class CardsAdapter(
             DateUtils.MINUTE_IN_MILLIS,
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
-        holder.title.text = item.title
         holder.snippet.text = item.snippet
+        holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
+        val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
+        holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
 
         // ---- Bind background image (drawable or Uri) ----
         when (val b = item.bg) {
@@ -146,10 +150,9 @@ class CardsAdapter(
 
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
-        holder.title.setTextColor(Color.WHITE)
         holder.snippet.setTextColor(Color.WHITE)
         holder.time.setTextColor(0xF2FFFFFF.toInt())
-        addShadow(holder.title, holder.snippet)
+        addShadow(holder.time, holder.snippet)
     }
 
     override fun getItemCount(): Int = items.size
@@ -205,6 +208,21 @@ class CardsAdapter(
 
     // --- Text helpers ---
     private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(4f, 0f, 1f, 0x66000000) } }
+
+    fun setBodyTextSize(sizeSp: Float) {
+        val clamped = sizeSp.coerceIn(MIN_BODY_TEXT_SIZE_SP, MAX_BODY_TEXT_SIZE_SP)
+        if (abs(bodyTextSizeSp - clamped) < 0.01f) return
+        bodyTextSizeSp = clamped
+        notifyDataSetChanged()
+    }
+
+    companion object {
+        private const val DEFAULT_BODY_TEXT_SIZE_SP = 18f
+        private const val MIN_BODY_TEXT_SIZE_SP = 12f
+        private const val MAX_BODY_TEXT_SIZE_SP = 32f
+        private const val TIME_SIZE_DELTA = 3f
+        private const val MIN_TIME_TEXT_SIZE_SP = 10f
+    }
 
     // --- Color matrices ---
     private fun colorizeMatrix(@ColorInt color: Int, amount: Float): ColorMatrix {
