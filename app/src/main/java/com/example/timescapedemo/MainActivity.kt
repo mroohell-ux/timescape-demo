@@ -76,8 +76,6 @@ class MainActivity : AppCompatActivity() {
     private val flows: MutableList<CardFlow> = mutableListOf()
     private val flowControllers: MutableMap<Long, FlowPageController> = mutableMapOf()
 
-    private val cardTint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
-
     private var appBackground: BgImage? = null
 
     private var nextCardId: Long = 0
@@ -500,6 +498,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun notifyCardBackgroundsChanged() {
+        flowControllers.values.forEach { controller ->
+            controller.adapter.notifyAppBackgroundChanged()
+        }
+    }
+
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
@@ -678,22 +682,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyAppBackground(): Boolean {
         val defaultRes = R.drawable.bg_app_light_optimistic
-        val bg = appBackground
-        if (bg == null) {
-            rootLayout.setBackgroundResource(defaultRes)
-            appBackgroundPreview.setImageResource(defaultRes)
-            return true
-        }
-        when (bg) {
+        val background = appBackground
+        val applied = when (background) {
+            null -> {
+                rootLayout.setBackgroundResource(defaultRes)
+                appBackgroundPreview.setImageResource(defaultRes)
+                true
+            }
             is BgImage.Res -> {
-                rootLayout.setBackgroundResource(bg.id)
-                appBackgroundPreview.setImageResource(bg.id)
-                return true
+                rootLayout.setBackgroundResource(background.id)
+                appBackgroundPreview.setImageResource(background.id)
+                true
             }
             is BgImage.UriRef -> {
                 val metrics = resources.displayMetrics
                 val target = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(720)
-                val bitmap = decodeBitmapSafe(bg, target) ?: run {
+                val bitmap = decodeBitmapSafe(background, target) ?: run {
                     appBackground = null
                     rootLayout.setBackgroundResource(defaultRes)
                     appBackgroundPreview.setImageResource(defaultRes)
@@ -701,10 +705,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 rootLayout.background = BitmapDrawable(resources, bitmap)
                 appBackgroundPreview.setImageBitmap(bitmap)
-                return true
+                true
             }
         }
-        return true
+        notifyCardBackgroundsChanged()
+        return applied
     }
 
     private fun makeCircularPreview(img: BgImage, sizePx: Int): Bitmap? = try {
@@ -1027,7 +1032,7 @@ class MainActivity : AppCompatActivity() {
 
             lateinit var holder: FlowVH
             val adapter = CardsAdapter(
-                cardTint,
+                backgroundRootProvider = { rootLayout },
                 onItemClick = { index -> holder.onCardTapped(index) },
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
             )

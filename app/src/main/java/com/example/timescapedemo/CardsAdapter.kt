@@ -1,17 +1,14 @@
 package com.example.timescapedemo
 
-import android.graphics.BlendMode
-import android.graphics.BlendModeColorFilter
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
+import android.graphics.Rect
 import android.graphics.RenderEffect
-import android.graphics.RuntimeShader
 import android.graphics.Shader
-import android.net.Uri
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.text.format.DateUtils
-import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -19,9 +16,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.annotation.ColorInt
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
+import androidx.core.view.doOnLayout
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.card.MaterialCardView
 
 data class CardItem(
     val id: Long,
@@ -31,43 +30,48 @@ data class CardItem(
     var updatedAt: Long = System.currentTimeMillis()
 )
 
-/** Non-“glass” tint options that keep the card transparent. */
-sealed class TintStyle {
-    data object None : TintStyle()
-    data class MultiplyDark(@ColorInt val color: Int, val alpha: Float = 0.18f) : TintStyle()
-    data class ScreenLight(@ColorInt val color: Int, val alpha: Float = 0.18f) : TintStyle()
-    data class Colorize(@ColorInt val color: Int, val amount: Float = 0.35f) : TintStyle()
-    data class Sepia(val amount: Float = 1f) : TintStyle()
-    data class Duotone(@ColorInt val dark: Int, @ColorInt val light: Int, val amount: Float = 1f) : TintStyle()
-}
-
 class CardsAdapter(
-    private val tint: TintStyle,
+    private val backgroundRootProvider: () -> ViewGroup?,
     private val onItemClick: (index: Int) -> Unit,
     private val onItemDoubleClick: (index: Int) -> Unit
 ) : RecyclerView.Adapter<CardsAdapter.VH>() {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
+        val card: MaterialCardView = v.findViewById(R.id.card)
+        val backgroundImage: ImageView = v.findViewById(R.id.bgImage)
         val time: TextView = v.findViewById(R.id.time)
         val title: TextView = v.findViewById(R.id.title)
         val snippet: TextView = v.findViewById(R.id.snippet)
-        val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        var backgroundBitmap: Bitmap? = null
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
     private val items = mutableListOf<CardItem>()
-    private val blockedUris = mutableSetOf<Uri>()
+    private var cachedRootBitmap: Bitmap? = null
+    private var cachedRootHash: Int = 0
+
+    private val tmpCardLocation = IntArray(2)
+    private val tmpRootLocation = IntArray(2)
+    private val tmpSrcRect = Rect()
+    private val tmpDstRect = Rect()
+
+    private var blurEffect: RenderEffect? = null
 
     fun submitList(newItems: List<CardItem>) {
         items.clear()
         items.addAll(newItems)
-        val activeUris = newItems.mapNotNull { (it.bg as? BgImage.UriRef)?.uri }.toSet()
-        blockedUris.retainAll(activeUris)
         notifyDataSetChanged()
     }
 
     fun getItem(index: Int): CardItem? = items.getOrNull(index)
+
+    fun notifyAppBackgroundChanged() {
+        cachedRootBitmap?.recycle()
+        cachedRootBitmap = null
+        cachedRootHash = 0
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
@@ -97,9 +101,9 @@ class CardsAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
+        bindBackground(holder)
         val item = items[position]
 
-        // ---- Bind text ----
         holder.time.text = DateUtils.getRelativeTimeSpanString(
             item.updatedAt,
             System.currentTimeMillis(),
@@ -109,188 +113,137 @@ class CardsAdapter(
         holder.title.text = item.title
         holder.snippet.text = item.snippet
 
-        // ---- Bind background image (drawable or Uri) ----
-        when (val b = item.bg) {
-            is BgImage.Res -> {
-                holder.bg.setImageResource(b.id)
-            }
-            is BgImage.UriRef -> {
-                if (blockedUris.contains(b.uri)) {
-                    holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                } else when (loadImageFromUriSafely(holder.bg, b.uri)) {
-                    LoadResult.Success -> {
-                        blockedUris.remove(b.uri)
-                    }
-                    LoadResult.PermissionDenied -> {
-                        blockedUris.add(b.uri)
-                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                    }
-                    LoadResult.TemporaryFailure -> {
-                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                    }
-                }
-            }
-            null -> {
-                holder.bg.setImageDrawable(null)
-            }
-        }
-
-        // Base blur (keeps transparency)
-        var baseEffect: RenderEffect? = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            baseEffect = RenderEffect.createBlurEffect(18f, 18f, Shader.TileMode.CLAMP)
-        }
-
-        // Apply NON-GLASS tint directly to image
-        applyTintToImage(holder.bg, tint, baseEffect)
-
-        // ---- Consistent readability styling ----
-        holder.textScrim.alpha = 0.45f
-        holder.title.setTextColor(Color.WHITE)
-        holder.snippet.setTextColor(Color.WHITE)
-        holder.time.setTextColor(0xF2FFFFFF.toInt())
-        addShadow(holder.title, holder.snippet)
+        styleText(holder)
     }
 
     override fun getItemCount(): Int = items.size
 
-    // ---------- Tint implementations ----------
-    private fun applyTintToImage(iv: ImageView, style: TintStyle, baseEffect: RenderEffect?) {
-        when (style) {
-            is TintStyle.None -> {
-                iv.colorFilter = null
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.MultiplyDark -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    iv.colorFilter = BlendModeColorFilter(withAlpha(style.color, style.alpha), BlendMode.MULTIPLY)
-                } else iv.colorFilter = ColorMatrixColorFilter(ColorMatrix())
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.ScreenLight -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    iv.colorFilter = BlendModeColorFilter(withAlpha(style.color, style.alpha), BlendMode.SCREEN)
-                } else iv.colorFilter = ColorMatrixColorFilter(ColorMatrix())
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.Colorize -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    iv.colorFilter = BlendModeColorFilter(withAlpha(style.color, style.amount.coerceIn(0f,1f)), BlendMode.COLOR)
-                } else iv.colorFilter = ColorMatrixColorFilter(colorizeMatrix(style.color, style.amount))
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.Sepia -> {
-                iv.colorFilter = ColorMatrixColorFilter(sepiaMatrix(style.amount))
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.Duotone -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val shader = RuntimeShader(DUOTONE_SHADER)
-                    setDuotoneUniforms(shader, style)
-                    val duo = RenderEffect.createRuntimeShaderEffect(shader, "content")
-                    val final = if (baseEffect != null) RenderEffect.createChainEffect(duo, baseEffect) else duo
-                    iv.setRenderEffect(final)
-                    iv.colorFilter = null
-                } else {
-                    applyTintToImage(iv, TintStyle.Colorize(style.light, style.amount * 0.6f), baseEffect)
-                }
-            }
+    override fun onViewRecycled(holder: VH) {
+        super.onViewRecycled(holder)
+        holder.backgroundBitmap?.recycle()
+        holder.backgroundBitmap = null
+        holder.backgroundImage.setImageDrawable(null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            holder.backgroundImage.setRenderEffect(null)
         }
     }
 
-    private fun withAlpha(@ColorInt color: Int, a: Float): Int {
-        val aa = (a.coerceIn(0f, 1f) * 255).toInt()
-        return (color and 0x00FFFFFF) or (aa shl 24)
+    private fun bindBackground(holder: VH) {
+        val root = backgroundRootProvider() ?: run {
+            clearBackground(holder)
+            return
+        }
+        if (holder.card.width == 0 || holder.card.height == 0) {
+            holder.card.doOnLayout { bindBackground(holder) }
+            return
+        }
+
+        val background = obtainRootBitmap(root, resolveWindowBackground(holder.itemView)) ?: run {
+            clearBackground(holder)
+            return
+        }
+
+        holder.card.getLocationOnScreen(tmpCardLocation)
+        root.getLocationOnScreen(tmpRootLocation)
+
+        val left = tmpCardLocation[0] - tmpRootLocation[0]
+        val top = tmpCardLocation[1] - tmpRootLocation[1]
+        val right = left + holder.card.width
+        val bottom = top + holder.card.height
+
+        val clampedLeft = left.coerceAtLeast(0)
+        val clampedTop = top.coerceAtLeast(0)
+        val clampedRight = right.coerceAtMost(background.width)
+        val clampedBottom = bottom.coerceAtMost(background.height)
+
+        if (clampedLeft >= clampedRight || clampedTop >= clampedBottom) {
+            clearBackground(holder)
+            return
+        }
+
+        tmpSrcRect.set(clampedLeft, clampedTop, clampedRight, clampedBottom)
+        val destBitmap = ensureBitmap(holder, tmpSrcRect.width(), tmpSrcRect.height())
+        val canvas = Canvas(destBitmap)
+        tmpDstRect.set(0, 0, destBitmap.width, destBitmap.height)
+        canvas.drawBitmap(background, tmpSrcRect, tmpDstRect, null)
+        holder.backgroundImage.setImageBitmap(destBitmap)
+        applyBlur(holder)
     }
 
-    // --- Text helpers ---
-    private fun addShadow(vararg tv: TextView) { tv.forEach { it.setShadowLayer(4f, 0f, 1f, 0x66000000) } }
-
-    // --- Color matrices ---
-    private fun colorizeMatrix(@ColorInt color: Int, amount: Float): ColorMatrix {
-        val t = amount.coerceIn(0f, 1f)
-        val sat = 1f - t
-        val cm = ColorMatrix().apply { setSaturation(sat) }
-        val r = Color.red(color) / 255f
-        val g = Color.green(color) / 255f
-        val b = Color.blue(color) / 255f
-        val bias = 0.12f * t
-        val push = ColorMatrix(
-            floatArrayOf(
-                1f, 0f, 0f, 0f, 255f * bias * r,
-                0f, 1f, 0f, 0f, 255f * bias * g,
-                0f, 0f, 1f, 0f, 255f * bias * b,
-                0f, 0f, 0f, 1f, 0f
-            )
-        )
-        cm.postConcat(push)
-        return cm
-    }
-    private fun sepiaMatrix(tIn: Float): ColorMatrix {
-        val t = tIn.coerceIn(0f, 1f)
-        val id = floatArrayOf(
-            1f, 0f, 0f, 0f, 0f,
-            0f, 1f, 0f, 0f, 0f,
-            0f, 0f, 1f, 0f, 0f,
-            0f, 0f, 0f, 1f, 0f
-        )
-        val sep = floatArrayOf(
-            0.393f, 0.769f, 0.189f, 0f, 0f,
-            0.349f, 0.686f, 0.168f, 0f, 0f,
-            0.272f, 0.534f, 0.131f, 0f, 0f,
-            0f,     0f,     0f,     1f, 0f
-        )
-        val out = FloatArray(20)
-        for (i in 0 until 20) out[i] = id[i] + (sep[i] - id[i]) * t
-        return ColorMatrix(out)
+    private fun ensureBitmap(holder: VH, width: Int, height: Int): Bitmap {
+        val existing = holder.backgroundBitmap
+        if (existing != null && existing.width == width && existing.height == height) {
+            return existing
+        }
+        existing?.recycle()
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        holder.backgroundBitmap = bitmap
+        return bitmap
     }
 
-    // --- Duotone shader (Android 13+) ---
-    private fun setDuotoneUniforms(shader: RuntimeShader, style: TintStyle.Duotone) {
-        val dark = style.dark
-        val light = style.light
-        shader.setFloatUniform("amount", style.amount.coerceIn(0f, 1f))
-        shader.setFloatUniform("dark", Color.red(dark)/255f, Color.green(dark)/255f, Color.blue(dark)/255f, 1f)
-        shader.setFloatUniform("light", Color.red(light)/255f, Color.green(light)/255f, Color.blue(light)/255f, 1f)
+    private fun applyBlur(holder: VH) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val effect = blurEffect ?: RenderEffect.createBlurEffect(BLUR_RADIUS, BLUR_RADIUS, Shader.TileMode.CLAMP).also {
+                blurEffect = it
+            }
+            holder.backgroundImage.setRenderEffect(effect)
+        }
     }
-    @Suppress("ConstPropertyName")
+
+    private fun clearBackground(holder: VH) {
+        holder.backgroundImage.setImageDrawable(null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            holder.backgroundImage.setRenderEffect(null)
+        }
+    }
+
+    private fun obtainRootBitmap(root: ViewGroup, fallback: Drawable?): Bitmap? {
+        val drawable = (root.background ?: fallback) ?: return null
+        val width = root.width
+        val height = root.height
+        if (width <= 0 || height <= 0) return null
+
+        val hash = System.identityHashCode(drawable)
+        val cached = cachedRootBitmap
+        if (cached != null && cached.width == width && cached.height == height && cachedRootHash == hash) {
+            return cached
+        }
+
+        val copy = drawable.constantState?.newDrawable()?.mutate() ?: drawable.mutate()
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        copy.setBounds(0, 0, width, height)
+        copy.draw(canvas)
+
+        cachedRootBitmap?.recycle()
+        cachedRootBitmap = bitmap
+        cachedRootHash = hash
+        return bitmap
+    }
+
+    private fun styleText(holder: VH) {
+        holder.textScrim.alpha = 0.18f
+        holder.title.setTextColor(HEADLINE_COLOR)
+        holder.snippet.setTextColor(BODY_COLOR)
+        holder.time.setTextColor(META_COLOR)
+        clearShadow(holder.title, holder.snippet)
+    }
+
+    private fun clearShadow(vararg tv: TextView) {
+        tv.forEach { it.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT) }
+    }
+
+    private fun resolveWindowBackground(view: View): Drawable? {
+        val attrs = view.context.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
+        val drawable = attrs.getDrawable(0)
+        attrs.recycle()
+        return drawable
+    }
+
     private companion object {
-        private const val TAG = "CardsAdapter"
-        private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
-
-        private enum class LoadResult { Success, TemporaryFailure, PermissionDenied }
-
-        private fun loadImageFromUriSafely(target: ImageView, uri: Uri): LoadResult {
-            return try {
-                target.setImageURI(uri)
-                if (target.drawable != null) {
-                    LoadResult.Success
-                } else {
-                    LoadResult.TemporaryFailure
-                }
-            } catch (se: SecurityException) {
-                Log.w(TAG, "Missing permission for uri: $uri", se)
-                target.setImageDrawable(null)
-                LoadResult.PermissionDenied
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to bind uri: $uri", e)
-                target.setImageDrawable(null)
-                LoadResult.TemporaryFailure
-            }
-        }
-
-        private const val DUOTONE_SHADER = """
-            uniform shader content;
-            uniform float amount;
-            uniform vec4 dark;
-            uniform vec4 light;
-            half4 main(float2 p) {
-                half4 c = content.eval(p);
-                float l = max(max(c.r, c.g), c.b);
-                vec3 tone = mix(dark.rgb, light.rgb, l);
-                vec3 outRGB = mix(c.rgb, tone, amount);
-                return half4(outRGB, c.a);
-            }
-        """
+        private const val BLUR_RADIUS = 28f
+        private val HEADLINE_COLOR = ColorUtils.setAlphaComponent(Color.BLACK, (0.87f * 255).toInt())
+        private val BODY_COLOR = ColorUtils.setAlphaComponent(Color.BLACK, (0.75f * 255).toInt())
+        private val META_COLOR = ColorUtils.setAlphaComponent(Color.BLACK, (0.6f * 255).toInt())
     }
 }
