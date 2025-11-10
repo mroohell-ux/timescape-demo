@@ -359,14 +359,28 @@ class MainActivity : AppCompatActivity() {
         flowChipGroup.removeAllViews()
         val density = resources.displayMetrics.density
         flows.forEachIndexed { index, flow ->
+            val chipLabel = if (isLandscape) flow.name.toVerticalLabel() else flow.name
             val chip = Chip(this).apply {
-                text = flow.name
+                text = chipLabel
                 isCheckable = true
                 isCheckedIconVisible = false
                 setEnsureMinTouchTargetSize(false)
-                minHeight = (36 * density).roundToInt()
+                minHeight = if (isLandscape) (72 * density).roundToInt() else (36 * density).roundToInt()
+                minWidth = if (isLandscape) (36 * density).roundToInt() else 0
                 textSize = 14f
-                setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
+                if (isLandscape) {
+                    textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(
+                        (6 * density).roundToInt(),
+                        (12 * density).roundToInt(),
+                        (6 * density).roundToInt(),
+                        (12 * density).roundToInt()
+                    )
+                    contentDescription = flow.name
+                } else {
+                    setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
+                }
                 isChecked = index == safeIndex
                 setOnClickListener { flowPager.setCurrentItem(index, true) }
                 setOnLongClickListener {
@@ -377,6 +391,26 @@ class MainActivity : AppCompatActivity() {
             flowChipGroup.addView(chip)
         }
         centerSelectedChip(safeIndex)
+    }
+
+    private fun String.toVerticalLabel(): String {
+        val trimmed = trim()
+        if (trimmed.isEmpty()) return this
+        val builder = StringBuilder()
+        for (ch in trimmed) {
+            if (ch.isWhitespace()) {
+                if (builder.isNotEmpty() && builder.last() != '\n') {
+                    builder.append('\n')
+                }
+            } else {
+                builder.append(ch)
+                builder.append('\n')
+            }
+        }
+        if (builder.isNotEmpty() && builder.last() == '\n') {
+            builder.deleteCharAt(builder.lastIndex)
+        }
+        return builder.toString()
     }
 
     private fun centerSelectedChip(position: Int) {
@@ -510,12 +544,14 @@ class MainActivity : AppCompatActivity() {
             val baseSide = availableHeight
             val focusSide = (availableHeight * 1.05f).roundToInt()
             val pitch = (24 * density).roundToInt()
+            val horizontalInsetPx = (32 * density).roundToInt()
             HorizontalFlowLayoutManager(
-                this,
                 baseSidePx = baseSide,
                 focusSidePx = focusSide,
                 itemPitchPx = pitch,
-                bottomInsetPx = (12 * density).roundToInt()
+                leftInsetPx = horizontalInsetPx,
+                rightInsetPx = (16 * density).roundToInt(),
+                verticalCenterOffsetPx = (12 * density).roundToInt()
             )
         } else {
             val horizontalInsetPx = (32 * density).roundToInt()
