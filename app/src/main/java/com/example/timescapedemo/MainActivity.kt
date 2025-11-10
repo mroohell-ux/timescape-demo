@@ -11,6 +11,7 @@ import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -44,6 +45,7 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileNotFoundException
@@ -455,7 +457,7 @@ class MainActivity : AppCompatActivity() {
         val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
         removed.cards.forEach { card ->
-            card.handwritingPath?.let { deleteHandwritingFile(it) }
+            card.handwriting?.path?.let { deleteHandwritingFile(it) }
         }
         flowControllers.remove(removed.id)
         flowAdapter.notifyItemRemoved(index)
@@ -609,15 +611,17 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_add_flow_first))
             return
         }
+        val defaults = defaultHandwritingOptions()
         showHandwritingDialog(
             titleRes = R.string.dialog_add_handwriting_title,
-            existingPath = null,
-            onSave = { savedPath ->
+            existing = null,
+            initialOptions = defaults,
+            onSave = { savedContent ->
                 val card = CardItem(
                     id = nextCardId++,
                     title = "",
                     snippet = "",
-                    handwritingPath = savedPath,
+                    handwriting = savedContent,
                     updatedAt = System.currentTimeMillis()
                 )
                 flow.cards += card
@@ -630,19 +634,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun editCard(flow: CardFlow, index: Int) {
         val card = flow.cards.getOrNull(index) ?: return
-        if (!card.handwritingPath.isNullOrBlank()) {
+        val handwritingContent = card.handwriting
+        if (handwritingContent != null) {
             showHandwritingDialog(
                 titleRes = R.string.dialog_edit_handwriting_title,
-                existingPath = card.handwritingPath,
-                onSave = { savedPath ->
-                    card.handwritingPath = savedPath
+                existing = handwritingContent,
+                initialOptions = handwritingContent.options,
+                onSave = { savedContent ->
+                    card.handwriting = savedContent
                     card.updatedAt = System.currentTimeMillis()
                     refreshFlow(flow, scrollToTop = false)
                     saveState()
                     snackbar("Card updated")
                 },
                 onDelete = {
-                    card.handwritingPath?.let { deleteHandwritingFile(it) }
+                    card.handwriting?.path?.let { deleteHandwritingFile(it) }
                     flow.cards.removeAt(index)
                     refreshFlow(flow, scrollToTop = true)
                     saveState()
@@ -658,7 +664,7 @@ class MainActivity : AppCompatActivity() {
                 saveState()
                 snackbar("Card updated")
             }, onDelete = {
-                card.handwritingPath?.let { deleteHandwritingFile(it) }
+                card.handwriting?.path?.let { deleteHandwritingFile(it) }
                 flow.cards.remove(card)
                 refreshFlow(flow, scrollToTop = true)
                 saveState()
@@ -692,16 +698,145 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHandwritingDialog(
         titleRes: Int,
-        existingPath: String?,
-        onSave: (String) -> Unit,
+        existing: HandwritingContent?,
+        initialOptions: HandwritingOptions,
+        onSave: (HandwritingContent) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
         val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
-        clearButton.setOnClickListener { handwritingView.clear() }
-        existingPath?.let { path ->
+        val sizeInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputCanvasSize)
+        val formatInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputCanvasFormat)
+        val backgroundInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputCanvasBackground)
+        val brushColorInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputBrushColor)
+        val brushSizeValue = dialogView.findViewById<TextView>(R.id.textBrushSizeValue)
+        val brushSizeSlider = dialogView.findViewById<Slider>(R.id.sliderBrushSize)
+
+        val (maxCanvasWidth, maxCanvasHeight) = cardCanvasBounds()
+        data class CanvasSizeOption(val key: String, val label: String, val width: Int, val height: Int)
+        data class NamedColor(val color: Int, val label: String)
+
+        fun computeSizeForRatio(key: String, labelRes: Int, ratio: Float): CanvasSizeOption {
+            val (width, height) = computeCanvasSizeForRatio(ratio, maxCanvasWidth, maxCanvasHeight)
+            return CanvasSizeOption(key, getString(labelRes), width, height)
+        }
+
+        val sizeOptions = mutableListOf(
+            CanvasSizeOption(
+                key = "full",
+                label = getString(R.string.handwriting_size_full),
+                width = maxCanvasWidth,
+                height = maxCanvasHeight
+            ),
+            computeSizeForRatio("square", R.string.handwriting_size_square, 1f),
+            computeSizeForRatio("landscape", R.string.handwriting_size_landscape, 0.75f),
+            computeSizeForRatio("portrait", R.string.handwriting_size_portrait, 4f / 3f)
+        ).distinctBy { it.width to it.height }.toMutableList()
+
+        var selectedSize = sizeOptions.firstOrNull { it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight }
+        if (selectedSize == null) {
+            selectedSize = CanvasSizeOption(
+                key = "custom",
+                label = getString(R.string.handwriting_size_custom, initialOptions.canvasWidth, initialOptions.canvasHeight),
+                width = initialOptions.canvasWidth,
+                height = initialOptions.canvasHeight
+            )
+            sizeOptions.add(0, selectedSize)
+        }
+
+        val sizeAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, sizeOptions.map { it.label })
+        sizeInput.setAdapter(sizeAdapter)
+        sizeInput.setText(selectedSize.label, false)
+
+        val formatOptions = HandwritingFormat.values().toList()
+        fun formatLabel(format: HandwritingFormat): String = when (format) {
+            HandwritingFormat.PNG -> getString(R.string.handwriting_format_png)
+            HandwritingFormat.JPEG -> getString(R.string.handwriting_format_jpeg)
+            HandwritingFormat.WEBP -> getString(R.string.handwriting_format_webp)
+        }
+        var selectedFormat = existing?.options?.format ?: initialOptions.format
+        if (selectedFormat !in formatOptions) selectedFormat = HandwritingFormat.PNG
+        val formatAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, formatOptions.map(::formatLabel))
+        formatInput.setAdapter(formatAdapter)
+        formatInput.setText(formatLabel(selectedFormat), false)
+
+        val backgroundOptions = listOf(
+            NamedColor(Color.WHITE, getString(R.string.handwriting_color_white)),
+            NamedColor(Color.parseColor("#FFF4E0"), getString(R.string.handwriting_color_cream)),
+            NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight)),
+            NamedColor(Color.parseColor("#E3F2FD"), getString(R.string.handwriting_color_sky))
+        )
+        var selectedBackground = backgroundOptions.firstOrNull { it.color == initialOptions.backgroundColor }
+            ?: backgroundOptions.first()
+        val backgroundAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, backgroundOptions.map { it.label })
+        backgroundInput.setAdapter(backgroundAdapter)
+        backgroundInput.setText(selectedBackground.label, false)
+
+        val brushColorOptions = listOf(
+            NamedColor(Color.BLACK, getString(R.string.handwriting_color_black)),
+            NamedColor(Color.parseColor("#1565C0"), getString(R.string.handwriting_color_blue)),
+            NamedColor(Color.parseColor("#D32F2F"), getString(R.string.handwriting_color_red)),
+            NamedColor(Color.parseColor("#2E7D32"), getString(R.string.handwriting_color_green))
+        )
+        var selectedBrushColor = brushColorOptions.firstOrNull { it.color == initialOptions.brushColor }
+            ?: brushColorOptions.first()
+        val brushColorAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, brushColorOptions.map { it.label })
+        brushColorInput.setAdapter(brushColorAdapter)
+        brushColorInput.setText(selectedBrushColor.label, false)
+
+        brushSizeSlider.valueFrom = MIN_HANDWRITING_BRUSH_SIZE_DP
+        brushSizeSlider.valueTo = MAX_HANDWRITING_BRUSH_SIZE_DP
+        brushSizeSlider.stepSize = 0.5f
+
+        val minBrush = brushSizeSlider.valueFrom
+        val maxBrush = brushSizeSlider.valueTo
+        var selectedBrushSize = initialOptions.brushSizeDp.coerceIn(minBrush, maxBrush)
+        fun updateBrushSizeLabel() {
+            brushSizeValue.text = getString(R.string.handwriting_brush_size_value, selectedBrushSize)
+        }
+
+        handwritingView.setCanvasSize(selectedSize.width, selectedSize.height)
+        handwritingView.setCanvasBackgroundColor(selectedBackground.color)
+        handwritingView.setBrushColor(selectedBrushColor.color)
+        handwritingView.setBrushSizeDp(selectedBrushSize)
+        existing?.path?.let { path ->
             loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
+        }
+
+        clearButton.setOnClickListener { handwritingView.clear() }
+
+        sizeInput.setOnItemClickListener { _, _, position, _ ->
+            val option = sizeOptions[position]
+            selectedSize = option
+            handwritingView.setCanvasSize(option.width, option.height)
+        }
+
+        formatInput.setOnItemClickListener { _, _, position, _ ->
+            selectedFormat = formatOptions.getOrNull(position) ?: selectedFormat
+            formatInput.setText(formatLabel(selectedFormat), false)
+        }
+
+        backgroundInput.setOnItemClickListener { _, _, position, _ ->
+            val option = backgroundOptions.getOrNull(position) ?: return@setOnItemClickListener
+            selectedBackground = option
+            handwritingView.setCanvasBackgroundColor(option.color)
+        }
+
+        brushColorInput.setOnItemClickListener { _, _, position, _ ->
+            val option = brushColorOptions.getOrNull(position) ?: return@setOnItemClickListener
+            selectedBrushColor = option
+            handwritingView.setBrushColor(option.color)
+        }
+
+        brushSizeSlider.value = selectedBrushSize
+        updateBrushSizeLabel()
+        brushSizeSlider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                selectedBrushSize = value
+                handwritingView.setBrushSizeDp(value)
+                updateBrushSizeLabel()
+            }
         }
 
         val dialog = AlertDialog.Builder(this)
@@ -722,13 +857,21 @@ class MainActivity : AppCompatActivity() {
                     snackbar(getString(R.string.snackbar_handwriting_required))
                     return@setOnClickListener
                 }
-                val bitmap = handwritingView.exportBitmap()
-                if (bitmap == null) {
+                val exportBitmap = handwritingView.exportBitmap()
+                if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
                 }
-                val saved = saveHandwritingBitmap(bitmap, existingPath)
-                bitmap.recycle()
+                val options = HandwritingOptions(
+                    backgroundColor = selectedBackground.color,
+                    brushColor = selectedBrushColor.color,
+                    brushSizeDp = selectedBrushSize,
+                    canvasWidth = selectedSize.width,
+                    canvasHeight = selectedSize.height,
+                    format = selectedFormat
+                )
+                val saved = saveHandwritingContent(exportBitmap, options, existing)
+                exportBitmap.recycle()
                 if (saved == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
@@ -891,14 +1034,35 @@ class MainActivity : AppCompatActivity() {
         contentResolver.openInputStream(uri)
     } catch (_: Exception) { null }
 
-    private fun saveHandwritingBitmap(bitmap: Bitmap, existingPath: String?): String? {
-        val filename = existingPath ?: "handwriting_${System.currentTimeMillis()}.png"
-        return runCatching {
+    private fun saveHandwritingContent(
+        bitmap: Bitmap,
+        options: HandwritingOptions,
+        existing: HandwritingContent?
+    ): HandwritingContent? {
+        val reuseExisting = existing?.takeIf { it.options.format == options.format }
+        val filename = reuseExisting?.path ?: "handwriting_${System.currentTimeMillis()}.${options.format.extension}"
+        val result = runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                val quality = when (options.format) {
+                    HandwritingFormat.PNG -> 100
+                    HandwritingFormat.JPEG -> 95
+                    HandwritingFormat.WEBP -> 100
+                }
+                bitmap.compress(options.format.compressFormat, quality, out)
             }
-            filename
-        }.getOrNull()
+            HandwritingContent(filename, options)
+        }.getOrElse {
+            if (reuseExisting == null) {
+                runCatching { deleteFile(filename) }
+            }
+            null
+        }
+        if (result != null && existing != null && reuseExisting == null) {
+            if (existing.path != result.path) {
+                deleteHandwritingFile(existing.path)
+            }
+        }
+        return result
     }
 
     private fun loadHandwritingBitmap(path: String): Bitmap? =
@@ -909,6 +1073,113 @@ class MainActivity : AppCompatActivity() {
     private fun deleteHandwritingFile(path: String) {
         runCatching { deleteFile(path) }
     }
+
+    private fun cardCanvasBounds(): Pair<Int, Int> {
+        val metrics = resources.displayMetrics
+        val density = metrics.density
+        val horizontalInsetPx = (32 * density).roundToInt()
+        val minSidePx = (320 * density).roundToInt()
+        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx).coerceAtLeast(1)
+        val maxHeight = (metrics.heightPixels * 2f / 3f).roundToInt().coerceAtLeast(1)
+        return availableWidth to maxHeight
+    }
+
+    private fun computeCanvasSizeForRatio(ratio: Float, maxWidth: Int, maxHeight: Int): Pair<Int, Int> {
+        var width = maxWidth
+        var height = (width * ratio).roundToInt().coerceAtLeast(1)
+        if (height > maxHeight) {
+            val scale = maxHeight.toFloat() / height
+            width = (width * scale).roundToInt().coerceAtLeast(1)
+            height = maxHeight
+        }
+        return width to height
+    }
+
+    private fun clampCanvasSize(width: Int, height: Int): Pair<Int, Int> {
+        val (maxWidth, maxHeight) = cardCanvasBounds()
+        var w = width.coerceAtLeast(1)
+        var h = height.coerceAtLeast(1)
+        val widthScale = maxWidth.toFloat() / w
+        val heightScale = maxHeight.toFloat() / h
+        val scale = min(1f, min(widthScale, heightScale))
+        if (scale < 1f) {
+            w = (w * scale).roundToInt().coerceAtLeast(1)
+            h = (h * scale).roundToInt().coerceAtLeast(1)
+        }
+        return w to h
+    }
+
+    private fun defaultHandwritingOptions(): HandwritingOptions {
+        val (maxWidth, maxHeight) = cardCanvasBounds()
+        val (canvasWidth, canvasHeight) = computeCanvasSizeForRatio(DEFAULT_CANVAS_RATIO, maxWidth, maxHeight)
+        return HandwritingOptions(
+            backgroundColor = DEFAULT_HANDWRITING_BACKGROUND,
+            brushColor = DEFAULT_HANDWRITING_BRUSH,
+            brushSizeDp = DEFAULT_HANDWRITING_BRUSH_SIZE_DP,
+            canvasWidth = canvasWidth,
+            canvasHeight = canvasHeight,
+            format = HandwritingFormat.PNG
+        )
+    }
+
+    private fun parseHandwritingContent(cardObj: JSONObject): HandwritingContent? {
+        val handwritingObj = cardObj.optJSONObject("handwriting")
+        val baseOptions = defaultHandwritingOptions()
+        if (handwritingObj != null) {
+            val path = handwritingObj.optString("path")
+            if (path.isNullOrBlank()) return null
+            val optionsObj = handwritingObj.optJSONObject("options")
+            val background = parseColorString(optionsObj?.optString("backgroundColor")) ?: baseOptions.backgroundColor
+            val brushColor = parseColorString(optionsObj?.optString("brushColor")) ?: baseOptions.brushColor
+            val brushSize = optionsObj?.optDouble("brushSizeDp", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat()
+                ?.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
+                ?: baseOptions.brushSizeDp
+            val rawWidth = optionsObj?.optInt("canvasWidth", baseOptions.canvasWidth) ?: baseOptions.canvasWidth
+            val rawHeight = optionsObj?.optInt("canvasHeight", baseOptions.canvasHeight) ?: baseOptions.canvasHeight
+            val (canvasWidth, canvasHeight) = clampCanvasSize(rawWidth, rawHeight)
+            val formatName = optionsObj?.optString("format")
+            val format = HandwritingFormat.fromName(formatName) ?: baseOptions.format
+            return HandwritingContent(
+                path = path,
+                options = HandwritingOptions(
+                    backgroundColor = background,
+                    brushColor = brushColor,
+                    brushSizeDp = brushSize,
+                    canvasWidth = canvasWidth,
+                    canvasHeight = canvasHeight,
+                    format = format
+                )
+            )
+        }
+
+        val legacyPath = cardObj.optString("handwritingPath", "").takeIf { it.isNotBlank() } ?: return null
+        val extension = legacyPath.substringAfterLast('.', "")
+        val format = HandwritingFormat.fromExtension(extension) ?: baseOptions.format
+        val legacySize = sniffHandwritingDimensions(legacyPath)
+        val (canvasWidth, canvasHeight) = legacySize?.let { clampCanvasSize(it.first, it.second) }
+            ?: (baseOptions.canvasWidth to baseOptions.canvasHeight)
+        return HandwritingContent(
+            path = legacyPath,
+            options = baseOptions.copy(
+                canvasWidth = canvasWidth,
+                canvasHeight = canvasHeight,
+                format = format
+            )
+        )
+    }
+
+    private fun parseColorString(value: String?): Int? = try {
+        if (value.isNullOrBlank()) null else Color.parseColor(value)
+    } catch (_: IllegalArgumentException) { null }
+
+    private fun sniffHandwritingDimensions(path: String): Pair<Int, Int>? =
+        runCatching {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            openFileInput(path).use { BitmapFactory.decodeStream(it, null, opts) }
+            if (opts.outWidth > 0 && opts.outHeight > 0) opts.outWidth to opts.outHeight else null
+        }.getOrNull()
+
+    private fun colorToString(color: Int): String = String.format("#%08X", color)
 
     private fun isPhotoPickerAvailable(): Boolean =
         if (Build.VERSION.SDK_INT >= 33) true
@@ -974,13 +1245,13 @@ class MainActivity : AppCompatActivity() {
                             var cardId = cardObj.optLong("id", -1L)
                             if (cardId < 0) cardId = highestCardId + 1
                             highestCardId = max(highestCardId, cardId)
-                            val handwritingPath = cardObj.optString("handwritingPath", "").takeIf { it.isNotBlank() }
+                            val handwriting = parseHandwritingContent(cardObj)
                             flow.cards += CardItem(
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
-                                handwritingPath = handwritingPath
+                                handwriting = handwriting
                             )
                         }
                     }
@@ -1015,7 +1286,7 @@ class MainActivity : AppCompatActivity() {
                             title = obj.optString("title"),
                             snippet = obj.optString("snippet"),
                             updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
-                            handwritingPath = null
+                            handwriting = null
                         )
                     }
                 } catch (_: Exception) {
@@ -1114,8 +1385,22 @@ class MainActivity : AppCompatActivity() {
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
                 obj.put("updatedAt", card.updatedAt)
-                if (!card.handwritingPath.isNullOrBlank()) {
-                    obj.put("handwritingPath", card.handwritingPath)
+                card.handwriting?.let { content ->
+                    val options = content.options
+                    val optionsObj = JSONObject().apply {
+                        put("backgroundColor", colorToString(options.backgroundColor))
+                        put("brushColor", colorToString(options.brushColor))
+                        put("brushSizeDp", options.brushSizeDp.toDouble())
+                        put("canvasWidth", options.canvasWidth)
+                        put("canvasHeight", options.canvasHeight)
+                        put("format", options.format.name)
+                    }
+                    val handwritingObj = JSONObject().apply {
+                        put("path", content.path)
+                        put("options", optionsObj)
+                    }
+                    obj.put("handwriting", handwritingObj)
+                    obj.put("handwritingPath", content.path)
                 }
                 cardsArray.put(obj)
             }
@@ -1318,5 +1603,11 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_NEXT_FLOW_ID = "next_flow_id"
         private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
         private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
+        private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 2f
+        private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 18f
+        private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 6f
+        private const val DEFAULT_CANVAS_RATIO = 0.75f
+        private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
+        private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
     }
 }

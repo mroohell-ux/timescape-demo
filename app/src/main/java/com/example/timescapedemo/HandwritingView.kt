@@ -13,7 +13,9 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import androidx.annotation.ColorInt
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class HandwritingView @JvmOverloads constructor(
     context: Context,
@@ -37,7 +39,26 @@ class HandwritingView @JvmOverloads constructor(
     private val touchTolerance = 4f
     private var hasContent = false
     private var pendingBitmap: Bitmap? = null
-    private val backgroundColor = Color.WHITE
+    @ColorInt
+    private var backgroundColorInt: Int = Color.WHITE
+    private var targetAspectRatio: Float? = null
+    private var exportWidth = 0
+    private var exportHeight = 0
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        val ratio = targetAspectRatio
+        if (ratio != null && ratio > 0f) {
+            val width = measuredWidth
+            if (width > 0) {
+                val desiredHeight = (width * ratio).roundToInt()
+                val resolvedHeight = resolveSize(desiredHeight, heightMeasureSpec)
+                if (resolvedHeight != measuredHeight) {
+                    setMeasuredDimension(width, resolvedHeight)
+                }
+            }
+        }
+    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -49,12 +70,13 @@ class HandwritingView @JvmOverloads constructor(
         }
         val newBitmap = Bitmap.createBitmap(w, h, Config.ARGB_8888)
         val newCanvas = Canvas(newBitmap)
-        newCanvas.drawColor(backgroundColor)
+        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
         extraBitmap?.recycle()
         extraBitmap = newBitmap
         extraCanvas = newCanvas
         pendingBitmap?.let { existing ->
             drawBitmapOntoCanvas(existing)
+            if (!existing.isRecycled) existing.recycle()
             pendingBitmap = null
         }
         invalidate()
@@ -62,7 +84,7 @@ class HandwritingView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(backgroundColor)
+        canvas.drawColor(backgroundColorInt)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, drawPaint)
     }
@@ -85,7 +107,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun clear() {
-        extraCanvas?.drawColor(backgroundColor, PorterDuff.Mode.SRC)
+        extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
         path.reset()
         hasContent = false
         pendingBitmap?.recycle()
@@ -113,7 +135,59 @@ class HandwritingView @JvmOverloads constructor(
 
     fun exportBitmap(): Bitmap? {
         commitCurrentPath()
-        return extraBitmap?.copy(Config.ARGB_8888, false)
+        val source = extraBitmap ?: return null
+        val targetW = exportWidth.takeIf { it > 0 } ?: source.width
+        val targetH = exportHeight.takeIf { it > 0 } ?: source.height
+        return if (targetW == source.width && targetH == source.height) {
+            val copy = source.copy(Config.ARGB_8888, false)
+            Canvas(copy).drawColor(backgroundColorInt, PorterDuff.Mode.DST_OVER)
+            copy
+        } else {
+            val bitmap = Bitmap.createBitmap(targetW, targetH, Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(backgroundColorInt)
+            val destRect = Rect(0, 0, targetW, targetH)
+            canvas.drawBitmap(source, null, destRect, null)
+            bitmap
+        }
+    }
+
+    fun setCanvasBackgroundColor(@ColorInt color: Int) {
+        if (backgroundColorInt == color) return
+        backgroundColorInt = color
+        invalidate()
+    }
+
+    fun setBrushColor(@ColorInt color: Int) {
+        drawPaint.color = color
+    }
+
+    fun setBrushSizeDp(sizeDp: Float) {
+        val px = sizeDp * resources.displayMetrics.density
+        setBrushSizePx(px)
+    }
+
+    fun setBrushSizePx(sizePx: Float) {
+        drawPaint.strokeWidth = sizePx
+    }
+
+    fun getBrushSizeDp(): Float = drawPaint.strokeWidth / resources.displayMetrics.density
+
+    fun setCanvasSize(widthPx: Int, heightPx: Int) {
+        if (widthPx <= 0 || heightPx <= 0) return
+        if (widthPx == exportWidth && heightPx == exportHeight) return
+        val hadContent = hasDrawing()
+        commitCurrentPath()
+        val snapshot = if (hadContent) extraBitmap?.copy(Config.ARGB_8888, false) else null
+        if (snapshot != null) {
+            pendingBitmap?.recycle()
+            pendingBitmap = snapshot
+        }
+        hasContent = hadContent
+        exportWidth = widthPx
+        exportHeight = heightPx
+        targetAspectRatio = heightPx.toFloat() / widthPx.toFloat()
+        requestLayout()
     }
 
     private fun touchStart(x: Float, y: Float) {
@@ -148,7 +222,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun drawBitmapOntoCanvas(bitmap: Bitmap) {
         val canvas = extraCanvas ?: return
-        canvas.drawColor(backgroundColor, PorterDuff.Mode.SRC)
+        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
         val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
         val srcRect = Rect(0, 0, bitmap.width, bitmap.height)
         val srcRatio = bitmap.width.toFloat() / bitmap.height

@@ -35,7 +35,7 @@ data class CardItem(
     var snippet: String,
     var bg: BgImage? = null,
     var updatedAt: Long = System.currentTimeMillis(),
-    var handwritingPath: String? = null
+    var handwriting: HandwritingContent? = null
 )
 
 /** Non-“glass” tint options that keep the card transparent. */
@@ -59,6 +59,8 @@ class CardsAdapter(
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        val cardContent: View = v.findViewById(R.id.card_content)
+        val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         lateinit var gestureDetector: GestureDetectorCompat
     }
@@ -114,18 +116,23 @@ class CardsAdapter(
             DateUtils.MINUTE_IN_MILLIS,
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
-        val handwritingBitmap = item.handwritingPath?.let {
+        val handwritingContent = item.handwriting
+        val handwritingBitmap = handwritingContent?.path?.let {
             loadHandwritingBitmap(holder.itemView.context, it)
         }
         val hasHandwriting = handwritingBitmap != null
-        holder.snippet.isVisible = !hasHandwriting
+        holder.handwritingContainer.isVisible = hasHandwriting
         holder.handwriting.isVisible = hasHandwriting
+        holder.cardContent.isVisible = !hasHandwriting
+        holder.textScrim.isVisible = !hasHandwriting
+        holder.time.isVisible = !hasHandwriting
+        holder.snippet.isVisible = !hasHandwriting
         if (hasHandwriting) {
             holder.snippet.text = ""
             holder.handwriting.setImageBitmap(handwritingBitmap)
             holder.handwriting.contentDescription = holder.itemView.context.getString(R.string.handwriting_card_content_desc)
         } else {
-            val fallback = if (!item.handwritingPath.isNullOrBlank()) {
+            val fallback = if (handwritingContent != null) {
                 if (item.snippet.isNotBlank()) item.snippet
                 else holder.itemView.context.getString(R.string.handwriting_card_missing)
             } else item.snippet
