@@ -764,21 +764,37 @@ class MainActivity : AppCompatActivity() {
         var selectedFormat = existing?.options?.format ?: initialOptions.format
         if (selectedFormat !in formatOptions) selectedFormat = HandwritingFormat.PNG
 
-        val paperColorOptions = listOf(
+        val paperColorOptions = mutableListOf(
             NamedColor(Color.WHITE, getString(R.string.handwriting_color_white)),
             NamedColor(Color.parseColor("#FFF4E0"), getString(R.string.handwriting_color_cream)),
-            NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight)),
-            NamedColor(Color.parseColor("#E3F2FD"), getString(R.string.handwriting_color_sky))
+            NamedColor(Color.parseColor("#FFF1CC"), getString(R.string.handwriting_color_parchment)),
+            NamedColor(Color.parseColor("#ECEFF1"), getString(R.string.handwriting_color_fog)),
+            NamedColor(Color.parseColor("#E3F2FD"), getString(R.string.handwriting_color_sky)),
+            NamedColor(Color.parseColor("#E8F5E9"), getString(R.string.handwriting_color_mint)),
+            NamedColor(Color.parseColor("#F3E5F5"), getString(R.string.handwriting_color_lavender)),
+            NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight))
         )
+        if (paperColorOptions.none { it.color == initialOptions.backgroundColor }) {
+            paperColorOptions.add(0, NamedColor(initialOptions.backgroundColor, getString(R.string.handwriting_color_custom)))
+        }
         var selectedPaperColor = paperColorOptions.firstOrNull { it.color == initialOptions.backgroundColor }
             ?: paperColorOptions.first()
 
-        val brushColorOptions = listOf(
+        val brushColorOptions = mutableListOf(
             NamedColor(Color.BLACK, getString(R.string.handwriting_color_black)),
-            NamedColor(Color.parseColor("#1565C0"), getString(R.string.handwriting_color_blue)),
-            NamedColor(Color.parseColor("#D32F2F"), getString(R.string.handwriting_color_red)),
-            NamedColor(Color.parseColor("#2E7D32"), getString(R.string.handwriting_color_green))
+            NamedColor(Color.parseColor("#424242"), getString(R.string.handwriting_color_graphite)),
+            NamedColor(Color.parseColor("#0D47A1"), getString(R.string.handwriting_color_navy)),
+            NamedColor(Color.parseColor("#2962FF"), getString(R.string.handwriting_color_cobalt)),
+            NamedColor(Color.parseColor("#00897B"), getString(R.string.handwriting_color_teal)),
+            NamedColor(Color.parseColor("#2E7D32"), getString(R.string.handwriting_color_green)),
+            NamedColor(Color.parseColor("#F9A825"), getString(R.string.handwriting_color_amber)),
+            NamedColor(Color.parseColor("#C62828"), getString(R.string.handwriting_color_red)),
+            NamedColor(Color.parseColor("#AD1457"), getString(R.string.handwriting_color_magenta)),
+            NamedColor(Color.parseColor("#6A1B9A"), getString(R.string.handwriting_color_violet))
         )
+        if (brushColorOptions.none { it.color == initialOptions.brushColor }) {
+            brushColorOptions.add(0, NamedColor(initialOptions.brushColor, getString(R.string.handwriting_color_custom)))
+        }
         var selectedBrushColor = brushColorOptions.firstOrNull { it.color == initialOptions.brushColor }
             ?: brushColorOptions.first()
 
@@ -801,7 +817,7 @@ class MainActivity : AppCompatActivity() {
 
         brushSizeSlider.valueFrom = MIN_HANDWRITING_BRUSH_SIZE_DP
         brushSizeSlider.valueTo = MAX_HANDWRITING_BRUSH_SIZE_DP
-        brushSizeSlider.stepSize = 0.5f
+        brushSizeSlider.stepSize = 0.25f
 
         val minBrush = brushSizeSlider.valueFrom
         val maxBrush = brushSizeSlider.valueTo
@@ -1012,6 +1028,7 @@ class MainActivity : AppCompatActivity() {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
                 }
+                persistHandwritingDefaults(options)
                 onSave(saved)
                 dialog.dismiss()
             }
@@ -1247,17 +1264,47 @@ class MainActivity : AppCompatActivity() {
 
     private fun defaultHandwritingOptions(): HandwritingOptions {
         val (maxWidth, maxHeight) = cardCanvasBounds()
-        val (canvasWidth, canvasHeight) = computeCanvasSizeForRatio(DEFAULT_CANVAS_RATIO, maxWidth, maxHeight)
+        val (fallbackWidth, fallbackHeight) = computeCanvasSizeForRatio(DEFAULT_CANVAS_RATIO, maxWidth, maxHeight)
+        val storedBackground = parseColorString(prefs.getString(KEY_HANDWRITING_DEFAULT_BACKGROUND, null))
+        val storedBrush = parseColorString(prefs.getString(KEY_HANDWRITING_DEFAULT_BRUSH, null))
+        val storedBrushSize = prefs.getFloat(KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP, Float.NaN)
+        val storedWidth = prefs.getInt(KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH, -1).takeIf { it > 0 }
+        val storedHeight = prefs.getInt(KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT, -1).takeIf { it > 0 }
+        val baseWidth = storedWidth ?: fallbackWidth
+        val baseHeight = storedHeight ?: fallbackHeight
+        val (canvasWidth, canvasHeight) = clampCanvasSize(baseWidth, baseHeight)
+        val brushSize = if (storedBrushSize.isNaN()) DEFAULT_HANDWRITING_BRUSH_SIZE_DP
+        else storedBrushSize.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
+        val formatName = prefs.getString(KEY_HANDWRITING_DEFAULT_FORMAT, null)
+        val paperStyleName = prefs.getString(KEY_HANDWRITING_DEFAULT_PAPER_STYLE, null)
+        val penTypeName = prefs.getString(KEY_HANDWRITING_DEFAULT_PEN_TYPE, null)
         return HandwritingOptions(
-            backgroundColor = DEFAULT_HANDWRITING_BACKGROUND,
-            brushColor = DEFAULT_HANDWRITING_BRUSH,
-            brushSizeDp = DEFAULT_HANDWRITING_BRUSH_SIZE_DP,
+            backgroundColor = storedBackground ?: DEFAULT_HANDWRITING_BACKGROUND,
+            brushColor = storedBrush ?: DEFAULT_HANDWRITING_BRUSH,
+            brushSizeDp = brushSize,
             canvasWidth = canvasWidth,
             canvasHeight = canvasHeight,
-            format = HandwritingFormat.PNG,
-            paperStyle = DEFAULT_HANDWRITING_PAPER_STYLE,
-            penType = DEFAULT_HANDWRITING_PEN_TYPE
+            format = HandwritingFormat.fromName(formatName) ?: HandwritingFormat.PNG,
+            paperStyle = HandwritingPaperStyle.fromName(paperStyleName) ?: DEFAULT_HANDWRITING_PAPER_STYLE,
+            penType = HandwritingPenType.fromName(penTypeName) ?: DEFAULT_HANDWRITING_PEN_TYPE
         )
+    }
+
+    private fun persistHandwritingDefaults(options: HandwritingOptions) {
+        val (width, height) = clampCanvasSize(options.canvasWidth, options.canvasHeight)
+        prefs.edit().apply {
+            putString(KEY_HANDWRITING_DEFAULT_BACKGROUND, colorToString(options.backgroundColor))
+            putString(KEY_HANDWRITING_DEFAULT_BRUSH, colorToString(options.brushColor))
+            putFloat(
+                KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP,
+                options.brushSizeDp.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
+            )
+            putInt(KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH, width)
+            putInt(KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT, height)
+            putString(KEY_HANDWRITING_DEFAULT_FORMAT, options.format.name)
+            putString(KEY_HANDWRITING_DEFAULT_PAPER_STYLE, options.paperStyle.name)
+            putString(KEY_HANDWRITING_DEFAULT_PEN_TYPE, options.penType.name)
+        }.apply()
     }
 
     private fun parseHandwritingContent(cardObj: JSONObject): HandwritingContent? {
@@ -1748,10 +1795,18 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_NEXT_CARD_ID = "next_card_id"
         private const val KEY_NEXT_FLOW_ID = "next_flow_id"
         private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
+        private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
+        private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
+        private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
+        private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
+        private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
+        private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
+        private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
+        private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
         private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
-        private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 2f
-        private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 18f
-        private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 6f
+        private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
+        private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
+        private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
         private const val DEFAULT_CANVAS_RATIO = 0.75f
         private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
         private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000

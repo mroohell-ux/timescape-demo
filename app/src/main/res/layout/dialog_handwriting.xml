@@ -149,9 +149,9 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:valueFrom="2"
-                        android:valueTo="18"
-                        android:stepSize="0.5"
+                        android:valueFrom="0.75"
+                        android:valueTo="12"
+                        android:stepSize="0.25"
                         app:labelBehavior="gone"
                         app:trackColorActive="?attr/colorPrimary"
                         app:trackColorInactive="@android:color/darker_gray" />

@@ -68,12 +68,24 @@
     <string name="handwriting_paper_grid">Grid</string>
     <string name="handwriting_color_white">White</string>
     <string name="handwriting_color_cream">Cream</string>
+    <string name="handwriting_color_parchment">Parchment</string>
+    <string name="handwriting_color_fog">Fog</string>
     <string name="handwriting_color_midnight">Midnight</string>
     <string name="handwriting_color_sky">Sky</string>
+    <string name="handwriting_color_mint">Mint</string>
+    <string name="handwriting_color_lavender">Lavender</string>
+    <string name="handwriting_color_custom">Custom</string>
     <string name="handwriting_color_black">Black</string>
+    <string name="handwriting_color_graphite">Graphite</string>
+    <string name="handwriting_color_navy">Navy</string>
+    <string name="handwriting_color_cobalt">Cobalt</string>
+    <string name="handwriting_color_teal">Teal</string>
     <string name="handwriting_color_blue">Blue</string>
     <string name="handwriting_color_red">Red</string>
     <string name="handwriting_color_green">Green</string>
+    <string name="handwriting_color_amber">Amber</string>
+    <string name="handwriting_color_magenta">Magenta</string>
+    <string name="handwriting_color_violet">Violet</string>
     <string name="handwriting_card_content_desc">Handwritten card content</string>
     <string name="handwriting_card_missing">Handwriting preview unavailable</string>
 </resources>
