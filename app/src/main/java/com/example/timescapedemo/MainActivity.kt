@@ -2,16 +2,17 @@ package com.example.timescapedemo
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -39,13 +40,13 @@ import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
-import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileNotFoundException
@@ -705,17 +706,26 @@ class MainActivity : AppCompatActivity() {
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
         val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
+        val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
-        val sizeInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputCanvasSize)
-        val formatInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputCanvasFormat)
-        val backgroundInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputCanvasBackground)
-        val brushColorInput = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.inputBrushColor)
+        val toolToggle = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.toggleHandwritingTools)
+        val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
+        val paperButton = dialogView.findViewById<MaterialButton>(R.id.buttonPaperOptions)
+        val penOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerPenOptions)
+        val paperOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerPaperOptions)
+        val brushColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupBrushColors)
+        val penTypeGroup = dialogView.findViewById<ChipGroup>(R.id.groupPenTypes)
         val brushSizeValue = dialogView.findViewById<TextView>(R.id.textBrushSizeValue)
         val brushSizeSlider = dialogView.findViewById<Slider>(R.id.sliderBrushSize)
+        val paperStyleGroup = dialogView.findViewById<ChipGroup>(R.id.groupPaperStyles)
+        val paperColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupPaperColors)
+        val canvasSizeGroup = dialogView.findViewById<ChipGroup>(R.id.groupCanvasSizes)
+        val formatGroup = dialogView.findViewById<ChipGroup>(R.id.groupExportFormats)
 
         val (maxCanvasWidth, maxCanvasHeight) = cardCanvasBounds()
         data class CanvasSizeOption(val key: String, val label: String, val width: Int, val height: Int)
         data class NamedColor(val color: Int, val label: String)
+        data class PaperStyleOption(val style: HandwritingPaperStyle, val label: String, val iconRes: Int)
 
         fun computeSizeForRatio(key: String, labelRes: Int, ratio: Float): CanvasSizeOption {
             val (width, height) = computeCanvasSizeForRatio(ratio, maxCanvasWidth, maxCanvasHeight)
@@ -745,10 +755,6 @@ class MainActivity : AppCompatActivity() {
             sizeOptions.add(0, selectedSize)
         }
 
-        val sizeAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, sizeOptions.map { it.label })
-        sizeInput.setAdapter(sizeAdapter)
-        sizeInput.setText(selectedSize.label, false)
-
         val formatOptions = HandwritingFormat.values().toList()
         fun formatLabel(format: HandwritingFormat): String = when (format) {
             HandwritingFormat.PNG -> getString(R.string.handwriting_format_png)
@@ -757,21 +763,15 @@ class MainActivity : AppCompatActivity() {
         }
         var selectedFormat = existing?.options?.format ?: initialOptions.format
         if (selectedFormat !in formatOptions) selectedFormat = HandwritingFormat.PNG
-        val formatAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, formatOptions.map(::formatLabel))
-        formatInput.setAdapter(formatAdapter)
-        formatInput.setText(formatLabel(selectedFormat), false)
 
-        val backgroundOptions = listOf(
+        val paperColorOptions = listOf(
             NamedColor(Color.WHITE, getString(R.string.handwriting_color_white)),
             NamedColor(Color.parseColor("#FFF4E0"), getString(R.string.handwriting_color_cream)),
             NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight)),
             NamedColor(Color.parseColor("#E3F2FD"), getString(R.string.handwriting_color_sky))
         )
-        var selectedBackground = backgroundOptions.firstOrNull { it.color == initialOptions.backgroundColor }
-            ?: backgroundOptions.first()
-        val backgroundAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, backgroundOptions.map { it.label })
-        backgroundInput.setAdapter(backgroundAdapter)
-        backgroundInput.setText(selectedBackground.label, false)
+        var selectedPaperColor = paperColorOptions.firstOrNull { it.color == initialOptions.backgroundColor }
+            ?: paperColorOptions.first()
 
         val brushColorOptions = listOf(
             NamedColor(Color.BLACK, getString(R.string.handwriting_color_black)),
@@ -781,9 +781,23 @@ class MainActivity : AppCompatActivity() {
         )
         var selectedBrushColor = brushColorOptions.firstOrNull { it.color == initialOptions.brushColor }
             ?: brushColorOptions.first()
-        val brushColorAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, brushColorOptions.map { it.label })
-        brushColorInput.setAdapter(brushColorAdapter)
-        brushColorInput.setText(selectedBrushColor.label, false)
+
+        val paperStyleOptions = listOf(
+            PaperStyleOption(HandwritingPaperStyle.PLAIN, getString(R.string.handwriting_paper_plain), R.drawable.ic_handwriting_paper_plain),
+            PaperStyleOption(HandwritingPaperStyle.RULED, getString(R.string.handwriting_paper_ruled), R.drawable.ic_handwriting_paper_ruled),
+            PaperStyleOption(HandwritingPaperStyle.GRID, getString(R.string.handwriting_paper_grid), R.drawable.ic_handwriting_paper_grid)
+        )
+        var selectedPaperStyle = initialOptions.paperStyle.takeIf { option ->
+            paperStyleOptions.any { it.style == option }
+        } ?: HandwritingPaperStyle.PLAIN
+
+        val penTypeOptions = listOf(
+            HandwritingPenType.ROUND to getString(R.string.handwriting_pen_type_round),
+            HandwritingPenType.MARKER to getString(R.string.handwriting_pen_type_marker),
+            HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy)
+        )
+        var selectedPenType = initialOptions.penType.takeIf { pen -> penTypeOptions.any { it.first == pen } }
+            ?: HandwritingPenType.ROUND
 
         brushSizeSlider.valueFrom = MIN_HANDWRITING_BRUSH_SIZE_DP
         brushSizeSlider.valueTo = MAX_HANDWRITING_BRUSH_SIZE_DP
@@ -792,41 +806,145 @@ class MainActivity : AppCompatActivity() {
         val minBrush = brushSizeSlider.valueFrom
         val maxBrush = brushSizeSlider.valueTo
         var selectedBrushSize = initialOptions.brushSizeDp.coerceIn(minBrush, maxBrush)
+
         fun updateBrushSizeLabel() {
             brushSizeValue.text = getString(R.string.handwriting_brush_size_value, selectedBrushSize)
         }
 
+        fun createChoiceChip(text: String, iconRes: Int? = null, iconTint: Int? = null): Chip {
+            val themedContext = ContextThemeWrapper(this, R.style.Widget_MaterialComponents_Chip_Choice)
+            return Chip(themedContext).apply {
+                id = View.generateViewId()
+                this.text = text
+                isCheckable = true
+                isClickable = true
+                isFocusable = true
+                isCheckedIconVisible = true
+                if (iconRes != null) {
+                    setChipIconResource(iconRes)
+                    isChipIconVisible = true
+                    iconTint?.let { tintColor -> chipIconTint = ColorStateList.valueOf(tintColor) }
+                }
+            }
+        }
+
+        brushColorGroup.removeAllViews()
+        brushColorOptions.forEach { option ->
+            val chip = createChoiceChip(option.label, R.drawable.ic_handwriting_color, option.color).apply {
+                tag = option
+                isChecked = option == selectedBrushColor
+            }
+            brushColorGroup.addView(chip)
+        }
+
+        penTypeGroup.removeAllViews()
+        penTypeOptions.forEach { (penType, label) ->
+            val chip = createChoiceChip(label).apply {
+                tag = penType
+                isChecked = penType == selectedPenType
+            }
+            penTypeGroup.addView(chip)
+        }
+
+        paperStyleGroup.removeAllViews()
+        paperStyleOptions.forEach { option ->
+            val chip = createChoiceChip(option.label, option.iconRes).apply {
+                tag = option
+                isChecked = option.style == selectedPaperStyle
+            }
+            paperStyleGroup.addView(chip)
+        }
+
+        paperColorGroup.removeAllViews()
+        paperColorOptions.forEach { option ->
+            val chip = createChoiceChip(option.label, R.drawable.ic_handwriting_color, option.color).apply {
+                tag = option
+                isChecked = option == selectedPaperColor
+            }
+            paperColorGroup.addView(chip)
+        }
+
+        canvasSizeGroup.removeAllViews()
+        sizeOptions.forEach { option ->
+            val chip = createChoiceChip(option.label).apply {
+                tag = option
+                isChecked = option == selectedSize
+            }
+            canvasSizeGroup.addView(chip)
+        }
+
+        formatGroup.removeAllViews()
+        formatOptions.forEach { option ->
+            val chip = createChoiceChip(formatLabel(option)).apply {
+                tag = option
+                isChecked = option == selectedFormat
+            }
+            formatGroup.addView(chip)
+        }
+
+        fun updateHistoryButtons() {
+            undoButton.isEnabled = handwritingView.canUndo()
+            clearButton.isEnabled = handwritingView.hasDrawing()
+        }
+
         handwritingView.setCanvasSize(selectedSize.width, selectedSize.height)
-        handwritingView.setCanvasBackgroundColor(selectedBackground.color)
+        handwritingView.setCanvasBackgroundColor(selectedPaperColor.color)
+        handwritingView.setPaperStyle(selectedPaperStyle)
         handwritingView.setBrushColor(selectedBrushColor.color)
         handwritingView.setBrushSizeDp(selectedBrushSize)
+        handwritingView.setPenType(selectedPenType)
+        handwritingView.setOnContentChangedListener { updateHistoryButtons() }
         existing?.path?.let { path ->
             loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
         }
 
-        clearButton.setOnClickListener { handwritingView.clear() }
+        undoButton.setOnClickListener {
+            if (handwritingView.undo()) updateHistoryButtons()
+        }
+        clearButton.setOnClickListener {
+            handwritingView.clear()
+            updateHistoryButtons()
+        }
 
-        sizeInput.setOnItemClickListener { _, _, position, _ ->
-            val option = sizeOptions[position]
+        brushColorGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? NamedColor ?: return@setOnCheckedStateChangeListener
+            selectedBrushColor = option
+            handwritingView.setBrushColor(option.color)
+        }
+
+        penTypeGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? HandwritingPenType ?: return@setOnCheckedStateChangeListener
+            selectedPenType = option
+            handwritingView.setPenType(option)
+        }
+
+        paperStyleGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? PaperStyleOption ?: return@setOnCheckedStateChangeListener
+            selectedPaperStyle = option.style
+            handwritingView.setPaperStyle(option.style)
+        }
+
+        paperColorGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? NamedColor ?: return@setOnCheckedStateChangeListener
+            selectedPaperColor = option
+            handwritingView.setCanvasBackgroundColor(option.color)
+        }
+
+        canvasSizeGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? CanvasSizeOption ?: return@setOnCheckedStateChangeListener
             selectedSize = option
             handwritingView.setCanvasSize(option.width, option.height)
         }
 
-        formatInput.setOnItemClickListener { _, _, position, _ ->
-            selectedFormat = formatOptions.getOrNull(position) ?: selectedFormat
-            formatInput.setText(formatLabel(selectedFormat), false)
-        }
-
-        backgroundInput.setOnItemClickListener { _, _, position, _ ->
-            val option = backgroundOptions.getOrNull(position) ?: return@setOnItemClickListener
-            selectedBackground = option
-            handwritingView.setCanvasBackgroundColor(option.color)
-        }
-
-        brushColorInput.setOnItemClickListener { _, _, position, _ ->
-            val option = brushColorOptions.getOrNull(position) ?: return@setOnItemClickListener
-            selectedBrushColor = option
-            handwritingView.setBrushColor(option.color)
+        formatGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? HandwritingFormat ?: return@setOnCheckedStateChangeListener
+            selectedFormat = option
         }
 
         brushSizeSlider.value = selectedBrushSize
@@ -838,6 +956,19 @@ class MainActivity : AppCompatActivity() {
                 updateBrushSizeLabel()
             }
         }
+
+        fun showTool(buttonId: Int) {
+            val showingPen = buttonId == penButton.id
+            penOptionsContainer.isVisible = showingPen
+            paperOptionsContainer.isVisible = !showingPen
+        }
+
+        toolToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) showTool(checkedId)
+        }
+        toolToggle.check(penButton.id)
+        showTool(penButton.id)
+        updateHistoryButtons()
 
         val dialog = AlertDialog.Builder(this)
             .setTitle(getString(titleRes))
@@ -863,12 +994,14 @@ class MainActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
                 val options = HandwritingOptions(
-                    backgroundColor = selectedBackground.color,
+                    backgroundColor = selectedPaperColor.color,
                     brushColor = selectedBrushColor.color,
                     brushSizeDp = selectedBrushSize,
                     canvasWidth = selectedSize.width,
                     canvasHeight = selectedSize.height,
-                    format = selectedFormat
+                    format = selectedFormat,
+                    paperStyle = selectedPaperStyle,
+                    penType = selectedPenType
                 )
                 val saved = saveHandwritingContent(exportBitmap, options, existing)
                 exportBitmap.recycle()
@@ -1118,7 +1251,9 @@ class MainActivity : AppCompatActivity() {
             brushSizeDp = DEFAULT_HANDWRITING_BRUSH_SIZE_DP,
             canvasWidth = canvasWidth,
             canvasHeight = canvasHeight,
-            format = HandwritingFormat.PNG
+            format = HandwritingFormat.PNG,
+            paperStyle = DEFAULT_HANDWRITING_PAPER_STYLE,
+            penType = DEFAULT_HANDWRITING_PEN_TYPE
         )
     }
 
@@ -1139,6 +1274,10 @@ class MainActivity : AppCompatActivity() {
             val (canvasWidth, canvasHeight) = clampCanvasSize(rawWidth, rawHeight)
             val formatName = optionsObj?.optString("format")
             val format = HandwritingFormat.fromName(formatName) ?: baseOptions.format
+            val paperStyleName = optionsObj?.optString("paperStyle")
+            val paperStyle = HandwritingPaperStyle.fromName(paperStyleName) ?: baseOptions.paperStyle
+            val penTypeName = optionsObj?.optString("penType")
+            val penType = HandwritingPenType.fromName(penTypeName) ?: baseOptions.penType
             return HandwritingContent(
                 path = path,
                 options = HandwritingOptions(
@@ -1147,7 +1286,9 @@ class MainActivity : AppCompatActivity() {
                     brushSizeDp = brushSize,
                     canvasWidth = canvasWidth,
                     canvasHeight = canvasHeight,
-                    format = format
+                    format = format,
+                    paperStyle = paperStyle,
+                    penType = penType
                 )
             )
         }
@@ -1394,6 +1535,8 @@ class MainActivity : AppCompatActivity() {
                         put("canvasWidth", options.canvasWidth)
                         put("canvasHeight", options.canvasHeight)
                         put("format", options.format.name)
+                        put("paperStyle", options.paperStyle.name)
+                        put("penType", options.penType.name)
                     }
                     val handwritingObj = JSONObject().apply {
                         put("path", content.path)
@@ -1609,5 +1752,7 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_CANVAS_RATIO = 0.75f
         private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
         private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
+        private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
+        private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
     }
 }

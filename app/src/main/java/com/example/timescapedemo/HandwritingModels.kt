@@ -20,13 +20,37 @@ enum class HandwritingFormat(
     }
 }
 
+enum class HandwritingPaperStyle {
+    PLAIN,
+    RULED,
+    GRID;
+
+    companion object {
+        fun fromName(name: String?): HandwritingPaperStyle? =
+            values().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+}
+
+enum class HandwritingPenType {
+    ROUND,
+    MARKER,
+    CALLIGRAPHY;
+
+    companion object {
+        fun fromName(name: String?): HandwritingPenType? =
+            values().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+}
+
 data class HandwritingOptions(
     @ColorInt val backgroundColor: Int,
     @ColorInt val brushColor: Int,
     val brushSizeDp: Float,
     val canvasWidth: Int,
     val canvasHeight: Int,
-    val format: HandwritingFormat
+    val format: HandwritingFormat,
+    val paperStyle: HandwritingPaperStyle,
+    val penType: HandwritingPenType
 )
 
 data class HandwritingContent(
