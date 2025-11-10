@@ -253,6 +253,14 @@ class RightRailFlowLayoutManager(
             ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
         )
 
+        for (i in childCount - 1 downTo 0) {
+            val child = getChildAt(i) ?: continue
+            val pos = getPosition(child)
+            if (pos !in firstIdx..lastIdx) {
+                removeAndRecycleView(child, recycler)
+            }
+        }
+
         // Size growth radius (how quickly a card "blooms" near center)
         val focusRadiusPx = itemPitchPx * 0.95f
         val heightCap = (height * 2f / 3f).roundToInt()
@@ -261,8 +269,7 @@ class RightRailFlowLayoutManager(
         val nearestY = yT + nearest * itemPitchPx - scrollYPx
 
         for (i in firstIdx..lastIdx) {
-            val child = recycler.getViewForPosition(i)
-            addView(child)
+            val child = findViewByPosition(i) ?: recycler.getViewForPosition(i).also { addView(it) }
             val cache = ensureCache(child)
 
             // Y position of item center for index i
@@ -321,7 +328,6 @@ class RightRailFlowLayoutManager(
         val consumed = (newY - old).toInt()
         scrollYPx = newY
 
-        detachAndScrapAttachedViews(recycler)
         layoutAll(recycler)
         return consumed
     }
