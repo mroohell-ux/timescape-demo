@@ -18,49 +18,44 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * Timescape-like vertical flow with variable-height cards:
- *  - Height grows with text (wrap-content), capped at 2/3 of the screen.
- *  - Width still follows center "gain" + focus animation.
- *  - Only near neighbors overlap slightly (itemPitchPx).
- *  - Cards remain STRAIGHT (no rotation).
+ * Landscape rail that mirrors the portrait effect while scrolling horizontally.
+ * Cards overlap because the center-to-center pitch is smaller than their width
+ * and the layout continuously eases size, alpha, and scatter as in portrait.
  */
-class RightRailFlowLayoutManager(
-    private val baseSidePx: Int,          // width near center (non-focused)
-    private val focusSidePx: Int,         // width when focused (main)
-    private val itemPitchPx: Int,         // visual spacing (center-to-center)
+class HorizontalFlowLayoutManager(
+    private val baseSidePx: Int,
+    private val focusSidePx: Int,
+    private val itemPitchPx: Int,
+    private val leftInsetPx: Int,
     private val rightInsetPx: Int,
-    private val topInsetPx: Int = 0,
-    private val bottomInsetPx: Int = 0,
+    private val verticalCenterOffsetPx: Int = 0,
 
-    // Visual tuning
     private val minEdgeScale: Float = 0.72f,
     private val edgeAlphaMin: Float = 0.30f,
     private val depthScaleDrop: Float = 0.05f,
 
-    // Horizontal rail shaping (controls inflow/outflow direction)
-    private val edgeRightShiftPx: Int = 48,     // far cards to the RIGHT by this many px
-    private val centerLeftShiftPx: Int = 0,     // center card stays centered on the rail
-    private val railCurvePow: Float = 1.1f,     // curvature; 1 = linear, >1 stronger S-curve
+    private val edgeDownShiftPx: Int = 48,
+    private val centerUpShiftPx: Int = 0,
+    private val railCurvePow: Float = 1.1f,
 
-    // S-curve styling
     private val curveRotationRadiusItems: Float = 4.5f,
     private val curveRotationPow: Float = 1.12f,
     private val curveMaxRotationDeg: Float = 9f,
-    private val curveExtraRightShiftPx: Int = 32
-) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider, FlowLayoutManager {
+    private val curveExtraDownShiftPx: Int = 32
+) : RecyclerView.LayoutManager(),
+    RecyclerView.SmoothScroller.ScrollVectorProvider,
+    FlowLayoutManager {
 
-    // focus animation state
     private var selectedIndex: Int? = null
     private var focusProgress: Float = 0f
     private var focusAnimator: ValueAnimator? = null
     private val interp = FastOutSlowInInterpolator()
 
-    // scroll state
-    private var scrollYPx = 0f
+    private var scrollXPx = 0f
     private var pendingRestore: PendingRestore? = null
 
     private data class CurvePlacement(
-        val extraX: Float,
+        val extraY: Float,
         val rotationDeg: Float
     )
 
@@ -75,25 +70,23 @@ class RightRailFlowLayoutManager(
         val focus: Boolean
     )
 
-    override fun canScrollVertically() = true
-    override fun canScrollHorizontally() = false
+    override fun canScrollVertically() = false
+    override fun canScrollHorizontally() = true
     override fun isAutoMeasureEnabled() = true
-    override fun generateDefaultLayoutParams() =
-        RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
+    override fun generateDefaultLayoutParams(): RecyclerView.LayoutParams =
+        RecyclerView.LayoutParams(RecyclerView.LayoutParams.WRAP_CONTENT, RecyclerView.LayoutParams.WRAP_CONTENT)
 
-    // ---- Public helpers ----
     override fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
 
-    /** Center index given current scroll (rounded to nearest). */
     override fun nearestIndex(): Int {
-        val idx = ((scrollYPx + screenCenter() - yTop()) / itemPitchPx).roundToInt()
+        if (itemCount == 0 || itemPitchPx == 0) return 0
+        val idx = ((xRight() + scrollXPx - screenCenter()) / itemPitchPx).roundToInt()
         return idx.coerceIn(0, max(0, itemCount - 1))
     }
 
-    /** Pixel delta required to move `index` to vertical screen center. */
     override fun offsetTo(index: Int): Int {
-        val desiredScroll = yTop() + index * itemPitchPx - screenCenter()
-        return (desiredScroll - scrollYPx).toInt()
+        val desiredScroll = desiredScrollFor(index)
+        return (desiredScroll - scrollXPx).roundToInt()
     }
 
     override fun focus(index: Int) {
@@ -101,13 +94,14 @@ class RightRailFlowLayoutManager(
         selectedIndex = index
         animateFocus(1f)
     }
+
     override fun clearFocus() {
         if (selectedIndex == null && focusProgress == 0f) return
         animateFocus(0f) { selectedIndex = null }
     }
 
     override fun scrollBy(recycler: RecyclerView, delta: Int) {
-        recycler.smoothScrollBy(0, delta)
+        recycler.smoothScrollBy(delta, 0)
     }
 
     private fun animateFocus(to: Float, end: (() -> Unit)? = null) {
@@ -116,7 +110,10 @@ class RightRailFlowLayoutManager(
         focusAnimator = ValueAnimator.ofFloat(from, to).apply {
             duration = if (to > from) 280 else 220
             interpolator = interp
-            addUpdateListener { focusProgress = it.animatedValue as Float; requestLayout() }
+            addUpdateListener {
+                focusProgress = it.animatedValue as Float
+                requestLayout()
+            }
             if (end != null) {
                 addListener(object : android.animation.AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -128,16 +125,15 @@ class RightRailFlowLayoutManager(
         }
     }
 
-    // ---- Rail geometry ----
-    private fun screenCenter() = height / 2f
-    private fun yTop() = paddingTop + topInsetPx + baseSidePx / 2f
-    private fun yBottom() = height - paddingBottom - bottomInsetPx - baseSidePx / 2f
-    private fun railX() = width - paddingRight - rightInsetPx - baseSidePx / 2f
+    private fun screenCenter() = width / 2f
+    private fun xRight() = width - paddingRight - rightInsetPx - baseSidePx / 2f
+    private fun xLeft() = paddingLeft + leftInsetPx + baseSidePx / 2f
+    private fun railY() = height / 2f + verticalCenterOffsetPx
 
-    /** Allow first/last items to be centered without dead space. */
-    private fun minScroll() = yTop() - screenCenter()
+    private fun minScroll(): Float = screenCenter() - xRight()
     private fun maxScroll(): Float {
-        val lastCentered = yTop() + (itemCount - 1).coerceAtLeast(0) * itemPitchPx - screenCenter()
+        if (itemCount <= 0) return minScroll()
+        val lastCentered = screenCenter() - xRight() + (itemCount - 1) * itemPitchPx
         return max(minScroll(), lastCentered)
     }
 
@@ -185,13 +181,11 @@ class RightRailFlowLayoutManager(
     ): Boolean {
         var textChanged = false
         val snippet = cache.snippet
-
         if (snippet != null && cache.lastSnippetMaxLines != Integer.MAX_VALUE) {
             snippet.maxLines = Integer.MAX_VALUE
             cache.lastSnippetMaxLines = Integer.MAX_VALUE
             textChanged = true
         }
-
         return textChanged
     }
 
@@ -215,20 +209,31 @@ class RightRailFlowLayoutManager(
     )
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
-        val cy = screenCenter()
-        val baseX = railX()
-        val yT = yTop(); val yB = yBottom()
+        if (itemPitchPx == 0) return
 
-        // Visible window of indices
+        val cx = screenCenter()
+        val baseY = railY()
+
         val layoutOverscan = 3
+        val leftEdge = paddingLeft.toFloat()
+        val rightEdge = (width - paddingRight).toFloat()
+
         val firstIdx = max(
             0,
-            floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
+            ceil((xRight() + scrollXPx - rightEdge - itemPitchPx) / itemPitchPx).toInt() - layoutOverscan
         )
         val lastIdx = min(
             itemCount - 1,
-            ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
+            floor((xRight() + scrollXPx - leftEdge + itemPitchPx) / itemPitchPx).toInt() + layoutOverscan
         )
+
+        if (firstIdx > lastIdx) {
+            for (i in childCount - 1 downTo 0) {
+                val child = getChildAt(i) ?: continue
+                removeAndRecycleView(child, recycler)
+            }
+            return
+        }
 
         for (i in childCount - 1 downTo 0) {
             val child = getChildAt(i) ?: continue
@@ -238,41 +243,31 @@ class RightRailFlowLayoutManager(
             }
         }
 
-        // Size growth radius (how quickly a card "blooms" near center)
         val focusRadiusPx = itemPitchPx * 0.95f
         val heightCap = (height * 2f / 3f).roundToInt()
 
         val nearest = nearestIndex()
-        val nearestY = yT + nearest * itemPitchPx - scrollYPx
+        val nearestX = xRight() - nearest * itemPitchPx + scrollXPx
 
         for (i in firstIdx..lastIdx) {
             val child = findViewByPosition(i) ?: recycler.getViewForPosition(i).also { addView(it) }
             val cache = ensureCache(child)
 
-            // Y position of item center for index i
-            val py = yT + i * itemPitchPx - scrollYPx
-            val dist = abs(py - cy)
-
-            // Gain ~ 1 at center, ~ 0 at edges
+            val px = xRight() - i * itemPitchPx + scrollXPx
+            val dist = abs(px - cx)
             val gain = exp(-(dist * dist) / (2f * focusRadiusPx * focusRadiusPx))
 
-            // ---- X rail shaping: edges right, center left (S-curve) ----
-            val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
-            val toLeft  = gain * centerLeftShiftPx
-            val curve = computeCurvePlacement(py, cy)
-            val px = baseX + toRight - toLeft + curve.extraX
+            val toDown = (1f - gain).pow(railCurvePow) * edgeDownShiftPx
+            val toUp = gain * centerUpShiftPx
+            val curve = computeCurvePlacement(px, cx)
+            val py = baseY + toDown - toUp + curve.extraY
 
-            val isSelected = (selectedIndex == i)
-
-            // Width: far small -> base -> (if selected) focused
+            val isSelected = selectedIndex == i
             val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
             var side = (edgeSide + (baseSidePx - edgeSide) * interp.getInterpolation(gain)).roundToInt()
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
 
-            // Text size influences measurement, so adjust before measuring
             val textChanged = applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
-
-            // Measure: fixed width, wrap-content height, capped to 2/3 screen
             measureCardWithWidthAndCap(child, side, heightCap, cache, textChanged)
 
             val w = getDecoratedMeasuredWidth(child)
@@ -281,9 +276,8 @@ class RightRailFlowLayoutManager(
             val t = (py - h / 2f).toInt()
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
-            // Alpha / depth (z-order so nearer items render above)
-            child.alpha = 0.92f + 0.08f * gain
-            val dIdx = abs(nearestY - py) / itemPitchPx
+            child.alpha = edgeAlphaMin + (1f - edgeAlphaMin) * gain
+            val dIdx = abs(nearestX - px) / itemPitchPx
             val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
             child.scaleX = depthS
             child.scaleY = depthS
@@ -292,19 +286,19 @@ class RightRailFlowLayoutManager(
             child.translationY = scatter.shiftY
             child.rotation = curve.rotationDeg + scatter.rotationDeg
             val z = if (isSelected) 6000f else (1000f - dist / 10f)
-            child.translationZ = z; child.elevation = z
+            child.translationZ = z
+            child.elevation = z
         }
     }
 
-    override fun scrollVerticallyBy(dy: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
-        if (itemCount == 0 || height == 0) return 0
-        if (dy != 0 && selectedIndex != null && focusProgress > 0f) clearFocus()
+    override fun scrollHorizontallyBy(dx: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
+        if (itemCount == 0 || width == 0) return 0
+        if (dx != 0 && selectedIndex != null && focusProgress > 0f) clearFocus()
 
-        val old = scrollYPx
-        val newY = (old + dy).coerceIn(minScroll(), maxScroll())
-        val consumed = (newY - old).toInt()
-        scrollYPx = newY
-
+        val old = scrollXPx
+        val newX = (old + dx).coerceIn(minScroll(), maxScroll())
+        val consumed = (newX - old).toInt()
+        scrollXPx = newX
         layoutAll(recycler)
         return consumed
     }
@@ -322,8 +316,8 @@ class RightRailFlowLayoutManager(
     private fun applyRestore(index: Int, focus: Boolean): Boolean {
         if (itemCount == 0 || width == 0 || height == 0) return false
         val clamped = index.coerceIn(0, max(0, itemCount - 1))
-        val desired = yTop() + clamped * itemPitchPx - screenCenter()
-        scrollYPx = desired.coerceIn(minScroll(), maxScroll())
+        val desired = desiredScrollFor(clamped)
+        scrollXPx = desired.coerceIn(minScroll(), maxScroll())
         focusAnimator?.cancel()
         if (focus) {
             selectedIndex = clamped
@@ -335,23 +329,25 @@ class RightRailFlowLayoutManager(
         return true
     }
 
-    override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {
-        val desired = yTop() + targetPosition * itemPitchPx - screenCenter()
-        val dir = if (desired > scrollYPx) 1f else -1f
-        return PointF(0f, dir)
+    private fun desiredScrollFor(index: Int): Float {
+        return screenCenter() - (xRight() - index * itemPitchPx)
     }
 
-    private fun computeCurvePlacement(py: Float, centerY: Float): CurvePlacement {
-        if (itemPitchPx == 0) return CurvePlacement(0f, 0f)
+    override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {
+        val desired = desiredScrollFor(targetPosition)
+        val dir = if (desired > scrollXPx) 1f else -1f
+        return PointF(dir, 0f)
+    }
 
-        val signedStepsFromCenter = (py - centerY) / itemPitchPx
+    private fun computeCurvePlacement(px: Float, centerX: Float): CurvePlacement {
+        if (itemPitchPx == 0) return CurvePlacement(0f, 0f)
+        val signedStepsFromCenter = (px - centerX) / itemPitchPx
         val direction = if (signedStepsFromCenter >= 0f) 1f else -1f
         val magnitude = abs(signedStepsFromCenter) / curveRotationRadiusItems
         val eased = magnitude.coerceAtMost(1f).pow(curveRotationPow)
-        val rotation = -direction * eased * curveMaxRotationDeg
-        val extraRight = eased * curveExtraRightShiftPx
-
-        return CurvePlacement(extraRight, rotation)
+        val rotation = direction * eased * curveMaxRotationDeg
+        val extraDown = eased * curveExtraDownShiftPx
+        return CurvePlacement(extraDown, rotation)
     }
 
     private fun computeScatterOffsets(
@@ -359,7 +355,7 @@ class RightRailFlowLayoutManager(
         gain: Float,
         isSelected: Boolean
     ): ScatterOffsets {
-        val normalizedScroll = scrollYPx / itemPitchPx
+        val normalizedScroll = scrollXPx / itemPitchPx
         val basePhase = index * 0.83f + normalizedScroll * 0.9f
         val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
         val tertiaryPhase = (index + normalizedScroll) * 0.55f

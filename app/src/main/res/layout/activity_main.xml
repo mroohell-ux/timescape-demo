@@ -66,6 +66,7 @@
                     android:id="@+id/flowChipScroll"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:saveEnabled="false"
                     android:overScrollMode="never"
                     android:scrollbars="none">
 
