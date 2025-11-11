@@ -25,8 +25,10 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
 import androidx.core.view.isVisible
-import kotlin.math.min
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 data class CardItem(
     val id: Long,
@@ -170,13 +172,15 @@ class CardsAdapter(
 
         // ---- Bind background image (drawable or Uri) ----
         BackgroundImageLoader.clear(holder.bg)
-        when (val b = item.bg) {
+        val hasBackground = when (val b = item.bg) {
             is BgImage.Res -> {
                 holder.bg.setImageResource(b.id)
+                true
             }
             is BgImage.UriRef -> {
                 if (blockedUris.contains(b.uri)) {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                    false
                 } else {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
                     val (targetWidth, targetHeight) = estimateBackgroundSize(holder)
@@ -206,17 +210,19 @@ class CardsAdapter(
                             }
                         }
                     }
+                    true
                 }
             }
             null -> {
                 holder.bg.setImageDrawable(null)
+                false
             }
         }
 
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            baseEffect = RenderEffect.createBlurEffect(18f, 18f, Shader.TileMode.CLAMP)
+        if (hasBackground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            baseEffect = RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
         }
 
         // Apply NON-GLASS tint directly to image
@@ -304,7 +310,22 @@ class CardsAdapter(
             holder.itemView.height,
             holder.itemView.measuredHeight
         ).firstOrNull { it > 0 } ?: fallbackHeight
-        return width to height
+        return clampBackgroundDimensions(width, height, metrics)
+    }
+
+    private fun clampBackgroundDimensions(width: Int, height: Int, metrics: android.util.DisplayMetrics): Pair<Int, Int> {
+        var w = width.coerceAtLeast(1)
+        var h = height.coerceAtLeast(1)
+        val maxLongEdge = min(
+            MAX_BG_LONG_EDGE_PX,
+            max((metrics.widthPixels * BG_WIDTH_FRACTION).roundToInt(), MIN_BG_LONG_EDGE_PX)
+        )
+        val currentLong = max(w, h)
+        if (currentLong <= maxLongEdge) return w to h
+        val scale = maxLongEdge.toFloat() / currentLong.toFloat()
+        w = max(1, (w * scale).roundToInt())
+        h = max(1, (h * scale).roundToInt())
+        return w to h
     }
 
     private fun showHandwriting(holder: VH, isVisible: Boolean, fallbackText: CharSequence) {
@@ -436,6 +457,10 @@ class CardsAdapter(
         private const val TIME_SIZE_DELTA = 3f
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
+        private const val BG_BLUR_RADIUS = 12f
+        private const val MAX_BG_LONG_EDGE_PX = 720
+        private const val MIN_BG_LONG_EDGE_PX = 320
+        private const val BG_WIDTH_FRACTION = 0.65f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
