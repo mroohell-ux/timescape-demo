@@ -9,7 +9,6 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.cos
-import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -58,6 +57,11 @@ class RightRailFlowLayoutManager(
     // scroll state
     private var scrollYPx = 0f
     private var pendingRestore: PendingRestore? = null
+
+    // Precomputed helpers to reduce per-frame work
+    private val gainLookup = GainLookup(itemPitchPx * 0.95f)
+    private val widthQuantizer = WidthQuantizer()
+    private val scatterCalculator = ScatterCalculator()
 
     private data class CurvePlacement(
         val extraX: Float,
@@ -154,6 +158,14 @@ class RightRailFlowLayoutManager(
         forceMeasure: Boolean
     ) {
         val lp = child.layoutParams as RecyclerView.LayoutParams
+        if (!forceMeasure && !child.isLayoutRequested &&
+            cache.lastQuantizedSide == widthPx && cache.lastMaxHeight == maxHeightPx
+        ) {
+            cache.lastMeasuredWidth = widthPx
+            cache.lastQuantizedSide = widthPx
+            return
+        }
+
         var needsMeasure = forceMeasure || child.isLayoutRequested
         if (lp.width != widthPx || lp.height != RecyclerView.LayoutParams.WRAP_CONTENT) {
             lp.width = widthPx
@@ -172,6 +184,7 @@ class RightRailFlowLayoutManager(
             measureChildWithMargins(child, 0, 0)
             cache.lastMeasuredWidth = widthPx
         }
+        cache.lastQuantizedSide = widthPx
     }
 
     private fun applyTextByGain(
@@ -207,7 +220,8 @@ class RightRailFlowLayoutManager(
         val snippet: TextView?,
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
-        var lastSnippetMaxLines: Int = -1
+        var lastSnippetMaxLines: Int = -1,
+        var lastQuantizedSide: Int = -1
     )
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
@@ -216,7 +230,7 @@ class RightRailFlowLayoutManager(
         val yT = yTop(); val yB = yBottom()
 
         // Visible window of indices
-        val layoutOverscan = 3
+        val layoutOverscan = 2
         val firstIdx = max(
             0,
             floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
@@ -235,7 +249,6 @@ class RightRailFlowLayoutManager(
         }
 
         // Size growth radius (how quickly a card "blooms" near center)
-        val focusRadiusPx = itemPitchPx * 0.95f
         val heightCap = (height * 2f / 3f).roundToInt()
 
         val nearest = nearestIndex()
@@ -250,7 +263,7 @@ class RightRailFlowLayoutManager(
             val dist = abs(py - cy)
 
             // Gain ~ 1 at center, ~ 0 at edges
-            val gain = exp(-(dist * dist) / (2f * focusRadiusPx * focusRadiusPx))
+            val gain = gainLookup.gainFor(dist)
 
             // ---- X rail shaping: edges right, center left (S-curve) ----
             val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
@@ -262,8 +275,10 @@ class RightRailFlowLayoutManager(
 
             // Width: far small -> base -> (if selected) focused
             val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
-            var side = (edgeSide + (baseSidePx - edgeSide) * interp.getInterpolation(gain)).roundToInt()
+            val easedGain = interp.getInterpolation(gain)
+            var side = (edgeSide + (baseSidePx - edgeSide) * easedGain).roundToInt()
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
+            side = widthQuantizer.snap(side)
 
             // Text size influences measurement, so adjust before measuring
             val textChanged = applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
@@ -283,7 +298,13 @@ class RightRailFlowLayoutManager(
             val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
             child.scaleX = depthS
             child.scaleY = depthS
-            val scatter = computeScatterOffsets(i, gain, isSelected)
+            val scatter = scatterCalculator.compute(
+                index = i,
+                gain = gain,
+                normalizedScroll = scrollYPx / itemPitchPx,
+                isSelected = isSelected,
+                focusProgress = focusProgress
+            )
             child.translationX = scatter.shiftX
             child.translationY = scatter.shiftY
             child.rotation = curve.rotationDeg + scatter.rotationDeg
@@ -350,28 +371,67 @@ class RightRailFlowLayoutManager(
         return CurvePlacement(extraRight, rotation)
     }
 
-    private fun computeScatterOffsets(
-        index: Int,
-        gain: Float,
-        isSelected: Boolean
-    ): ScatterOffsets {
-        val normalizedScroll = scrollYPx / itemPitchPx
-        val basePhase = index * 0.83f + normalizedScroll * 0.9f
-        val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
-        val tertiaryPhase = (index + normalizedScroll) * 0.55f
+    private class GainLookup(private val focusRadiusPx: Float) {
+        private val invTwoSigmaSq = if (focusRadiusPx == 0f) 0f else 1f / (2f * focusRadiusPx * focusRadiusPx)
+        private val stepPx = max(1f, focusRadiusPx / 80f)
+        private val maxDistance = focusRadiusPx * 6f
+        private val table: FloatArray
 
-        val waveA = sin(basePhase)
-        val waveB = cos(secondaryPhase)
-        val waveC = sin(tertiaryPhase + waveB * 0.35f)
+        init {
+            val size = (maxDistance / stepPx).roundToInt().coerceAtLeast(1)
+            table = FloatArray(size + 2)
+            for (i in table.indices) {
+                val dist = i * stepPx
+                val value = if (focusRadiusPx == 0f) 1f else kotlin.math.exp(-(dist * dist) * invTwoSigmaSq)
+                table[i] = value
+            }
+        }
 
-        val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
-        val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
-        val amount = scatterStrength * focusDamp
+        fun gainFor(distance: Float): Float {
+            if (focusRadiusPx == 0f) return 1f
+            val clamped = distance.coerceIn(0f, maxDistance)
+            val pos = clamped / stepPx
+            val idx = pos.toInt()
+            val frac = pos - idx
+            val a = table.getOrElse(idx) { 0f }
+            val b = table.getOrElse(idx + 1) { 0f }
+            return a + (b - a) * frac
+        }
+    }
 
-        val shiftX = (waveA * 14f + waveB * 8f) * amount
-        val shiftY = (waveB * 6f + waveC * 10f) * amount
-        val rotation = (waveA * 2.6f + waveC * 1.1f) * amount
+    private class WidthQuantizer(private val stepPx: Int = 4) {
+        fun snap(value: Int): Int {
+            if (stepPx <= 1) return value
+            val snapped = ((value + stepPx / 2) / stepPx) * stepPx
+            return snapped.coerceAtLeast(0)
+        }
+    }
 
-        return ScatterOffsets(shiftX, shiftY, rotation)
+    private class ScatterCalculator {
+        fun compute(
+            index: Int,
+            gain: Float,
+            normalizedScroll: Float,
+            isSelected: Boolean,
+            focusProgress: Float
+        ): ScatterOffsets {
+            val basePhase = index * 0.83f + normalizedScroll * 0.9f
+            val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
+            val tertiaryPhase = (index + normalizedScroll) * 0.55f
+
+            val waveA = sin(basePhase)
+            val waveB = cos(secondaryPhase)
+            val waveC = sin(tertiaryPhase + waveB * 0.35f)
+
+            val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
+            val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
+            val amount = scatterStrength * focusDamp
+
+            val shiftX = (waveA * 14f + waveB * 8f) * amount
+            val shiftY = (waveB * 6f + waveC * 10f) * amount
+            val rotation = (waveA * 2.6f + waveC * 1.1f) * amount
+
+            return ScatterOffsets(shiftX, shiftY, rotation)
+        }
     }
 }
