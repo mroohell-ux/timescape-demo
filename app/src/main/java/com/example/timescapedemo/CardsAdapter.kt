@@ -25,8 +25,39 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
 import androidx.core.view.isVisible
-import kotlin.math.min
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+// Default sizing limits used when callers do not provide their own
+// `BackgroundSizingConfig`. The adapter will never decode a background bitmap with a
+// long edge greater than `DEFAULT_MAX_BG_LONG_EDGE_PX`, but it will also avoid shrinking
+// extremely small cards below `DEFAULT_MIN_BG_LONG_EDGE_PX`. When the on-screen size
+// is still unknown, it estimates the desired width as a fraction of the device width;
+// `DEFAULT_BG_WIDTH_FRACTION` represents that fallback fraction. To prevent impossible
+// values, `MIN_BG_WIDTH_FRACTION` defines the lowest fraction the config will accept.
+private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 280
+private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 80
+private const val DEFAULT_BG_WIDTH_FRACTION = 0.45f
+private const val MIN_BG_WIDTH_FRACTION = 0.1f
+
+data class BackgroundSizingConfig(
+    val maxLongEdgePx: Int = DEFAULT_MAX_BG_LONG_EDGE_PX,
+    val minLongEdgePx: Int = DEFAULT_MIN_BG_LONG_EDGE_PX,
+    val widthFraction: Float = DEFAULT_BG_WIDTH_FRACTION
+) {
+    fun normalized(): BackgroundSizingConfig {
+        val minEdge = minLongEdgePx.coerceAtLeast(1)
+        val maxEdge = max(maxLongEdgePx, minEdge)
+        val fraction = widthFraction.coerceIn(MIN_BG_WIDTH_FRACTION, 1f)
+        return if (minEdge == minLongEdgePx && maxEdge == maxLongEdgePx && fraction == widthFraction) {
+            this
+        } else {
+            copy(maxLongEdgePx = maxEdge, minLongEdgePx = minEdge, widthFraction = fraction)
+        }
+    }
+}
 
 data class CardItem(
     val id: Long,
@@ -50,7 +81,8 @@ sealed class TintStyle {
 class CardsAdapter(
     private val tint: TintStyle,
     private val onItemClick: (index: Int) -> Unit,
-    private val onItemDoubleClick: (index: Int) -> Unit
+    private val onItemDoubleClick: (index: Int) -> Unit,
+    backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : RecyclerView.Adapter<CardsAdapter.VH>() {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -67,6 +99,7 @@ class CardsAdapter(
     private val items = mutableListOf<CardItem>()
     private val blockedUris = mutableSetOf<Uri>()
     private var bodyTextSizeSp: Float = DEFAULT_BODY_TEXT_SIZE_SP
+    private var backgroundSizingConfig: BackgroundSizingConfig = backgroundSizing.normalized()
 
     init {
         setHasStableIds(true)
@@ -91,6 +124,13 @@ class CardsAdapter(
     }
 
     fun getItem(index: Int): CardItem? = items.getOrNull(index)
+
+    fun setBackgroundSizing(config: BackgroundSizingConfig) {
+        val normalized = config.normalized()
+        if (normalized == backgroundSizingConfig) return
+        backgroundSizingConfig = normalized
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
@@ -170,13 +210,15 @@ class CardsAdapter(
 
         // ---- Bind background image (drawable or Uri) ----
         BackgroundImageLoader.clear(holder.bg)
-        when (val b = item.bg) {
+        val hasBackground = when (val b = item.bg) {
             is BgImage.Res -> {
                 holder.bg.setImageResource(b.id)
+                true
             }
             is BgImage.UriRef -> {
                 if (blockedUris.contains(b.uri)) {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                    false
                 } else {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
                     val (targetWidth, targetHeight) = estimateBackgroundSize(holder)
@@ -206,17 +248,19 @@ class CardsAdapter(
                             }
                         }
                     }
+                    true
                 }
             }
             null -> {
                 holder.bg.setImageDrawable(null)
+                false
             }
         }
 
         // Base blur (keeps transparency)
         var baseEffect: RenderEffect? = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            baseEffect = RenderEffect.createBlurEffect(18f, 18f, Shader.TileMode.CLAMP)
+        if (hasBackground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            baseEffect = RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
         }
 
         // Apply NON-GLASS tint directly to image
@@ -288,7 +332,7 @@ class CardsAdapter(
     private fun estimateBackgroundSize(holder: VH): Pair<Int, Int> {
         val imageView = holder.bg
         val metrics = holder.itemView.resources.displayMetrics
-        val fallbackWidth = (metrics.widthPixels * 0.7f).toInt().coerceAtLeast(1)
+        val fallbackWidth = (metrics.widthPixels * backgroundSizingConfig.widthFraction).toInt().coerceAtLeast(1)
         val fallbackHeight = (metrics.heightPixels * 0.5f).toInt().coerceAtLeast(1)
         val width = listOf(
             imageView.width,
@@ -304,7 +348,23 @@ class CardsAdapter(
             holder.itemView.height,
             holder.itemView.measuredHeight
         ).firstOrNull { it > 0 } ?: fallbackHeight
-        return width to height
+        return clampBackgroundDimensions(width, height, metrics)
+    }
+
+    private fun clampBackgroundDimensions(width: Int, height: Int, metrics: android.util.DisplayMetrics): Pair<Int, Int> {
+        var w = width.coerceAtLeast(1)
+        var h = height.coerceAtLeast(1)
+        val config = backgroundSizingConfig
+        val maxLongEdge = min(
+            config.maxLongEdgePx,
+            max((metrics.widthPixels * config.widthFraction).roundToInt(), config.minLongEdgePx)
+        )
+        val currentLong = max(w, h)
+        if (currentLong <= maxLongEdge) return w to h
+        val scale = maxLongEdge.toFloat() / currentLong.toFloat()
+        w = max(1, (w * scale).roundToInt())
+        h = max(1, (h * scale).roundToInt())
+        return w to h
     }
 
     private fun showHandwriting(holder: VH, isVisible: Boolean, fallbackText: CharSequence) {
@@ -436,6 +496,7 @@ class CardsAdapter(
         private const val TIME_SIZE_DELTA = 3f
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
+        private const val BG_BLUR_RADIUS = 12f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;

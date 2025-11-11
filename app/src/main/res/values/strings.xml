@@ -27,7 +27,7 @@
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_added_handwriting">Added handwriting card</string>
     <string name="snackbar_handwriting_required">Draw something before saving.</string>
-    <string name="snackbar_handwriting_save_failed">Couldn't save that handwriting.</string>
+    <string name="snackbar_handwriting_save_failed">Couldnt save that handwriting.</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
     <string name="snackbar_removed_image">Removed 1 image</string>
     <string name="snackbar_removed_image_reset_app_background">Removed image and reset app background</string>
@@ -35,7 +35,7 @@
     <string name="snackbar_cleared_all_images">Cleared all images</string>
     <string name="snackbar_app_background_updated">App background updated</string>
     <string name="snackbar_app_background_reset">App background reset</string>
-    <string name="snackbar_app_background_failed">Couldn't load that background</string>
+    <string name="snackbar_app_background_failed">Couldnt load that background</string>
     <string name="drawer_card_font_size">Card font size</string>
     <string name="drawer_card_font_size_value">%1$.0fsp</string>
     <string name="dialog_add_handwriting_title">Handwriting card</string>
