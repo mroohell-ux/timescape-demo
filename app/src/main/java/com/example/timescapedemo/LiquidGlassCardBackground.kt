@@ -1,7 +1,5 @@
 package com.example.timescapedemo
 
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -15,6 +13,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RenderEffect
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
@@ -66,7 +66,7 @@ fun LiquidGlassCardBackground(
                     .graphicsLayer {
                         this.shape = shape
                         clip = true
-                        renderEffect = RenderEffect.createBlurEffect(blurPx, blurPx, Shader.TileMode.CLAMP)
+                        renderEffect = RenderEffect.createBlurEffect(blurPx, blurPx, TileMode.Clamp)
                     }
                     .background(backgroundTint)
             )
