@@ -30,6 +30,28 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 720
+private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 320
+private const val DEFAULT_BG_WIDTH_FRACTION = 0.65f
+private const val MIN_BG_WIDTH_FRACTION = 0.1f
+
+data class BackgroundSizingConfig(
+    val maxLongEdgePx: Int = DEFAULT_MAX_BG_LONG_EDGE_PX,
+    val minLongEdgePx: Int = DEFAULT_MIN_BG_LONG_EDGE_PX,
+    val widthFraction: Float = DEFAULT_BG_WIDTH_FRACTION
+) {
+    fun normalized(): BackgroundSizingConfig {
+        val minEdge = minLongEdgePx.coerceAtLeast(1)
+        val maxEdge = max(maxLongEdgePx, minEdge)
+        val fraction = widthFraction.coerceIn(MIN_BG_WIDTH_FRACTION, 1f)
+        return if (minEdge == minLongEdgePx && maxEdge == maxLongEdgePx && fraction == widthFraction) {
+            this
+        } else {
+            copy(maxLongEdgePx = maxEdge, minLongEdgePx = minEdge, widthFraction = fraction)
+        }
+    }
+}
+
 data class CardItem(
     val id: Long,
     var title: String,
@@ -52,7 +74,8 @@ sealed class TintStyle {
 class CardsAdapter(
     private val tint: TintStyle,
     private val onItemClick: (index: Int) -> Unit,
-    private val onItemDoubleClick: (index: Int) -> Unit
+    private val onItemDoubleClick: (index: Int) -> Unit,
+    backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : RecyclerView.Adapter<CardsAdapter.VH>() {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -69,6 +92,7 @@ class CardsAdapter(
     private val items = mutableListOf<CardItem>()
     private val blockedUris = mutableSetOf<Uri>()
     private var bodyTextSizeSp: Float = DEFAULT_BODY_TEXT_SIZE_SP
+    private var backgroundSizingConfig: BackgroundSizingConfig = backgroundSizing.normalized()
 
     init {
         setHasStableIds(true)
@@ -93,6 +117,13 @@ class CardsAdapter(
     }
 
     fun getItem(index: Int): CardItem? = items.getOrNull(index)
+
+    fun setBackgroundSizing(config: BackgroundSizingConfig) {
+        val normalized = config.normalized()
+        if (normalized == backgroundSizingConfig) return
+        backgroundSizingConfig = normalized
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
@@ -294,7 +325,7 @@ class CardsAdapter(
     private fun estimateBackgroundSize(holder: VH): Pair<Int, Int> {
         val imageView = holder.bg
         val metrics = holder.itemView.resources.displayMetrics
-        val fallbackWidth = (metrics.widthPixels * 0.7f).toInt().coerceAtLeast(1)
+        val fallbackWidth = (metrics.widthPixels * backgroundSizingConfig.widthFraction).toInt().coerceAtLeast(1)
         val fallbackHeight = (metrics.heightPixels * 0.5f).toInt().coerceAtLeast(1)
         val width = listOf(
             imageView.width,
@@ -316,9 +347,10 @@ class CardsAdapter(
     private fun clampBackgroundDimensions(width: Int, height: Int, metrics: android.util.DisplayMetrics): Pair<Int, Int> {
         var w = width.coerceAtLeast(1)
         var h = height.coerceAtLeast(1)
+        val config = backgroundSizingConfig
         val maxLongEdge = min(
-            MAX_BG_LONG_EDGE_PX,
-            max((metrics.widthPixels * BG_WIDTH_FRACTION).roundToInt(), MIN_BG_LONG_EDGE_PX)
+            config.maxLongEdgePx,
+            max((metrics.widthPixels * config.widthFraction).roundToInt(), config.minLongEdgePx)
         )
         val currentLong = max(w, h)
         if (currentLong <= maxLongEdge) return w to h
@@ -458,9 +490,6 @@ class CardsAdapter(
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
-        private const val MAX_BG_LONG_EDGE_PX = 720
-        private const val MIN_BG_LONG_EDGE_PX = 320
-        private const val BG_WIDTH_FRACTION = 0.65f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
