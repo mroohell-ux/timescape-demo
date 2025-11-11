@@ -3,6 +3,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_shuffle_cards"
+        android:title="@string/menu_shuffle_cards"
+        android:checkable="true"
+        app:showAsAction="ifRoom"/>
+
+    <item
         android:id="@+id/action_add_card"
         android:title="@string/menu_add_card"
         android:icon="@android:drawable/ic_menu_edit"
