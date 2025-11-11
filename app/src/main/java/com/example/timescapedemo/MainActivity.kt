@@ -11,8 +11,10 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -25,6 +27,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SearchView
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
@@ -66,6 +69,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
     private lateinit var flowChipScroll: HorizontalScrollView
+
+    private var searchMenuItem: MenuItem? = null
+    private var searchView: SearchView? = null
+    private var searchQueryText: String = ""
+    private var searchQueryNormalized: String = ""
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -287,6 +295,10 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(rootLayout)
 
         onBackPressedDispatcher.addCallback(this) {
+            if (searchMenuItem?.isActionViewExpanded == true) {
+                searchMenuItem?.collapseActionView()
+                return@addCallback
+            }
             if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
                 drawerLayout.closeDrawer(GravityCompat.START)
                 return@addCallback
@@ -333,6 +345,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupToolbarActions() {
         toolbar.menu.clear()
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
+        setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
@@ -342,6 +355,85 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
                 else -> false
             }
+        }
+    }
+
+    private fun setupSearchAction(searchItem: MenuItem?) {
+        searchMenuItem = searchItem
+        val view = searchItem?.actionView as? SearchView ?: run {
+            searchView = null
+            return
+        }
+        searchView = view
+        view.queryHint = getString(R.string.search_cards_hint)
+        view.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        view.imeOptions = EditorInfo.IME_ACTION_SEARCH
+        view.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+            override fun onQueryTextSubmit(query: String?): Boolean {
+                setSearchQuery(query.orEmpty(), restoreStateWhenCleared = true)
+                view.clearFocus()
+                return true
+            }
+
+            override fun onQueryTextChange(newText: String?): Boolean {
+                val value = newText.orEmpty()
+                if (value == searchQueryText) return true
+                setSearchQuery(value, restoreStateWhenCleared = true)
+                return true
+            }
+        })
+        searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
+            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
+                val flow = currentFlow()
+                val controller = currentController()
+                if (flow != null && controller != null) {
+                    controller.captureState(flow)
+                }
+                view.setQuery(searchQueryText, false)
+                view.post { view.requestFocus() }
+                return true
+            }
+
+            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
+                view.clearFocus()
+                if (searchQueryText.isNotEmpty()) {
+                    view.setQuery("", false)
+                }
+                return true
+            }
+        })
+
+        if (searchQueryText.isNotEmpty()) {
+            searchItem.expandActionView()
+            view.setQuery(searchQueryText, false)
+            view.clearFocus()
+        } else {
+            view.setQuery("", false)
+        }
+    }
+
+    private fun setSearchQuery(rawQuery: String, restoreStateWhenCleared: Boolean) {
+        val normalized = rawQuery.trim()
+        val rawChanged = rawQuery != searchQueryText
+        val normalizedChanged = normalized != searchQueryNormalized
+        if (!rawChanged && !normalizedChanged) return
+        searchQueryText = rawQuery
+        searchQueryNormalized = normalized
+        updateSearchResults(restoreStateWhenCleared)
+    }
+
+    private fun updateSearchResults(restoreStateWhenCleared: Boolean) {
+        val normalized = searchQueryNormalized
+        flowControllers.forEach { (id, controller) ->
+            val flow = flows.firstOrNull { it.id == id } ?: return@forEach
+            val shouldRestoreState = normalized.isEmpty() && restoreStateWhenCleared
+            val shouldScrollToTop = normalized.isNotEmpty()
+            controller.updateDisplayedCards(
+                flow = flow,
+                query = normalized,
+                shouldRestoreState = shouldRestoreState,
+                shouldScrollToTop = shouldScrollToTop
+            )
         }
     }
 
@@ -431,8 +523,12 @@ class MainActivity : AppCompatActivity() {
         applyCardBackgrounds(flow)
 
         if (controller != null) {
-            controller.adapter.submitList(flow.cards.toList())
-            controller.restoreState(flow)
+            controller.updateDisplayedCards(
+                flow = flow,
+                query = searchQueryNormalized,
+                shouldRestoreState = searchQueryNormalized.isEmpty(),
+                shouldScrollToTop = searchQueryNormalized.isNotEmpty()
+            )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
             if (index >= 0) flowAdapter.notifyItemChanged(index)
@@ -584,17 +680,32 @@ class MainActivity : AppCompatActivity() {
         applyCardBackgrounds(flow)
     }
 
+    private fun filterCardsForSearch(cards: List<CardItem>, query: String): List<CardItem> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return cards.toList()
+        return cards.filter { card ->
+            card.title.contains(trimmed, ignoreCase = true) ||
+                card.snippet.contains(trimmed, ignoreCase = true)
+        }
+    }
+
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
-        if (scrollToTop) {
+        if (scrollToTop && searchQueryNormalized.isEmpty()) {
             flow.lastViewedCardIndex = 0
             flow.lastViewedCardId = flow.cards.firstOrNull()?.id
             flow.lastViewedCardFocused = false
         }
         if (controller != null) {
-            controller.adapter.submitList(flow.cards.toList())
-            controller.restoreState(flow)
+            val shouldRestoreState = searchQueryNormalized.isEmpty() && !scrollToTop
+            val shouldScrollToTop = scrollToTop || searchQueryNormalized.isNotEmpty()
+            controller.updateDisplayedCards(
+                flow = flow,
+                query = searchQueryNormalized,
+                shouldRestoreState = shouldRestoreState,
+                shouldScrollToTop = shouldScrollToTop
+            )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
             if (index >= 0) flowAdapter.notifyItemChanged(index)
@@ -1811,8 +1922,12 @@ class MainActivity : AppCompatActivity() {
                 val controller = FlowPageController(flow.id, recycler, layoutManager, adapter)
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
-                adapter.submitList(flow.cards.toList())
-                controller.restoreState(flow)
+                controller.updateDisplayedCards(
+                    flow = flow,
+                    query = searchQueryNormalized,
+                    shouldRestoreState = searchQueryNormalized.isEmpty(),
+                    shouldScrollToTop = searchQueryNormalized.isNotEmpty()
+                )
             }
 
             fun onCardTapped(index: Int) {
@@ -1842,7 +1957,43 @@ class MainActivity : AppCompatActivity() {
         val layoutManager: RightRailFlowLayoutManager,
         val adapter: CardsAdapter
     ) {
+        private var activeQuery: String = ""
+
+        fun updateDisplayedCards(
+            flow: CardFlow,
+            query: String,
+            shouldRestoreState: Boolean,
+            shouldScrollToTop: Boolean
+        ) {
+            activeQuery = query
+            val displayed = filterCardsForSearch(flow.cards, query)
+            adapter.submitList(displayed)
+            if (displayed.isEmpty()) {
+                layoutManager.clearFocus()
+                layoutManager.restoreState(0, false)
+                return
+            }
+            if (query.isBlank()) {
+                if (shouldRestoreState) {
+                    restoreState(flow)
+                } else if (shouldScrollToTop) {
+                    layoutManager.clearFocus()
+                    layoutManager.restoreState(0, false)
+                }
+                return
+            }
+            layoutManager.clearFocus()
+            if (shouldScrollToTop) {
+                layoutManager.restoreState(0, false)
+            }
+        }
+
         fun restoreState(flow: CardFlow) {
+            if (activeQuery.isNotBlank()) {
+                layoutManager.clearFocus()
+                layoutManager.restoreState(0, false)
+                return
+            }
             if (adapter.itemCount == 0) {
                 layoutManager.restoreState(0, false)
                 flow.lastViewedCardIndex = 0
