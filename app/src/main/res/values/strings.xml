@@ -8,8 +8,10 @@
     <string name="menu_add_card">Add card</string>
     <string name="menu_add_handwriting">Add handwriting</string>
     <string name="menu_add_flow">Add flow</string>
+    <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
     <string name="menu_unshuffle_cards">Restore order</string>
+    <string name="search_cards_hint">Search cards</string>
     <string name="snackbar_not_enough_cards_to_shuffle">Add at least two cards to shuffle.</string>
     <string name="drawer_card_backgrounds">Card backgrounds</string>
     <string name="drawer_add_images">Add background images</string>
