@@ -13,8 +13,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RenderEffect
-import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
@@ -39,7 +38,6 @@ fun LiquidGlassCardBackground(
 ) {
     val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
     val density = LocalDensity.current
-    val blurPx = remember(blurRadius, density) { with(density) { blurRadius.toPx() } }
     val radiusPx = remember(cornerRadius, density) { with(density) { cornerRadius.toPx() } }
     val borderWidthPx = remember(density) { with(density) { 1.4.dp.toPx() } }
 
@@ -66,8 +64,8 @@ fun LiquidGlassCardBackground(
                     .graphicsLayer {
                         this.shape = shape
                         clip = true
-                        renderEffect = RenderEffect.createBlurEffect(blurPx, blurPx, TileMode.Clamp)
                     }
+                    .blur(blurRadius)
                     .background(backgroundTint)
             )
 
