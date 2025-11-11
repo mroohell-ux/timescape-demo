@@ -16,11 +16,17 @@ pluginManagement {
         maven("https://maven.pkg.jetbrains.space/kotlin/p/compose/dev")
         maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
         maven("https://maven.pkg.jetbrains.space/public/p/compose/releases")
+        maven("https://androidx.dev/storage/compose-compiler/repository/")
     }
     resolutionStrategy {
         eachPlugin {
-            if (requested.id.id.startsWith("org.jetbrains.kotlin")) {
-                useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${requested.version}")
+            when (requested.id.id) {
+                "org.jetbrains.kotlin.plugin.compose" -> {
+                    useModule("org.jetbrains.kotlin:compose-compiler-gradle-plugin:${requested.version}")
+                }
+                else -> if (requested.id.id.startsWith("org.jetbrains.kotlin")) {
+                    useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${requested.version}")
+                }
             }
         }
     }
@@ -30,6 +36,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://androidx.dev/storage/compose-compiler/repository/")
     }
 }
 
