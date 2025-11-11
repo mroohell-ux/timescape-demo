@@ -3,21 +3,28 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_shuffle_cards"
+        android:title="@string/menu_shuffle_cards"
+        android:icon="@drawable/ic_shuffle"
+        android:checkable="true"
+        app:showAsAction="always"/>
+
+    <item
         android:id="@+id/action_add_card"
         android:title="@string/menu_add_card"
         android:icon="@android:drawable/ic_menu_edit"
-        app:showAsAction="ifRoom"/>
+        app:showAsAction="always"/>
 
     <item
         android:id="@+id/action_add_handwriting"
         android:title="@string/menu_add_handwriting"
         android:icon="@drawable/ic_handwriting"
-        app:showAsAction="ifRoom"/>
+        app:showAsAction="always"/>
 
     <item
         android:id="@+id/action_add_flow"
         android:title="@string/menu_add_flow"
         android:icon="@android:drawable/ic_menu_add"
-        app:showAsAction="ifRoom"/>
+        app:showAsAction="always"/>
 
 </menu>

@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
     private val selectedImages: MutableList<BgImage> = mutableListOf()
     private val flows: MutableList<CardFlow> = mutableListOf()
     private val flowControllers: MutableMap<Long, FlowPageController> = mutableMapOf()
+    private val flowShuffleStates: MutableMap<Long, FlowShuffleState> = mutableMapOf()
 
     private val cardTint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
 
@@ -324,6 +325,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, position).apply()
                 updateChipSelection(position)
                 updateToolbarSubtitle()
+                updateShuffleMenuState()
             }
         })
     }
@@ -331,8 +333,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupToolbarActions() {
         toolbar.menu.clear()
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
+        updateShuffleMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
+                R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
                 R.id.action_add_card -> { showAddCardDialog(); true }
                 R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
@@ -343,6 +347,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateToolbarSubtitle() {
         toolbar.subtitle = ""
+    }
+
+    private fun updateShuffleMenuState() {
+        val menuItem = toolbar.menu.findItem(R.id.action_shuffle_cards) ?: return
+        val flow = currentFlow()
+        val isShuffled = flow?.let { flowShuffleStates.containsKey(it.id) } == true
+        menuItem.isCheckable = true
+        menuItem.isChecked = isShuffled
+        menuItem.title = getString(
+            if (isShuffled) R.string.menu_unshuffle_cards else R.string.menu_shuffle_cards
+        )
     }
 
     private fun updateChipSelection(position: Int) {
@@ -376,6 +391,55 @@ class MainActivity : AppCompatActivity() {
             flowChipGroup.addView(chip)
         }
         centerSelectedChip(safeIndex)
+    }
+
+    private fun toggleShuffleCards() {
+        val flow = currentFlow()
+        if (flow == null) {
+            snackbar(getString(R.string.snackbar_add_flow_first))
+            return
+        }
+        val isCurrentlyShuffled = flowShuffleStates.containsKey(flow.id)
+        if (!isCurrentlyShuffled && flow.cards.size < 2) {
+            snackbar(getString(R.string.snackbar_not_enough_cards_to_shuffle))
+            updateShuffleMenuState()
+            return
+        }
+
+        val controller = currentController()
+        controller?.captureState(flow)
+
+        if (!isCurrentlyShuffled) {
+            val originalOrder = flow.cards.map { it.id }.toMutableList()
+            val shuffled = flow.cards.toMutableList().also { it.shuffle() }
+            flow.cards.clear()
+            flow.cards.addAll(shuffled)
+            val state = FlowShuffleState(originalOrder)
+            flowShuffleStates[flow.id] = state
+            state.syncWith(flow)
+        } else {
+            val state = flowShuffleStates.remove(flow.id)
+            if (state != null) {
+                val orderMap = state.originalOrder.withIndex().associate { (index, id) -> id to index }
+                flow.cards.sortWith(
+                    compareBy<CardItem> { orderMap[it.id] ?: Int.MAX_VALUE }
+                        .thenByDescending { it.updatedAt }
+                )
+            }
+        }
+
+        applyCardBackgrounds(flow)
+
+        if (controller != null) {
+            controller.adapter.submitList(flow.cards.toList())
+            controller.restoreState(flow)
+        } else {
+            val index = flows.indexOfFirst { it.id == flow.id }
+            if (index >= 0) flowAdapter.notifyItemChanged(index)
+        }
+
+        updateShuffleMenuState()
+        saveState()
     }
 
     private fun centerSelectedChip(position: Int) {
@@ -457,6 +521,7 @@ class MainActivity : AppCompatActivity() {
         }
         val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
+        flowShuffleStates.remove(removed.id)
         removed.cards.forEach { card ->
             card.handwriting?.path?.let { deleteHandwritingFile(it) }
         }
@@ -467,6 +532,7 @@ class MainActivity : AppCompatActivity() {
             selectedFlowIndex = 0
             renderFlowChips(0)
             updateToolbarSubtitle()
+            updateShuffleMenuState()
             saveState()
             return
         }
@@ -480,6 +546,7 @@ class MainActivity : AppCompatActivity() {
         renderFlowChips(safeTarget)
         flowPager.setCurrentItem(safeTarget, false)
         updateToolbarSubtitle()
+        updateShuffleMenuState()
         saveState()
         snackbar(getString(R.string.snackbar_deleted_flow, removed.name))
     }
@@ -509,19 +576,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
-        flow.cards.sortByDescending { it.updatedAt }
-        val fallback: BgImage = BgImage.Res(R.drawable.bg_placeholder)
-        val backgrounds = if (selectedImages.isNotEmpty()) selectedImages else listOf(fallback)
-        flow.cards.forEach { card ->
-            val chosenBg = if (selectedImages.isEmpty()) {
-                fallback
-            } else {
-                val seed = card.id * 31L + flow.id
-                val random = Random(seed)
-                backgrounds[random.nextInt(backgrounds.size)]
-            }
-            card.bg = chosenBg
+        if (!isFlowShuffled(flow.id)) {
+            flow.cards.sortByDescending { it.updatedAt }
+        } else {
+            flowShuffleStates[flow.id]?.syncWith(flow)
         }
+        applyCardBackgrounds(flow)
     }
 
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
@@ -539,6 +599,9 @@ class MainActivity : AppCompatActivity() {
             val index = flows.indexOfFirst { it.id == flow.id }
             if (index >= 0) flowAdapter.notifyItemChanged(index)
         }
+        if (flow == currentFlow()) {
+            updateShuffleMenuState()
+        }
     }
 
     private fun refreshAllFlows(scrollToTopCurrent: Boolean = false) {
@@ -546,6 +609,32 @@ class MainActivity : AppCompatActivity() {
             val shouldScroll = scrollToTopCurrent && flow == currentFlow()
             refreshFlow(flow, shouldScroll)
         }
+    }
+
+    private fun isFlowShuffled(flowId: Long): Boolean = flowShuffleStates.containsKey(flowId)
+
+    private fun applyCardBackgrounds(flow: CardFlow) {
+        val fallback: BgImage = BgImage.Res(R.drawable.bg_placeholder)
+        val backgrounds = if (selectedImages.isNotEmpty()) selectedImages else listOf(fallback)
+        flow.cards.forEach { card ->
+            val chosenBg = if (selectedImages.isEmpty()) {
+                fallback
+            } else {
+                val seed = card.id * 31L + flow.id
+                val random = Random(seed)
+                backgrounds[random.nextInt(backgrounds.size)]
+            }
+            card.bg = chosenBg
+        }
+    }
+
+    private fun cardsInOriginalOrder(flow: CardFlow, state: FlowShuffleState): List<CardItem> {
+        val cardsById = flow.cards.associateBy { it.id }
+        val ordered = state.originalOrder.mapNotNull { cardsById[it] }
+        if (ordered.size == flow.cards.size) return ordered
+        val knownIds = state.originalOrder.toHashSet()
+        val remaining = flow.cards.filterNot { knownIds.contains(it.id) }
+        return ordered + remaining
     }
 
     private fun persistControllerState(flowId: Long) {
@@ -1411,6 +1500,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadState() {
         flows.clear()
         selectedImages.clear()
+        flowShuffleStates.clear()
 
         var highestFlowId = -1L
         var highestCardId = -1L
@@ -1570,7 +1660,9 @@ class MainActivity : AppCompatActivity() {
             flowObj.put("id", flow.id)
             flowObj.put("name", flow.name)
             val cardsArray = JSONArray()
-            flow.cards.forEach { card ->
+            val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
+            val cardsForPersistence = shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards
+            cardsForPersistence.forEach { card ->
                 val obj = JSONObject()
                 obj.put("id", card.id)
                 obj.put("title", card.title)
@@ -1782,6 +1874,17 @@ class MainActivity : AppCompatActivity() {
             flow.lastViewedCardIndex = nearest
             flow.lastViewedCardId = adapter.getItem(nearest)?.id
             flow.lastViewedCardFocused = layoutManager.isFocused(nearest)
+        }
+    }
+
+    private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
+        fun syncWith(flow: CardFlow) {
+            val currentIds = flow.cards.map { it.id }
+            val currentSet = currentIds.toMutableSet()
+            originalOrder.retainAll(currentSet)
+            currentIds.forEach { id ->
+                if (!originalOrder.contains(id)) originalOrder.add(id)
+            }
         }
     }
 
