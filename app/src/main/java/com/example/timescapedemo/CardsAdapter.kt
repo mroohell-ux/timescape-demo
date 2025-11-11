@@ -30,6 +30,13 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+// Default sizing limits used when callers do not provide their own
+// `BackgroundSizingConfig`. The adapter will never decode a background bitmap with a
+// long edge greater than `DEFAULT_MAX_BG_LONG_EDGE_PX`, but it will also avoid shrinking
+// extremely small cards below `DEFAULT_MIN_BG_LONG_EDGE_PX`. When the on-screen size
+// is still unknown, it estimates the desired width as a fraction of the device width;
+// `DEFAULT_BG_WIDTH_FRACTION` represents that fallback fraction. To prevent impossible
+// values, `MIN_BG_WIDTH_FRACTION` defines the lowest fraction the config will accept.
 private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 720
 private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 320
 private const val DEFAULT_BG_WIDTH_FRACTION = 0.65f
