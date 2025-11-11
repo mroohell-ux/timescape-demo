@@ -9,6 +9,12 @@
         app:showAsAction="ifRoom"/>
 
     <item
+        android:id="@+id/action_add_handwriting"
+        android:title="@string/menu_add_handwriting"
+        android:icon="@drawable/ic_handwriting"
+        app:showAsAction="ifRoom"/>
+
+    <item
         android:id="@+id/action_add_flow"
         android:title="@string/menu_add_flow"
         android:icon="@android:drawable/ic_menu_add"

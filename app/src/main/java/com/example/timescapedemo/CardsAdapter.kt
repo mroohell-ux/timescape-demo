@@ -5,6 +5,7 @@ import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.content.Context
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
@@ -21,8 +22,11 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
 import androidx.core.view.GestureDetectorCompat
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
+import androidx.core.view.isVisible
+import kotlin.math.min
 import kotlin.math.abs
 
 data class CardItem(
@@ -30,7 +34,8 @@ data class CardItem(
     var title: String,
     var snippet: String,
     var bg: BgImage? = null,
-    var updatedAt: Long = System.currentTimeMillis()
+    var updatedAt: Long = System.currentTimeMillis(),
+    var handwriting: HandwritingContent? = null
 )
 
 /** Non-“glass” tint options that keep the card transparent. */
@@ -54,6 +59,9 @@ class CardsAdapter(
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
+        val cardContent: View = v.findViewById(R.id.card_content)
+        val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
+        val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -61,12 +69,26 @@ class CardsAdapter(
     private val blockedUris = mutableSetOf<Uri>()
     private var bodyTextSizeSp: Float = DEFAULT_BODY_TEXT_SIZE_SP
 
+    init {
+        setHasStableIds(true)
+    }
+
     fun submitList(newItems: List<CardItem>) {
+        val oldItems = snapshotItems(items)
+        val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize(): Int = oldItems.size
+            override fun getNewListSize(): Int = newItems.size
+            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                oldItems[oldItemPosition].id == newItems[newItemPosition].id
+
+            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                oldItems[oldItemPosition] == newItems[newItemPosition]
+        })
         items.clear()
-        items.addAll(newItems)
+        items.addAll(newItems.map { it.deepCopy() })
         val activeUris = newItems.mapNotNull { (it.bg as? BgImage.UriRef)?.uri }.toSet()
         blockedUris.retainAll(activeUris)
-        notifyDataSetChanged()
+        diff.dispatchUpdatesTo(this)
     }
 
     fun getItem(index: Int): CardItem? = items.getOrNull(index)
@@ -108,7 +130,41 @@ class CardsAdapter(
             DateUtils.MINUTE_IN_MILLIS,
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
-        holder.snippet.text = item.snippet
+        val handwritingContent = item.handwriting
+        val fallbackText = if (handwritingContent != null) {
+            if (item.snippet.isNotBlank()) item.snippet
+            else holder.itemView.context.getString(R.string.handwriting_card_missing)
+        } else item.snippet
+        holder.itemView.setTag(R.id.tag_card_id, item.id)
+        showHandwriting(holder, isVisible = false, fallbackText = fallbackText)
+        handwritingContent?.path?.let { path ->
+            val (targetWidth, targetHeight) = estimateTargetSize(holder, handwritingContent)
+            HandwritingBitmapLoader.load(
+                context = holder.itemView.context,
+                path = path,
+                imageView = holder.handwriting,
+                targetWidth = targetWidth,
+                targetHeight = targetHeight
+            ) { bitmap ->
+                val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+                if (!isSameCard) return@load
+                if (bitmap != null) {
+                    holder.handwriting.setImageBitmap(bitmap)
+                    showHandwriting(holder, isVisible = true, fallbackText = fallbackText)
+                    holder.handwriting.contentDescription = holder.itemView.context.getString(
+                        R.string.handwriting_card_content_desc
+                    )
+                } else {
+                    holder.handwriting.setImageDrawable(null)
+                    showHandwriting(holder, isVisible = false, fallbackText = fallbackText)
+                    holder.handwriting.contentDescription = null
+                }
+            }
+            prefetchNeighbors(holder, position, targetWidth, targetHeight)
+        } ?: run {
+            HandwritingBitmapLoader.clear(holder.handwriting)
+            holder.handwriting.contentDescription = null
+        }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
         holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
@@ -156,6 +212,74 @@ class CardsAdapter(
     }
 
     override fun getItemCount(): Int = items.size
+
+    override fun getItemId(position: Int): Long = items[position].id
+
+    override fun onViewRecycled(holder: VH) {
+        HandwritingBitmapLoader.clear(holder.handwriting)
+        holder.handwriting.contentDescription = null
+        holder.itemView.setTag(R.id.tag_card_id, null)
+        showHandwriting(holder, isVisible = false, fallbackText = holder.snippet.text ?: "")
+        super.onViewRecycled(holder)
+    }
+
+    private fun prefetchNeighbors(holder: VH, position: Int, targetWidth: Int, targetHeight: Int) {
+        val context = holder.itemView.context
+        val appContext = context.applicationContext
+        for (offset in 1..HANDWRITING_PREFETCH_DISTANCE) {
+            prefetchForIndex(position + offset, appContext, targetWidth, targetHeight)
+            prefetchForIndex(position - offset, appContext, targetWidth, targetHeight)
+        }
+    }
+
+    private fun prefetchForIndex(index: Int, context: Context, baseWidth: Int, baseHeight: Int) {
+        if (index < 0 || index >= items.size) return
+        val handwriting = items[index].handwriting ?: return
+        val width = min(baseWidth, handwriting.options.canvasWidth)
+        val height = min(baseHeight, handwriting.options.canvasHeight)
+        HandwritingBitmapLoader.prefetch(
+            context = context,
+            path = handwriting.path,
+            targetWidth = width,
+            targetHeight = height
+        )
+    }
+
+    private fun estimateTargetSize(holder: VH, content: HandwritingContent): Pair<Int, Int> {
+        val imageView = holder.handwriting
+        val fallbackWidth = content.options.canvasWidth
+        val fallbackHeight = content.options.canvasHeight
+        val width = listOf(
+            imageView.width,
+            imageView.measuredWidth,
+            imageView.layoutParams?.width ?: 0,
+            holder.itemView.width
+        ).firstOrNull { it > 0 }?.coerceAtMost(fallbackWidth)?.coerceAtLeast(1)
+            ?: fallbackWidth
+        val height = listOf(
+            imageView.height,
+            imageView.measuredHeight,
+            imageView.layoutParams?.height ?: 0,
+            holder.itemView.height
+        ).firstOrNull { it > 0 }?.coerceAtMost(fallbackHeight)?.coerceAtLeast(1)
+            ?: fallbackHeight
+        return width to height
+    }
+
+    private fun showHandwriting(holder: VH, isVisible: Boolean, fallbackText: CharSequence) {
+        holder.handwritingContainer.isVisible = isVisible
+        holder.handwriting.isVisible = isVisible
+        holder.cardContent.isVisible = !isVisible
+        holder.textScrim.isVisible = !isVisible
+        holder.time.isVisible = !isVisible
+        holder.snippet.isVisible = !isVisible
+        if (isVisible) {
+            holder.snippet.text = ""
+        } else {
+            holder.handwriting.setImageDrawable(null)
+            holder.snippet.text = fallbackText
+        }
+    }
 
     // ---------- Tint implementations ----------
     private fun applyTintToImage(iv: ImageView, style: TintStyle, baseEffect: RenderEffect?) {
@@ -309,3 +433,18 @@ class CardsAdapter(
         """
     }
 }
+
+private const val HANDWRITING_PREFETCH_DISTANCE = 2
+
+private fun snapshotItems(source: List<CardItem>): List<CardItem> = source.map { it.deepCopy() }
+
+private fun CardItem.deepCopy(): CardItem = copy(
+    bg = when (val background = bg) {
+        is BgImage.Res -> background.copy()
+        is BgImage.UriRef -> background.copy()
+        null -> null
+    },
+    handwriting = handwriting?.let { content ->
+        content.copy(options = content.options.copy())
+    }
+)

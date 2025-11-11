@@ -76,5 +76,24 @@
                 android:lineSpacingExtra="4dp"
                 android:ellipsize="end"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
+
+        <FrameLayout
+            android:id="@+id/handwritingContainer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent">
+
+            <ImageView
+                android:id="@+id/handwritingImage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/handwriting_card_content_desc"
+                android:scaleType="fitCenter"/>
+        </FrameLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
