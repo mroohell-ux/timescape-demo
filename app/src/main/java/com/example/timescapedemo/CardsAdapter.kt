@@ -1,18 +1,17 @@
 package com.example.timescapedemo
 
+import android.content.Context
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
-import android.content.Context
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
-import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -170,6 +169,7 @@ class CardsAdapter(
         holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
 
         // ---- Bind background image (drawable or Uri) ----
+        BackgroundImageLoader.clear(holder.bg)
         when (val b = item.bg) {
             is BgImage.Res -> {
                 holder.bg.setImageResource(b.id)
@@ -177,16 +177,34 @@ class CardsAdapter(
             is BgImage.UriRef -> {
                 if (blockedUris.contains(b.uri)) {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                } else when (loadImageFromUriSafely(holder.bg, b.uri)) {
-                    LoadResult.Success -> {
-                        blockedUris.remove(b.uri)
-                    }
-                    LoadResult.PermissionDenied -> {
-                        blockedUris.add(b.uri)
-                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                    }
-                    LoadResult.TemporaryFailure -> {
-                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                } else {
+                    holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                    val (targetWidth, targetHeight) = estimateBackgroundSize(holder)
+                    BackgroundImageLoader.load(
+                        context = holder.itemView.context,
+                        imageView = holder.bg,
+                        uri = b.uri,
+                        targetWidth = targetWidth,
+                        targetHeight = targetHeight
+                    ) { result ->
+                        val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+                        if (!isSameCard) return@load
+                        when (result) {
+                            is BackgroundImageLoader.Result.Success -> {
+                                blockedUris.remove(b.uri)
+                                holder.bg.setImageBitmap(result.bitmap)
+                            }
+                            is BackgroundImageLoader.Result.PermissionDenied -> {
+                                blockedUris.add(b.uri)
+                                holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                            }
+                            is BackgroundImageLoader.Result.NotFound -> {
+                                holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                            }
+                            is BackgroundImageLoader.Result.Error -> {
+                                holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                            }
+                        }
                     }
                 }
             }
@@ -217,6 +235,7 @@ class CardsAdapter(
 
     override fun onViewRecycled(holder: VH) {
         HandwritingBitmapLoader.clear(holder.handwriting)
+        BackgroundImageLoader.clear(holder.bg)
         holder.handwriting.contentDescription = null
         holder.itemView.setTag(R.id.tag_card_id, null)
         showHandwriting(holder, isVisible = false, fallbackText = holder.snippet.text ?: "")
@@ -263,6 +282,28 @@ class CardsAdapter(
             holder.itemView.height
         ).firstOrNull { it > 0 }?.coerceAtMost(fallbackHeight)?.coerceAtLeast(1)
             ?: fallbackHeight
+        return width to height
+    }
+
+    private fun estimateBackgroundSize(holder: VH): Pair<Int, Int> {
+        val imageView = holder.bg
+        val metrics = holder.itemView.resources.displayMetrics
+        val fallbackWidth = (metrics.widthPixels * 0.7f).toInt().coerceAtLeast(1)
+        val fallbackHeight = (metrics.heightPixels * 0.5f).toInt().coerceAtLeast(1)
+        val width = listOf(
+            imageView.width,
+            imageView.measuredWidth,
+            imageView.layoutParams?.width ?: 0,
+            holder.itemView.width,
+            holder.itemView.measuredWidth
+        ).firstOrNull { it > 0 } ?: fallbackWidth
+        val height = listOf(
+            imageView.height,
+            imageView.measuredHeight,
+            imageView.layoutParams?.height ?: 0,
+            holder.itemView.height,
+            holder.itemView.measuredHeight
+        ).firstOrNull { it > 0 } ?: fallbackHeight
         return width to height
     }
 
@@ -394,29 +435,7 @@ class CardsAdapter(
         private const val MAX_BODY_TEXT_SIZE_SP = 32f
         private const val TIME_SIZE_DELTA = 3f
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
-        private const val TAG = "CardsAdapter"
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
-
-        private enum class LoadResult { Success, TemporaryFailure, PermissionDenied }
-
-        private fun loadImageFromUriSafely(target: ImageView, uri: Uri): LoadResult {
-            return try {
-                target.setImageURI(uri)
-                if (target.drawable != null) {
-                    LoadResult.Success
-                } else {
-                    LoadResult.TemporaryFailure
-                }
-            } catch (se: SecurityException) {
-                Log.w(TAG, "Missing permission for uri: $uri", se)
-                target.setImageDrawable(null)
-                LoadResult.PermissionDenied
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to bind uri: $uri", e)
-                target.setImageDrawable(null)
-                LoadResult.TemporaryFailure
-            }
-        }
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
