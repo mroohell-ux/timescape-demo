@@ -68,6 +68,7 @@
     <string name="handwriting_pen_type_round">Round tip</string>
     <string name="handwriting_pen_type_marker">Marker</string>
     <string name="handwriting_pen_type_calligraphy">Calligraphy</string>
+    <string name="handwriting_pen_type_highlighter">Highlighter</string>
     <string name="handwriting_paper_plain">Plain</string>
     <string name="handwriting_paper_ruled">Ruled</string>
     <string name="handwriting_paper_grid">Grid</string>

@@ -88,6 +88,8 @@ class HandwritingView @JvmOverloads constructor(
 
     @ColorInt
     private var backgroundColorInt: Int = Color.WHITE
+    @ColorInt
+    private var brushColorInt: Int = Color.BLACK
     private var paperStyle: HandwritingPaperStyle = HandwritingPaperStyle.PLAIN
     private var penType: HandwritingPenType = HandwritingPenType.ROUND
     private var eraserType: HandwritingEraserType = HandwritingEraserType.ROUND
@@ -103,6 +105,7 @@ class HandwritingView @JvmOverloads constructor(
     init {
         setLayerType(LAYER_TYPE_HARDWARE, null)
         applyPenType(penType)
+        updatePenColor()
         applyEraserType(eraserType)
         updateGuidePaintColor()
     }
@@ -299,7 +302,8 @@ class HandwritingView @JvmOverloads constructor(
     fun getPaperStyle(): HandwritingPaperStyle = paperStyle
 
     fun setBrushColor(@ColorInt color: Int) {
-        penPaint.color = color
+        brushColorInt = color
+        updatePenColor()
     }
 
     fun setBrushSizeDp(sizeDp: Float) {
@@ -310,6 +314,7 @@ class HandwritingView @JvmOverloads constructor(
     fun setBrushSizePx(sizePx: Float) {
         penPaint.strokeWidth = sizePx
         applyPenType(penType)
+        updatePenColor()
         if (drawingTool == PEN) {
             invalidate()
         }
@@ -321,6 +326,7 @@ class HandwritingView @JvmOverloads constructor(
         if (penType == type) return
         penType = type
         applyPenType(type)
+        updatePenColor()
     }
 
     fun getPenType(): HandwritingPenType = penType
@@ -495,6 +501,11 @@ class HandwritingView @JvmOverloads constructor(
                 penPaint.strokeMiter = 12f
                 penPaint.pathEffect = createCalligraphyPathEffect()
             }
+            HandwritingPenType.HIGHLIGHTER -> {
+                penPaint.strokeCap = Paint.Cap.SQUARE
+                penPaint.strokeJoin = Paint.Join.BEVEL
+                penPaint.pathEffect = createHighlighterPathEffect()
+            }
         }
     }
 
@@ -512,6 +523,24 @@ class HandwritingView @JvmOverloads constructor(
         val dash = PathDashPathEffect(nib, advance, 0f, PathDashPathEffect.Style.ROTATE)
         val smooth = CornerPathEffect(penPaint.strokeWidth * 0.2f)
         return ComposePathEffect(smooth, dash)
+    }
+
+    private fun createHighlighterPathEffect(): android.graphics.PathEffect {
+        val softenRadius = max(1f, penPaint.strokeWidth * 0.75f)
+        return CornerPathEffect(softenRadius)
+    }
+
+    private fun updatePenColor() {
+        val baseColor = brushColorInt
+        val updatedColor = when (penType) {
+            HandwritingPenType.HIGHLIGHTER -> {
+                val targetAlpha = (Color.alpha(baseColor) * 0.55f).roundToInt().coerceIn(16, 255)
+                val brightened = ColorUtils.blendARGB(baseColor, Color.WHITE, 0.2f)
+                ColorUtils.setAlphaComponent(brightened, targetAlpha)
+            }
+            else -> baseColor
+        }
+        penPaint.color = updatedColor
     }
 
     private fun buildCalligraphyNibPath(strokeWidth: Float): Path {

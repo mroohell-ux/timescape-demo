@@ -1016,7 +1016,8 @@ class MainActivity : AppCompatActivity() {
         val penTypeOptions = listOf(
             HandwritingPenType.ROUND to getString(R.string.handwriting_pen_type_round),
             HandwritingPenType.MARKER to getString(R.string.handwriting_pen_type_marker),
-            HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy)
+            HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy),
+            HandwritingPenType.HIGHLIGHTER to getString(R.string.handwriting_pen_type_highlighter)
         )
         var selectedPenType = initialOptions.penType.takeIf { pen -> penTypeOptions.any { it.first == pen } }
             ?: HandwritingPenType.ROUND
@@ -1060,14 +1061,19 @@ class MainActivity : AppCompatActivity() {
             HandwritingPaletteSection.CANVAS -> loadHandwritingDrawingTool()
         }
 
-        fun createChoiceChip(text: String, iconRes: Int? = null, iconTint: Int? = null): Chip {
+        fun createChoiceChip(
+            text: String,
+            iconRes: Int? = null,
+            iconTint: Int? = null,
+            showLabel: Boolean = true
+        ): Chip {
             val themedContext = ContextThemeWrapper(
                 this,
                 com.google.android.material.R.style.Widget_MaterialComponents_Chip_Choice
             )
             return Chip(themedContext).apply {
                 id = View.generateViewId()
-                this.text = text
+                this.text = if (showLabel) text else ""
                 isCheckable = true
                 isClickable = true
                 isFocusable = true
@@ -1077,12 +1083,20 @@ class MainActivity : AppCompatActivity() {
                     isChipIconVisible = true
                     iconTint?.let { tintColor -> chipIconTint = ColorStateList.valueOf(tintColor) }
                 }
+                if (!showLabel) {
+                    contentDescription = text
+                }
             }
         }
 
         brushColorGroup.removeAllViews()
         brushColorOptions.forEach { option ->
-            val chip = createChoiceChip(option.label, R.drawable.ic_handwriting_color, option.color).apply {
+            val chip = createChoiceChip(
+                option.label,
+                R.drawable.ic_handwriting_color,
+                option.color,
+                showLabel = false
+            ).apply {
                 tag = option
                 isChecked = option == selectedBrushColor
             }
@@ -1118,7 +1132,12 @@ class MainActivity : AppCompatActivity() {
 
         paperColorGroup.removeAllViews()
         paperColorOptions.forEach { option ->
-            val chip = createChoiceChip(option.label, R.drawable.ic_handwriting_color, option.color).apply {
+            val chip = createChoiceChip(
+                option.label,
+                R.drawable.ic_handwriting_color,
+                option.color,
+                showLabel = false
+            ).apply {
                 tag = option
                 isChecked = option == selectedPaperColor
             }

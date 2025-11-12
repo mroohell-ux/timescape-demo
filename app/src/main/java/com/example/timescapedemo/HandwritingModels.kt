@@ -34,7 +34,8 @@ enum class HandwritingPaperStyle {
 enum class HandwritingPenType {
     ROUND,
     MARKER,
-    CALLIGRAPHY;
+    CALLIGRAPHY,
+    HIGHLIGHTER;
 
     companion object {
         fun fromName(name: String?): HandwritingPenType? =
