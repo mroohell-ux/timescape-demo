@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -9,6 +10,9 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
@@ -20,12 +24,21 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import android.util.TypedValue
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import android.util.TypedValue
-import androidx.core.view.isVisible
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -91,10 +104,12 @@ class CardsAdapter(
         val time: TextView = v.findViewById(R.id.time)
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
+        val glassBackground: ComposeView = v.findViewById(R.id.glassBackground)
         val textScrim: View = v.findViewById(R.id.textScrim)
         val cardContent: View = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
+        var accentColor by mutableStateOf(DEFAULT_ACCENT_COLOR)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -147,6 +162,14 @@ class CardsAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
         val vh = VH(v)
+        vh.glassBackground.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        vh.glassBackground.setContent {
+            val accent = vh.accentColor
+            LiquidGlassCardBackground(
+                modifier = Modifier.fillMaxSize(),
+                accentColor = ComposeColor(accent)
+            )
+        }
         vh.gestureDetector = GestureDetectorCompat(v.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val idx = vh.bindingAdapterPosition
@@ -222,17 +245,21 @@ class CardsAdapter(
 
         // ---- Bind background image (drawable or Uri) ----
         BackgroundImageLoader.clear(holder.bg)
+        var accentOverride: Int? = null
         val hasBackground = when (val b = item.bg) {
             is BgImage.Res -> {
                 holder.bg.setImageResource(b.id)
+                accentOverride = extractAccentColor(holder.bg.drawable)
                 true
             }
             is BgImage.UriRef -> {
                 if (blockedUris.contains(b.uri)) {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                    accentOverride = null
                     false
                 } else {
                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                    accentOverride = null
                     val (targetWidth, targetHeight) = estimateBackgroundSize(holder)
                     BackgroundImageLoader.load(
                         context = holder.itemView.context,
@@ -247,16 +274,20 @@ class CardsAdapter(
                             is BackgroundImageLoader.Result.Success -> {
                                 blockedUris.remove(b.uri)
                                 holder.bg.setImageBitmap(result.bitmap)
+                                updateLiquidGlassBackground(holder, computeAccentColor(result.bitmap))
                             }
                             is BackgroundImageLoader.Result.PermissionDenied -> {
                                 blockedUris.add(b.uri)
                                 holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                                updateLiquidGlassBackground(holder, null)
                             }
                             is BackgroundImageLoader.Result.NotFound -> {
                                 holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                                updateLiquidGlassBackground(holder, null)
                             }
                             is BackgroundImageLoader.Result.Error -> {
                                 holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                                updateLiquidGlassBackground(holder, null)
                             }
                         }
                     }
@@ -265,9 +296,11 @@ class CardsAdapter(
             }
             null -> {
                 holder.bg.setImageDrawable(null)
+                accentOverride = null
                 false
             }
         }
+        updateLiquidGlassBackground(holder, accentOverride)
 
         // Base blur (keeps transparency)
         val baseEffect = if (hasBackground) blurEffect else null
@@ -290,6 +323,7 @@ class CardsAdapter(
         holder.handwriting.contentDescription = null
         holder.itemView.setTag(R.id.tag_card_id, null)
         showHandwriting(holder, isVisible = false, fallbackText = holder.snippet.text ?: "")
+        holder.accentColor = DEFAULT_ACCENT_COLOR
         super.onViewRecycled(holder)
     }
 
@@ -314,6 +348,57 @@ class CardsAdapter(
             targetWidth = width,
             targetHeight = height
         )
+    }
+
+    private fun updateLiquidGlassBackground(holder: VH, @ColorInt accentOverride: Int?) {
+        val target = accentOverride?.let(::normalizeAccentColor) ?: DEFAULT_ACCENT_COLOR
+        if (holder.accentColor != target) {
+            holder.accentColor = target
+        }
+    }
+
+    private fun computeAccentColor(bitmap: Bitmap?): Int? {
+        bitmap ?: return null
+        if (bitmap.width <= 0 || bitmap.height <= 0 || bitmap.isRecycled) return null
+        var sumR = 0L
+        var sumG = 0L
+        var sumB = 0L
+        var count = 0
+        val xs = floatArrayOf(0.2f, 0.5f, 0.8f)
+        val ys = floatArrayOf(0.25f, 0.55f, 0.8f)
+        for (xf in xs) {
+            val x = ((bitmap.width - 1) * xf).roundToInt().coerceIn(0, bitmap.width - 1)
+            for (yf in ys) {
+                val y = ((bitmap.height - 1) * yf).roundToInt().coerceIn(0, bitmap.height - 1)
+                val pixel = bitmap.getPixel(x, y)
+                sumR += Color.red(pixel)
+                sumG += Color.green(pixel)
+                sumB += Color.blue(pixel)
+                count++
+            }
+        }
+        if (count == 0) return null
+        val r = (sumR / count).toInt().coerceIn(0, 255)
+        val g = (sumG / count).toInt().coerceIn(0, 255)
+        val b = (sumB / count).toInt().coerceIn(0, 255)
+        return Color.rgb(r, g, b)
+    }
+
+    private fun extractAccentColor(drawable: Drawable?): Int? = when (drawable) {
+        is BitmapDrawable -> computeAccentColor(drawable.bitmap)
+        is ColorDrawable -> ColorUtils.setAlphaComponent(drawable.color, 255)
+        else -> null
+    }
+
+    private fun normalizeAccentColor(@ColorInt color: Int): Int {
+        val opaque = ColorUtils.setAlphaComponent(color, 255)
+        val lifted = ColorUtils.blendARGB(opaque, Color.WHITE, 0.35f)
+        val hsl = FloatArray(3)
+        ColorUtils.colorToHSL(lifted, hsl)
+        hsl[1] = (hsl[1] * 1.12f).coerceIn(0f, 1f)
+        hsl[2] = hsl[2].coerceIn(0.28f, 0.82f)
+        val final = ColorUtils.HSLToColor(hsl)
+        return ColorUtils.setAlphaComponent(final, 255)
     }
 
     private fun estimateTargetSize(holder: VH, content: HandwritingContent): Pair<Int, Int> {
@@ -567,6 +652,7 @@ class CardsAdapter(
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
+        private const val DEFAULT_ACCENT_COLOR = 0xFF80D8FF.toInt()
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
