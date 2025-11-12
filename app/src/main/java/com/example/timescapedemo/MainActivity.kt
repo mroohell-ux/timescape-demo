@@ -33,6 +33,7 @@ import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
@@ -43,7 +44,7 @@ import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
@@ -908,7 +909,7 @@ class MainActivity : AppCompatActivity() {
         val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
-        val toolToggle = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.toggleHandwritingTools)
+        val paletteCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingOptions)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
@@ -1155,7 +1156,6 @@ class MainActivity : AppCompatActivity() {
         handwritingView.setPenType(selectedPenType)
         handwritingView.setEraserType(selectedEraserType)
         handwritingView.setEraserSizeDp(selectedEraserSize)
-        handwritingView.setDrawingTool(selectedDrawingTool)
         handwritingView.setOnContentChangedListener { updateHistoryButtons() }
         existing?.path?.let { path ->
             loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
@@ -1238,43 +1238,67 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        fun paletteFor(buttonId: Int): HandwritingPaletteSection = when (buttonId) {
-            penButton.id -> HandwritingPaletteSection.PEN
-            eraserButton.id -> HandwritingPaletteSection.ERASER
-            canvasButton.id -> HandwritingPaletteSection.CANVAS
-            else -> HandwritingPaletteSection.PEN
+        var visiblePalette: HandwritingPaletteSection? = null
+
+        fun updateToolButtons() {
+            penButton.isChecked = selectedDrawingTool == HandwritingDrawingTool.PEN
+            eraserButton.isChecked = selectedDrawingTool == HandwritingDrawingTool.ERASER
+            canvasButton.isChecked = visiblePalette == HandwritingPaletteSection.CANVAS
+        }
+
+        fun setDrawingTool(tool: HandwritingDrawingTool) {
+            selectedDrawingTool = tool
+            handwritingView.setDrawingTool(tool)
+            updateToolButtons()
         }
 
         fun showPalette(section: HandwritingPaletteSection) {
+            visiblePalette = section
             selectedPalette = section
+            paletteCard.isVisible = true
             penOptionsContainer.isVisible = section == HandwritingPaletteSection.PEN
             eraserOptionsContainer.isVisible = section == HandwritingPaletteSection.ERASER
             canvasOptionsContainer.isVisible = section == HandwritingPaletteSection.CANVAS
-            when (section) {
-                HandwritingPaletteSection.PEN -> {
-                    selectedDrawingTool = HandwritingDrawingTool.PEN
-                    handwritingView.setDrawingTool(HandwritingDrawingTool.PEN)
-                }
-                HandwritingPaletteSection.ERASER -> {
-                    selectedDrawingTool = HandwritingDrawingTool.ERASER
-                    handwritingView.setDrawingTool(HandwritingDrawingTool.ERASER)
-                }
-                HandwritingPaletteSection.CANVAS -> {
-                    handwritingView.setDrawingTool(selectedDrawingTool)
-                }
+            updateToolButtons()
+        }
+
+        fun hidePalette() {
+            visiblePalette = null
+            paletteCard.isGone = true
+            penOptionsContainer.isGone = true
+            eraserOptionsContainer.isGone = true
+            canvasOptionsContainer.isGone = true
+            updateToolButtons()
+        }
+
+        setDrawingTool(selectedDrawingTool)
+        hidePalette()
+
+        penButton.setOnClickListener {
+            setDrawingTool(HandwritingDrawingTool.PEN)
+            if (visiblePalette == HandwritingPaletteSection.PEN) {
+                hidePalette()
+            } else {
+                showPalette(HandwritingPaletteSection.PEN)
             }
         }
 
-        toolToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) showPalette(paletteFor(checkedId))
+        eraserButton.setOnClickListener {
+            setDrawingTool(HandwritingDrawingTool.ERASER)
+            if (visiblePalette == HandwritingPaletteSection.ERASER) {
+                hidePalette()
+            } else {
+                showPalette(HandwritingPaletteSection.ERASER)
+            }
         }
-        val initialButtonId = when (selectedPalette) {
-            HandwritingPaletteSection.PEN -> penButton.id
-            HandwritingPaletteSection.ERASER -> eraserButton.id
-            HandwritingPaletteSection.CANVAS -> canvasButton.id
+
+        canvasButton.setOnClickListener {
+            if (visiblePalette == HandwritingPaletteSection.CANVAS) {
+                hidePalette()
+            } else {
+                showPalette(HandwritingPaletteSection.CANVAS)
+            }
         }
-        toolToggle.check(initialButtonId)
-        showPalette(selectedPalette)
         updateHistoryButtons()
 
         val dialog = AlertDialog.Builder(this)
