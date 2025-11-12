@@ -14,9 +14,41 @@
         android:padding="24dp">
 
         <TextView
+            android:id="@+id/labelNotes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/drawer_notes_tools"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerExportNotes"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/drawer_export_notes"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerImportNotes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_import_notes"
+            app:iconGravity="textStart"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:background="@color/flow_bar_stroke"/>
+
+        <TextView
             android:id="@+id/labelCardBackgrounds"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
             android:text="@string/drawer_card_backgrounds"
             android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
 
