@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.util.AttributeSet
@@ -16,6 +17,8 @@ import android.view.View
 import android.view.ViewParent
 import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
+import com.example.timescapedemo.HandwritingDrawingTool.ERASER
+import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
@@ -30,12 +33,26 @@ class HandwritingView @JvmOverloads constructor(
     private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
 
     private val density = resources.displayMetrics.density
-    private val drawPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
         strokeWidth = 6f * density
+    }
+    private val eraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 16f * density
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+    }
+    private val eraserPreviewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 16f * density
+        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.28f * 255).roundToInt())
     }
     private val bitmapPaint = Paint(Paint.DITHER_FLAG)
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -68,6 +85,8 @@ class HandwritingView @JvmOverloads constructor(
     private var backgroundColorInt: Int = Color.WHITE
     private var paperStyle: HandwritingPaperStyle = HandwritingPaperStyle.PLAIN
     private var penType: HandwritingPenType = HandwritingPenType.ROUND
+    private var eraserType: HandwritingEraserType = HandwritingEraserType.ROUND
+    private var drawingTool: HandwritingDrawingTool = PEN
     private var targetAspectRatio: Float? = null
     private var exportWidth = 0
     private var exportHeight = 0
@@ -77,7 +96,9 @@ class HandwritingView @JvmOverloads constructor(
     private val maxHistory = 25
 
     init {
+        setLayerType(LAYER_TYPE_HARDWARE, null)
         applyPenType(penType)
+        applyEraserType(eraserType)
         updateGuidePaintColor()
     }
 
@@ -139,7 +160,7 @@ class HandwritingView @JvmOverloads constructor(
         canvas.drawColor(backgroundColorInt)
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        canvas.drawPath(path, drawPaint)
+        canvas.drawPath(path, currentPreviewPaint())
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -273,7 +294,7 @@ class HandwritingView @JvmOverloads constructor(
     fun getPaperStyle(): HandwritingPaperStyle = paperStyle
 
     fun setBrushColor(@ColorInt color: Int) {
-        drawPaint.color = color
+        penPaint.color = color
     }
 
     fun setBrushSizeDp(sizeDp: Float) {
@@ -282,10 +303,13 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun setBrushSizePx(sizePx: Float) {
-        drawPaint.strokeWidth = sizePx
+        penPaint.strokeWidth = sizePx
+        if (drawingTool == PEN) {
+            invalidate()
+        }
     }
 
-    fun getBrushSizeDp(): Float = drawPaint.strokeWidth / density
+    fun getBrushSizeDp(): Float = penPaint.strokeWidth / density
 
     fun setPenType(type: HandwritingPenType) {
         if (penType == type) return
@@ -294,6 +318,31 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun getPenType(): HandwritingPenType = penType
+
+    fun setEraserSizeDp(sizeDp: Float) {
+        val px = sizeDp * density
+        eraserPaint.strokeWidth = px
+        eraserPreviewPaint.strokeWidth = px
+        if (drawingTool == ERASER) invalidate()
+    }
+
+    fun getEraserSizeDp(): Float = eraserPaint.strokeWidth / density
+
+    fun setEraserType(type: HandwritingEraserType) {
+        if (eraserType == type) return
+        eraserType = type
+        applyEraserType(type)
+        if (drawingTool == ERASER) invalidate()
+    }
+
+    fun getEraserType(): HandwritingEraserType = eraserType
+
+    fun setDrawingTool(tool: HandwritingDrawingTool) {
+        if (drawingTool == tool) return
+        commitCurrentPath()
+        drawingTool = tool
+        invalidate()
+    }
 
     fun setCanvasSize(widthPx: Int, heightPx: Int) {
         if (widthPx <= 0 || heightPx <= 0) return
@@ -354,7 +403,7 @@ class HandwritingView @JvmOverloads constructor(
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
         val canvas = extraCanvas ?: return
-        canvas.drawPath(path, drawPaint)
+        canvas.drawPath(path, currentCommitPaint())
         path.reset()
         hasContent = true
         if (addToHistory) {
@@ -421,19 +470,40 @@ class HandwritingView @JvmOverloads constructor(
     private fun applyPenType(type: HandwritingPenType) {
         when (type) {
             HandwritingPenType.ROUND -> {
-                drawPaint.strokeCap = Paint.Cap.ROUND
-                drawPaint.strokeJoin = Paint.Join.ROUND
-                drawPaint.pathEffect = null
+                penPaint.strokeCap = Paint.Cap.ROUND
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = null
             }
             HandwritingPenType.MARKER -> {
-                drawPaint.strokeCap = Paint.Cap.SQUARE
-                drawPaint.strokeJoin = Paint.Join.BEVEL
-                drawPaint.pathEffect = null
+                penPaint.strokeCap = Paint.Cap.SQUARE
+                penPaint.strokeJoin = Paint.Join.BEVEL
+                penPaint.pathEffect = null
             }
             HandwritingPenType.CALLIGRAPHY -> {
-                drawPaint.strokeCap = Paint.Cap.BUTT
-                drawPaint.strokeJoin = Paint.Join.ROUND
-                drawPaint.pathEffect = android.graphics.CornerPathEffect(16f * density)
+                penPaint.strokeCap = Paint.Cap.BUTT
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = android.graphics.CornerPathEffect(16f * density)
+            }
+        }
+    }
+
+    private fun applyEraserType(type: HandwritingEraserType) {
+        when (type) {
+            HandwritingEraserType.ROUND -> {
+                eraserPaint.strokeCap = Paint.Cap.ROUND
+                eraserPaint.strokeJoin = Paint.Join.ROUND
+                eraserPaint.pathEffect = null
+                eraserPreviewPaint.strokeCap = Paint.Cap.ROUND
+                eraserPreviewPaint.strokeJoin = Paint.Join.ROUND
+                eraserPreviewPaint.pathEffect = null
+            }
+            HandwritingEraserType.BLOCK -> {
+                eraserPaint.strokeCap = Paint.Cap.SQUARE
+                eraserPaint.strokeJoin = Paint.Join.BEVEL
+                eraserPaint.pathEffect = null
+                eraserPreviewPaint.strokeCap = Paint.Cap.SQUARE
+                eraserPreviewPaint.strokeJoin = Paint.Join.BEVEL
+                eraserPreviewPaint.pathEffect = null
             }
         }
     }
@@ -483,5 +553,15 @@ class HandwritingView @JvmOverloads constructor(
             viewParent.requestDisallowInterceptTouchEvent(disallow)
             viewParent = viewParent.parent
         }
+    }
+
+    private fun currentCommitPaint(): Paint = when (drawingTool) {
+        PEN -> penPaint
+        ERASER -> eraserPaint
+    }
+
+    private fun currentPreviewPaint(): Paint = when (drawingTool) {
+        PEN -> penPaint
+        ERASER -> eraserPreviewPaint
     }
 }
