@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.util.Base64
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -39,14 +40,15 @@ import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.drawerlayout.widget.DrawerLayout
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
@@ -56,11 +58,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FileNotFoundException
 import java.io.InputStream
+import java.io.OutputStreamWriter
+import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.random.Random
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -82,6 +93,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerClearImagesButton: MaterialButton
     private lateinit var drawerPickAppBackgroundButton: MaterialButton
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
+    private lateinit var drawerExportNotesButton: MaterialButton
+    private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
@@ -156,6 +169,20 @@ class MainActivity : AppCompatActivity() {
             } else snackbar("No photos selected")
         }
 
+    private val exportNotesLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri != null) {
+                exportNotes(uri)
+            } else snackbar(getString(R.string.snackbar_export_cancelled))
+        }
+
+    private val importNotesLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                importNotes(uri)
+            } else snackbar(getString(R.string.snackbar_import_cancelled))
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -183,6 +210,8 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = ""
 
         val header = navigationView.getHeaderView(0)
+        drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
+        drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -236,6 +265,16 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
         })
         drawerRecyclerImages.adapter = imagesAdapter
+
+        drawerExportNotesButton.setOnClickListener {
+            val defaultName = buildExportFileName()
+            exportNotesLauncher.launch(defaultName)
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerImportNotesButton.setOnClickListener {
+            importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
 
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
@@ -1788,6 +1827,218 @@ class MainActivity : AppCompatActivity() {
         snack.show()
     }
 
+    private fun buildExportFileName(): String {
+        val formatter = SimpleDateFormat(EXPORT_FILE_DATE_PATTERN, Locale.US)
+        val timestamp = formatter.format(Date())
+        return "timescape_notes_${'$'}timestamp.json"
+    }
+
+    private fun exportNotes(uri: Uri) {
+        captureVisibleFlowStates()
+        lifecycleScope.launch {
+            val payload = withContext(Dispatchers.IO) {
+                runCatching {
+                    val exportPayload = buildNotesExportPayload()
+                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
+                            writer.write(exportPayload.json)
+                        }
+                    } ?: error("Unable to open output stream")
+                    exportPayload
+                }
+            }.getOrElse {
+                snackbar(getString(R.string.snackbar_export_failed))
+                return@launch
+            }
+            val notesText = resources.getQuantityString(R.plurals.count_notes, payload.cardCount, payload.cardCount)
+            val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
+            snackbar(getString(R.string.snackbar_export_success, notesText, flowsText))
+        }
+    }
+
+    private fun buildNotesExportPayload(): ExportPayload {
+        val root = JSONObject()
+        root.put("version", NOTES_EXPORT_VERSION)
+        root.put("generatedAt", System.currentTimeMillis())
+        val flowsArray = JSONArray()
+        var cardCount = 0
+        flows.forEach { flow ->
+            val flowObj = JSONObject()
+            flowObj.put("name", flow.name)
+            val cardsArray = JSONArray()
+            val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
+            val cardsForExport = shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards
+            cardsForExport.forEach { card ->
+                val cardObj = JSONObject()
+                cardObj.put("title", card.title)
+                cardObj.put("snippet", card.snippet)
+                cardObj.put("updatedAt", card.updatedAt)
+                card.handwriting?.let { handwriting ->
+                    handwritingToJson(handwriting)?.let { cardObj.put("handwriting", it) }
+                }
+                cardsArray.put(cardObj)
+                cardCount++
+            }
+            flowObj.put("cards", cardsArray)
+            flowsArray.put(flowObj)
+        }
+        root.put("flows", flowsArray)
+        return ExportPayload(root.toString(2), flows.size, cardCount)
+    }
+
+    private fun handwritingToJson(content: HandwritingContent): JSONObject? {
+        val bytes = readHandwritingBytes(content.path) ?: return null
+        val options = content.options
+        val optionsObj = JSONObject().apply {
+            put("backgroundColor", colorToString(options.backgroundColor))
+            put("brushColor", colorToString(options.brushColor))
+            put("brushSizeDp", options.brushSizeDp.toDouble())
+            put("canvasWidth", options.canvasWidth)
+            put("canvasHeight", options.canvasHeight)
+            put("format", options.format.name)
+            put("paperStyle", options.paperStyle.name)
+            put("penType", options.penType.name)
+            put("eraserSizeDp", options.eraserSizeDp.toDouble())
+            put("eraserType", options.eraserType.name)
+        }
+        return JSONObject().apply {
+            put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            put("options", optionsObj)
+        }
+    }
+
+    private fun readHandwritingBytes(path: String): ByteArray? =
+        runCatching { openFileInput(path).use { it.readBytes() } }.getOrNull()
+
+    private fun importNotes(uri: Uri) {
+        lifecycleScope.launch {
+            val payload = withContext(Dispatchers.IO) {
+                runCatching { readImportPayload(uri) }
+            }.getOrElse {
+                snackbar(getString(R.string.snackbar_import_failed))
+                return@launch
+            }
+            if (payload.flows.isEmpty()) {
+                snackbar(getString(R.string.snackbar_import_empty))
+                return@launch
+            }
+            val baseIndex = flows.size
+            var insertedCards = 0
+            payload.flows.forEachIndexed { index, importedFlow ->
+                val flowId = nextFlowId++
+                val flowName = importedFlow.name.takeIf { it.isNotBlank() }
+                    ?: defaultFlowName(baseIndex + index)
+                val newFlow = CardFlow(id = flowId, name = flowName)
+                importedFlow.cards.forEach { importedCard ->
+                    val cardId = nextCardId++
+                    val card = CardItem(
+                        id = cardId,
+                        title = importedCard.title,
+                        snippet = importedCard.snippet,
+                        updatedAt = importedCard.updatedAt,
+                        handwriting = importedCard.handwriting
+                    )
+                    newFlow.cards += card
+                }
+                insertedCards += newFlow.cards.size
+                newFlow.lastViewedCardIndex = 0
+                newFlow.lastViewedCardId = newFlow.cards.firstOrNull()?.id
+                newFlow.lastViewedCardFocused = false
+                prepareFlowCards(newFlow)
+                flows += newFlow
+            }
+            val insertedFlows = payload.flows.size
+            flowAdapter.notifyItemRangeInserted(baseIndex, insertedFlows)
+            renderFlowChips(selectedFlowIndex.coerceIn(0, flows.lastIndex))
+            updateToolbarSubtitle()
+            updateShuffleMenuState()
+            saveState()
+            val notesText = resources.getQuantityString(R.plurals.count_notes, insertedCards, insertedCards)
+            val flowsText = resources.getQuantityString(R.plurals.count_flows, insertedFlows, insertedFlows)
+            snackbar(getString(R.string.snackbar_import_success, notesText, flowsText))
+        }
+    }
+
+    private fun readImportPayload(uri: Uri): ImportPayload {
+        val createdFiles = mutableListOf<String>()
+        return try {
+            val jsonText = contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { reader ->
+                reader.readText()
+            } ?: throw IllegalStateException("Unable to open input stream")
+            val root = JSONObject(jsonText)
+            val flowsArray = root.optJSONArray("flows") ?: JSONArray()
+            val importedFlows = mutableListOf<ImportedFlow>()
+            var totalCards = 0
+            for (i in 0 until flowsArray.length()) {
+                val flowObj = flowsArray.optJSONObject(i) ?: continue
+                val flowName = flowObj.optString("name")
+                val cardsArray = flowObj.optJSONArray("cards") ?: JSONArray()
+                val cards = mutableListOf<ImportedCard>()
+                for (j in 0 until cardsArray.length()) {
+                    val cardObj = cardsArray.optJSONObject(j) ?: continue
+                    val title = cardObj.optString("title")
+                    val snippet = cardObj.optString("snippet")
+                    val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
+                    val handwriting = decodeHandwritingFromExport(cardObj.optJSONObject("handwriting"), createdFiles)
+                    cards += ImportedCard(title, snippet, updatedAt, handwriting)
+                }
+                totalCards += cards.size
+                importedFlows += ImportedFlow(flowName, cards)
+            }
+            ImportPayload(importedFlows, totalCards)
+        } catch (e: Exception) {
+            createdFiles.forEach { deleteHandwritingFile(it) }
+            throw e
+        }
+    }
+
+    private fun decodeHandwritingFromExport(
+        handwritingObj: JSONObject?,
+        createdFiles: MutableList<String>
+    ): HandwritingContent? {
+        if (handwritingObj == null) return null
+        val data = handwritingObj.optString("data").takeIf { it.isNotBlank() } ?: return null
+        val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return null
+        val options = parseHandwritingOptionsFromExport(handwritingObj.optJSONObject("options")) ?: return null
+        val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
+        return runCatching {
+            openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
+            createdFiles += filename
+            HandwritingContent(filename, options)
+        }.getOrElse {
+            createdFiles.remove(filename)
+            null
+        }
+    }
+
+    private fun parseHandwritingOptionsFromExport(optionsObj: JSONObject?): HandwritingOptions? {
+        val defaults = defaultHandwritingOptions()
+        if (optionsObj == null) return defaults
+        val background = parseColorString(optionsObj.optString("backgroundColor")) ?: defaults.backgroundColor
+        val brush = parseColorString(optionsObj.optString("brushColor")) ?: defaults.brushColor
+        val brushSize = optionsObj.optDouble("brushSizeDp", defaults.brushSizeDp.toDouble()).toFloat()
+        val eraserSize = optionsObj.optDouble("eraserSizeDp", defaults.eraserSizeDp.toDouble()).toFloat()
+        val width = optionsObj.optInt("canvasWidth", defaults.canvasWidth)
+        val height = optionsObj.optInt("canvasHeight", defaults.canvasHeight)
+        val (clampedWidth, clampedHeight) = clampCanvasSize(width, height)
+        val format = HandwritingFormat.fromName(optionsObj.optString("format")) ?: defaults.format
+        val paperStyle = HandwritingPaperStyle.fromName(optionsObj.optString("paperStyle")) ?: defaults.paperStyle
+        val penType = HandwritingPenType.fromName(optionsObj.optString("penType")) ?: defaults.penType
+        val eraserType = HandwritingEraserType.fromName(optionsObj.optString("eraserType")) ?: defaults.eraserType
+        return HandwritingOptions(
+            backgroundColor = background,
+            brushColor = brush,
+            brushSizeDp = brushSize.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP),
+            canvasWidth = clampedWidth,
+            canvasHeight = clampedHeight,
+            format = format,
+            paperStyle = paperStyle,
+            penType = penType,
+            eraserSizeDp = eraserSize.coerceIn(MIN_HANDWRITING_ERASER_SIZE_DP, MAX_HANDWRITING_ERASER_SIZE_DP),
+            eraserType = eraserType
+        )
+    }
+
     private fun updateCardFontSize(value: Float, fromUser: Boolean) {
         val clamped = value.coerceIn(cardFontSizeSlider.valueFrom, cardFontSizeSlider.valueTo)
         val changed = abs(cardFontSizeSp - clamped) >= 0.01f
@@ -2247,6 +2498,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private data class ExportPayload(val json: String, val flowCount: Int, val cardCount: Int)
+
+    private data class ImportPayload(val flows: List<ImportedFlow>, val cardCount: Int)
+
+    private data class ImportedFlow(val name: String, val cards: List<ImportedCard>)
+
+    private data class ImportedCard(
+        val title: String,
+        val snippet: String,
+        val updatedAt: Long,
+        val handwriting: HandwritingContent?
+    )
+
     companion object {
         private const val PREFS_NAME = "timescape_state"
         private const val KEY_CARDS = "cards"
@@ -2282,5 +2546,7 @@ class MainActivity : AppCompatActivity() {
         private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
         private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
         private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
+        private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
+        private const val NOTES_EXPORT_VERSION = 1
     }
 }
