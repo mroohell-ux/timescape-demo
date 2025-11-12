@@ -28,6 +28,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
@@ -907,6 +908,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
         val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
+        val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
         val paletteCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingOptions)
@@ -1061,11 +1063,21 @@ class MainActivity : AppCompatActivity() {
             HandwritingPaletteSection.CANVAS -> loadHandwritingDrawingTool()
         }
 
+        fun applyCanvasCardWidth(widthPx: Int) {
+            val targetWidth = widthPx.coerceAtLeast(1)
+            handwritingCard.updateLayoutParams<ViewGroup.LayoutParams> {
+                if (width != targetWidth) {
+                    width = targetWidth
+                }
+            }
+        }
+
         fun createChoiceChip(
             text: String,
             iconRes: Int? = null,
             iconTint: Int? = null,
-            showLabel: Boolean = true
+            showLabel: Boolean = true,
+            fillColor: Int? = null
         ): Chip {
             val themedContext = ContextThemeWrapper(
                 this,
@@ -1086,6 +1098,28 @@ class MainActivity : AppCompatActivity() {
                 if (!showLabel) {
                     contentDescription = text
                 }
+                fillColor?.let { colorInt ->
+                    val density = themedContext.resources.displayMetrics.density
+                    val onColor = if (ColorUtils.calculateLuminance(colorInt) < 0.5f) {
+                        Color.WHITE
+                    } else {
+                        Color.BLACK
+                    }
+                    chipBackgroundColor = ColorStateList.valueOf(colorInt)
+                    checkedIconTint = ColorStateList.valueOf(onColor)
+                    val uncheckedStroke = ColorUtils.setAlphaComponent(onColor, (0.28f * 255).roundToInt())
+                    val checkedStroke = ColorUtils.setAlphaComponent(onColor, (0.54f * 255).roundToInt())
+                    chipStrokeColor = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(checkedStroke, uncheckedStroke)
+                    )
+                    chipStrokeWidth = (1.5f * density)
+                    rippleColor = ColorStateList.valueOf(
+                        ColorUtils.setAlphaComponent(onColor, (0.16f * 255).roundToInt())
+                    )
+                    setTextColor(onColor)
+                    isChipIconVisible = false
+                }
             }
         }
 
@@ -1093,9 +1127,8 @@ class MainActivity : AppCompatActivity() {
         brushColorOptions.forEach { option ->
             val chip = createChoiceChip(
                 option.label,
-                R.drawable.ic_handwriting_color,
-                option.color,
-                showLabel = false
+                showLabel = false,
+                fillColor = option.color
             ).apply {
                 tag = option
                 isChecked = option == selectedBrushColor
@@ -1134,9 +1167,8 @@ class MainActivity : AppCompatActivity() {
         paperColorOptions.forEach { option ->
             val chip = createChoiceChip(
                 option.label,
-                R.drawable.ic_handwriting_color,
-                option.color,
-                showLabel = false
+                showLabel = false,
+                fillColor = option.color
             ).apply {
                 tag = option
                 isChecked = option == selectedPaperColor
@@ -1167,6 +1199,7 @@ class MainActivity : AppCompatActivity() {
             clearButton.isEnabled = handwritingView.hasDrawing()
         }
 
+        applyCanvasCardWidth(selectedSize.width)
         handwritingView.setCanvasSize(selectedSize.width, selectedSize.height)
         handwritingView.setCanvasBackgroundColor(selectedPaperColor.color)
         handwritingView.setPaperStyle(selectedPaperStyle)
@@ -1228,6 +1261,7 @@ class MainActivity : AppCompatActivity() {
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
             val option = group.findViewById<Chip>(checkedId)?.tag as? CanvasSizeOption ?: return@setOnCheckedStateChangeListener
             selectedSize = option
+            applyCanvasCardWidth(option.width)
             handwritingView.setCanvasSize(option.width, option.height)
         }
 
@@ -1333,6 +1367,10 @@ class MainActivity : AppCompatActivity() {
             .create()
 
         dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                 if (!handwritingView.hasDrawing()) {
                     snackbar(getString(R.string.snackbar_handwriting_required))

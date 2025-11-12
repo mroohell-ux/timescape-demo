@@ -15,8 +15,10 @@
         android:paddingBottom="16dp">
 
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardHandwritingCanvas"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             app:cardCornerRadius="20dp"
             app:cardElevation="2dp"
             app:cardUseCompatPadding="false">
