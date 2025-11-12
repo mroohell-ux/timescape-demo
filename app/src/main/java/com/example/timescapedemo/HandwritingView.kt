@@ -11,6 +11,11 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.CornerPathEffect
+import android.graphics.ComposePathEffect
+import android.graphics.DiscretePathEffect
+import android.graphics.Matrix
+import android.graphics.PathDashPathEffect
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -304,6 +309,7 @@ class HandwritingView @JvmOverloads constructor(
 
     fun setBrushSizePx(sizePx: Float) {
         penPaint.strokeWidth = sizePx
+        applyPenType(penType)
         if (drawingTool == PEN) {
             invalidate()
         }
@@ -468,6 +474,10 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun applyPenType(type: HandwritingPenType) {
+        penPaint.maskFilter = null
+        penPaint.pathEffect = null
+        penPaint.strokeMiter = 4f
+        penPaint.style = Paint.Style.STROKE
         when (type) {
             HandwritingPenType.ROUND -> {
                 penPaint.strokeCap = Paint.Cap.ROUND
@@ -475,16 +485,48 @@ class HandwritingView @JvmOverloads constructor(
                 penPaint.pathEffect = null
             }
             HandwritingPenType.MARKER -> {
-                penPaint.strokeCap = Paint.Cap.SQUARE
+                penPaint.strokeCap = Paint.Cap.BUTT
                 penPaint.strokeJoin = Paint.Join.BEVEL
-                penPaint.pathEffect = null
+                penPaint.pathEffect = createMarkerPathEffect()
             }
             HandwritingPenType.CALLIGRAPHY -> {
                 penPaint.strokeCap = Paint.Cap.BUTT
-                penPaint.strokeJoin = Paint.Join.ROUND
-                penPaint.pathEffect = android.graphics.CornerPathEffect(16f * density)
+                penPaint.strokeJoin = Paint.Join.MITER
+                penPaint.strokeMiter = 12f
+                penPaint.pathEffect = createCalligraphyPathEffect()
             }
         }
+    }
+
+    private fun createMarkerPathEffect(): android.graphics.PathEffect {
+        val jitter = max(1f, penPaint.strokeWidth * 0.45f)
+        val segment = max(1f, penPaint.strokeWidth * 0.9f)
+        val texture = DiscretePathEffect(segment, jitter)
+        val soften = CornerPathEffect(penPaint.strokeWidth * 0.4f)
+        return ComposePathEffect(soften, texture)
+    }
+
+    private fun createCalligraphyPathEffect(): android.graphics.PathEffect {
+        val nib = buildCalligraphyNibPath(penPaint.strokeWidth)
+        val advance = max(1f, penPaint.strokeWidth * 0.28f)
+        val dash = PathDashPathEffect(nib, advance, 0f, PathDashPathEffect.Style.ROTATE)
+        val smooth = CornerPathEffect(penPaint.strokeWidth * 0.2f)
+        return ComposePathEffect(smooth, dash)
+    }
+
+    private fun buildCalligraphyNibPath(strokeWidth: Float): Path {
+        val nibLength = max(2f, strokeWidth * 1.35f)
+        val nibThickness = max(1f, strokeWidth * 0.45f)
+        val nibPath = Path().apply {
+            moveTo(-nibLength / 2f, 0f)
+            lineTo(0f, nibThickness / 2f)
+            lineTo(nibLength / 2f, 0f)
+            lineTo(0f, -nibThickness / 2f)
+            close()
+        }
+        val matrix = Matrix().apply { setRotate(-45f) }
+        nibPath.transform(matrix)
+        return nibPath
     }
 
     private fun applyEraserType(type: HandwritingEraserType) {
