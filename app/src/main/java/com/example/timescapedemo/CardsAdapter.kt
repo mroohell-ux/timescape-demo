@@ -22,6 +22,7 @@ import android.widget.TextView
 import androidx.annotation.ColorInt
 import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
 import androidx.core.view.isVisible
@@ -65,7 +66,8 @@ data class CardItem(
     var snippet: String,
     var bg: BgImage? = null,
     var updatedAt: Long = System.currentTimeMillis(),
-    var handwriting: HandwritingContent? = null
+    var handwriting: HandwritingContent? = null,
+    var relativeTimeText: CharSequence? = null
 )
 
 /** Non-“glass” tint options that keep the card transparent. */
@@ -83,7 +85,7 @@ class CardsAdapter(
     private val onItemClick: (index: Int) -> Unit,
     private val onItemDoubleClick: (index: Int) -> Unit,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
-) : RecyclerView.Adapter<CardsAdapter.VH>() {
+) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val time: TextView = v.findViewById(R.id.time)
@@ -96,34 +98,44 @@ class CardsAdapter(
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
-    private val items = mutableListOf<CardItem>()
     private val blockedUris = mutableSetOf<Uri>()
     private var bodyTextSizeSp: Float = DEFAULT_BODY_TEXT_SIZE_SP
     private var backgroundSizingConfig: BackgroundSizingConfig = backgroundSizing.normalized()
+    private val tintProcessor = TintProcessor(tint)
+    private val blurEffect: RenderEffect? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
+        } else {
+            null
+        }
 
     init {
         setHasStableIds(true)
     }
 
-    fun submitList(newItems: List<CardItem>) {
-        val oldItems = snapshotItems(items)
-        val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize(): Int = oldItems.size
-            override fun getNewListSize(): Int = newItems.size
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
-                oldItems[oldItemPosition].id == newItems[newItemPosition].id
-
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
-                oldItems[oldItemPosition] == newItems[newItemPosition]
-        })
-        items.clear()
-        items.addAll(newItems.map { it.deepCopy() })
-        val activeUris = newItems.mapNotNull { (it.bg as? BgImage.UriRef)?.uri }.toSet()
+    override fun submitList(list: List<CardItem>?) {
+        if (list == null) {
+            blockedUris.clear()
+            super.submitList(null)
+            return
+        }
+        val now = System.currentTimeMillis()
+        val copies = list.map { item ->
+            val copy = item.deepCopy()
+            copy.relativeTimeText = DateUtils.getRelativeTimeSpanString(
+                copy.updatedAt,
+                now,
+                DateUtils.MINUTE_IN_MILLIS,
+                DateUtils.FORMAT_ABBREV_RELATIVE
+            ).toString()
+            copy
+        }
+        val activeUris = copies.mapNotNull { (it.bg as? BgImage.UriRef)?.uri }.toSet()
         blockedUris.retainAll(activeUris)
-        diff.dispatchUpdatesTo(this)
+        super.submitList(copies)
     }
 
-    fun getItem(index: Int): CardItem? = items.getOrNull(index)
+    fun getItemAt(index: Int): CardItem? = currentList.getOrNull(index)
 
     fun setBackgroundSizing(config: BackgroundSizingConfig) {
         val normalized = config.normalized()
@@ -160,15 +172,15 @@ class CardsAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val item = items[position]
+        val item = getItem(position)
 
         // ---- Bind text ----
-        holder.time.text = DateUtils.getRelativeTimeSpanString(
+        holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(
             item.updatedAt,
             System.currentTimeMillis(),
             DateUtils.MINUTE_IN_MILLIS,
             DateUtils.FORMAT_ABBREV_RELATIVE
-        ).toString()
+        ).toString().also { item.relativeTimeText = it }
         val handwritingContent = item.handwriting
         val fallbackText = if (handwritingContent != null) {
             if (item.snippet.isNotBlank()) item.snippet
@@ -258,13 +270,10 @@ class CardsAdapter(
         }
 
         // Base blur (keeps transparency)
-        var baseEffect: RenderEffect? = null
-        if (hasBackground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            baseEffect = RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
-        }
+        val baseEffect = if (hasBackground) blurEffect else null
 
         // Apply NON-GLASS tint directly to image
-        applyTintToImage(holder.bg, tint, baseEffect)
+        tintProcessor.apply(holder.bg, baseEffect)
 
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
@@ -273,9 +282,7 @@ class CardsAdapter(
         addShadow(holder.time, holder.snippet)
     }
 
-    override fun getItemCount(): Int = items.size
-
-    override fun getItemId(position: Int): Long = items[position].id
+    override fun getItemId(position: Int): Long = getItem(position).id
 
     override fun onViewRecycled(holder: VH) {
         HandwritingBitmapLoader.clear(holder.handwriting)
@@ -296,8 +303,9 @@ class CardsAdapter(
     }
 
     private fun prefetchForIndex(index: Int, context: Context, baseWidth: Int, baseHeight: Int) {
-        if (index < 0 || index >= items.size) return
-        val handwriting = items[index].handwriting ?: return
+        val snapshot = currentList
+        if (index < 0 || index >= snapshot.size) return
+        val handwriting = snapshot[index].handwriting ?: return
         val width = min(baseWidth, handwriting.options.canvasWidth)
         val height = min(baseHeight, handwriting.options.canvasHeight)
         HandwritingBitmapLoader.prefetch(
@@ -383,45 +391,107 @@ class CardsAdapter(
     }
 
     // ---------- Tint implementations ----------
-    private fun applyTintToImage(iv: ImageView, style: TintStyle, baseEffect: RenderEffect?) {
-        when (style) {
-            is TintStyle.None -> {
-                iv.colorFilter = null
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.MultiplyDark -> {
+    private inner class TintProcessor(private val style: TintStyle) {
+        private val multiplyFilter: android.graphics.ColorFilter? =
+            (style as? TintStyle.MultiplyDark)?.let { tint ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    iv.colorFilter = BlendModeColorFilter(withAlpha(style.color, style.alpha), BlendMode.MULTIPLY)
-                } else iv.colorFilter = ColorMatrixColorFilter(ColorMatrix())
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.ScreenLight -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    iv.colorFilter = BlendModeColorFilter(withAlpha(style.color, style.alpha), BlendMode.SCREEN)
-                } else iv.colorFilter = ColorMatrixColorFilter(ColorMatrix())
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.Colorize -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    iv.colorFilter = BlendModeColorFilter(withAlpha(style.color, style.amount.coerceIn(0f,1f)), BlendMode.COLOR)
-                } else iv.colorFilter = ColorMatrixColorFilter(colorizeMatrix(style.color, style.amount))
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.Sepia -> {
-                iv.colorFilter = ColorMatrixColorFilter(sepiaMatrix(style.amount))
-                if (baseEffect != null) iv.setRenderEffect(baseEffect)
-            }
-            is TintStyle.Duotone -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val shader = RuntimeShader(DUOTONE_SHADER)
-                    setDuotoneUniforms(shader, style)
-                    val duo = RenderEffect.createRuntimeShaderEffect(shader, "content")
-                    val final = if (baseEffect != null) RenderEffect.createChainEffect(duo, baseEffect) else duo
-                    iv.setRenderEffect(final)
-                    iv.colorFilter = null
+                    BlendModeColorFilter(withAlpha(tint.color, tint.alpha), BlendMode.MULTIPLY)
                 } else {
-                    applyTintToImage(iv, TintStyle.Colorize(style.light, style.amount * 0.6f), baseEffect)
+                    ColorMatrixColorFilter(ColorMatrix())
                 }
+            }
+
+        private val screenFilter: android.graphics.ColorFilter? =
+            (style as? TintStyle.ScreenLight)?.let { tint ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    BlendModeColorFilter(withAlpha(tint.color, tint.alpha), BlendMode.SCREEN)
+                } else {
+                    ColorMatrixColorFilter(ColorMatrix())
+                }
+            }
+
+        private val colorizeFilter: android.graphics.ColorFilter? =
+            (style as? TintStyle.Colorize)?.let { tint ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    BlendModeColorFilter(
+                        withAlpha(tint.color, tint.amount.coerceIn(0f, 1f)),
+                        BlendMode.COLOR
+                    )
+                } else {
+                    ColorMatrixColorFilter(colorizeMatrix(tint.color, tint.amount))
+                }
+            }
+
+        private val sepiaFilter: android.graphics.ColorFilter? =
+            (style as? TintStyle.Sepia)?.let { tint ->
+                ColorMatrixColorFilter(sepiaMatrix(tint.amount))
+            }
+
+        private val duotoneEffect: RenderEffect? =
+            (style as? TintStyle.Duotone)?.let { tint ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    RuntimeShader(DUOTONE_SHADER).apply { setDuotoneUniforms(this, tint) }
+                        .let { shader -> RenderEffect.createRuntimeShaderEffect(shader, "content") }
+                } else {
+                    null
+                }
+            }
+
+        private val duotoneFallbackFilter: android.graphics.ColorFilter? =
+            (style as? TintStyle.Duotone)?.let { tint ->
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    ColorMatrixColorFilter(colorizeMatrix(tint.light, tint.amount * 0.6f))
+                } else {
+                    null
+                }
+            }
+
+        private val duotoneWithBlurCache = mutableMapOf<RenderEffect, RenderEffect>()
+
+        fun apply(iv: ImageView, baseEffect: RenderEffect?) {
+            when (style) {
+                is TintStyle.None -> {
+                    iv.colorFilter = null
+                    iv.setEffect(baseEffect)
+                }
+                is TintStyle.MultiplyDark -> {
+                    iv.colorFilter = multiplyFilter
+                    iv.setEffect(baseEffect)
+                }
+                is TintStyle.ScreenLight -> {
+                    iv.colorFilter = screenFilter
+                    iv.setEffect(baseEffect)
+                }
+                is TintStyle.Colorize -> {
+                    iv.colorFilter = colorizeFilter
+                    iv.setEffect(baseEffect)
+                }
+                is TintStyle.Sepia -> {
+                    iv.colorFilter = sepiaFilter
+                    iv.setEffect(baseEffect)
+                }
+                is TintStyle.Duotone -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && duotoneEffect != null) {
+                        val effect = if (baseEffect != null) {
+                            duotoneWithBlurCache.getOrPut(baseEffect) {
+                                RenderEffect.createChainEffect(duotoneEffect, baseEffect)
+                            }
+                        } else {
+                            duotoneEffect
+                        }
+                        iv.setEffect(effect)
+                        iv.colorFilter = null
+                    } else {
+                        iv.colorFilter = duotoneFallbackFilter
+                        iv.setEffect(baseEffect)
+                    }
+                }
+            }
+        }
+
+        private fun ImageView.setEffect(effect: RenderEffect?) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRenderEffect(effect)
             }
         }
     }
@@ -511,12 +581,18 @@ class CardsAdapter(
                 return half4(outRGB, c.a);
             }
         """
+
+        private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<CardItem>() {
+            override fun areItemsTheSame(oldItem: CardItem, newItem: CardItem): Boolean =
+                oldItem.id == newItem.id
+
+            override fun areContentsTheSame(oldItem: CardItem, newItem: CardItem): Boolean =
+                oldItem == newItem
+        }
     }
 }
 
 private const val HANDWRITING_PREFETCH_DISTANCE = 2
-
-private fun snapshotItems(source: List<CardItem>): List<CardItem> = source.map { it.deepCopy() }
 
 private fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
@@ -526,5 +602,6 @@ private fun CardItem.deepCopy(): CardItem = copy(
     },
     handwriting = handwriting?.let { content ->
         content.copy(options = content.options.copy())
-    }
+    },
+    relativeTimeText = relativeTimeText
 )
