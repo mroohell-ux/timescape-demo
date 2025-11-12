@@ -28,11 +28,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
@@ -43,7 +45,7 @@ import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
@@ -906,17 +908,23 @@ class MainActivity : AppCompatActivity() {
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
         val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
+        val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
-        val toolToggle = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.toggleHandwritingTools)
+        val paletteCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingOptions)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
-        val paperButton = dialogView.findViewById<MaterialButton>(R.id.buttonPaperOptions)
+        val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
+        val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         val penOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerPenOptions)
-        val paperOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerPaperOptions)
+        val eraserOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerEraserOptions)
+        val canvasOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerCanvasOptions)
         val brushColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupBrushColors)
         val penTypeGroup = dialogView.findViewById<ChipGroup>(R.id.groupPenTypes)
         val brushSizeValue = dialogView.findViewById<TextView>(R.id.textBrushSizeValue)
         val brushSizeSlider = dialogView.findViewById<Slider>(R.id.sliderBrushSize)
+        val eraserSizeValue = dialogView.findViewById<TextView>(R.id.textEraserSizeValue)
+        val eraserSizeSlider = dialogView.findViewById<Slider>(R.id.sliderEraserSize)
+        val eraserTypeGroup = dialogView.findViewById<ChipGroup>(R.id.groupEraserTypes)
         val paperStyleGroup = dialogView.findViewById<ChipGroup>(R.id.groupPaperStyles)
         val paperColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupPaperColors)
         val canvasSizeGroup = dialogView.findViewById<ChipGroup>(R.id.groupCanvasSizes)
@@ -1010,7 +1018,8 @@ class MainActivity : AppCompatActivity() {
         val penTypeOptions = listOf(
             HandwritingPenType.ROUND to getString(R.string.handwriting_pen_type_round),
             HandwritingPenType.MARKER to getString(R.string.handwriting_pen_type_marker),
-            HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy)
+            HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy),
+            HandwritingPenType.HIGHLIGHTER to getString(R.string.handwriting_pen_type_highlighter)
         )
         var selectedPenType = initialOptions.penType.takeIf { pen -> penTypeOptions.any { it.first == pen } }
             ?: HandwritingPenType.ROUND
@@ -1027,14 +1036,56 @@ class MainActivity : AppCompatActivity() {
             brushSizeValue.text = getString(R.string.handwriting_brush_size_value, selectedBrushSize)
         }
 
-        fun createChoiceChip(text: String, iconRes: Int? = null, iconTint: Int? = null): Chip {
+        val eraserTypeOptions = listOf(
+            HandwritingEraserType.ROUND to getString(R.string.handwriting_eraser_type_round),
+            HandwritingEraserType.BLOCK to getString(R.string.handwriting_eraser_type_block)
+        )
+        var selectedEraserType = initialOptions.eraserType.takeIf { type ->
+            eraserTypeOptions.any { it.first == type }
+        } ?: HandwritingEraserType.ROUND
+
+        eraserSizeSlider.valueFrom = MIN_HANDWRITING_ERASER_SIZE_DP
+        eraserSizeSlider.valueTo = MAX_HANDWRITING_ERASER_SIZE_DP
+        eraserSizeSlider.stepSize = 0.5f
+
+        val minEraser = eraserSizeSlider.valueFrom
+        val maxEraser = eraserSizeSlider.valueTo
+        var selectedEraserSize = initialOptions.eraserSizeDp.coerceIn(minEraser, maxEraser)
+
+        fun updateEraserSizeLabel() {
+            eraserSizeValue.text = getString(R.string.handwriting_eraser_size_value, selectedEraserSize)
+        }
+
+        var selectedPalette = loadHandwritingPaletteSection()
+        var selectedDrawingTool = when (selectedPalette) {
+            HandwritingPaletteSection.PEN -> HandwritingDrawingTool.PEN
+            HandwritingPaletteSection.ERASER -> HandwritingDrawingTool.ERASER
+            HandwritingPaletteSection.CANVAS -> loadHandwritingDrawingTool()
+        }
+
+        fun applyCanvasCardWidth(widthPx: Int) {
+            val targetWidth = widthPx.coerceAtLeast(1)
+            handwritingCard.updateLayoutParams<ViewGroup.LayoutParams> {
+                if (width != targetWidth) {
+                    width = targetWidth
+                }
+            }
+        }
+
+        fun createChoiceChip(
+            text: String,
+            iconRes: Int? = null,
+            iconTint: Int? = null,
+            showLabel: Boolean = true,
+            fillColor: Int? = null
+        ): Chip {
             val themedContext = ContextThemeWrapper(
                 this,
                 com.google.android.material.R.style.Widget_MaterialComponents_Chip_Choice
             )
             return Chip(themedContext).apply {
                 id = View.generateViewId()
-                this.text = text
+                this.text = if (showLabel) text else ""
                 isCheckable = true
                 isClickable = true
                 isFocusable = true
@@ -1044,12 +1095,41 @@ class MainActivity : AppCompatActivity() {
                     isChipIconVisible = true
                     iconTint?.let { tintColor -> chipIconTint = ColorStateList.valueOf(tintColor) }
                 }
+                if (!showLabel) {
+                    contentDescription = text
+                }
+                fillColor?.let { colorInt ->
+                    val density = themedContext.resources.displayMetrics.density
+                    val onColor = if (ColorUtils.calculateLuminance(colorInt) < 0.5f) {
+                        Color.WHITE
+                    } else {
+                        Color.BLACK
+                    }
+                    chipBackgroundColor = ColorStateList.valueOf(colorInt)
+                    checkedIconTint = ColorStateList.valueOf(onColor)
+                    val uncheckedStroke = ColorUtils.setAlphaComponent(onColor, (0.28f * 255).roundToInt())
+                    val checkedStroke = ColorUtils.setAlphaComponent(onColor, (0.54f * 255).roundToInt())
+                    chipStrokeColor = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(checkedStroke, uncheckedStroke)
+                    )
+                    chipStrokeWidth = (1.5f * density)
+                    rippleColor = ColorStateList.valueOf(
+                        ColorUtils.setAlphaComponent(onColor, (0.16f * 255).roundToInt())
+                    )
+                    setTextColor(onColor)
+                    isChipIconVisible = false
+                }
             }
         }
 
         brushColorGroup.removeAllViews()
         brushColorOptions.forEach { option ->
-            val chip = createChoiceChip(option.label, R.drawable.ic_handwriting_color, option.color).apply {
+            val chip = createChoiceChip(
+                option.label,
+                showLabel = false,
+                fillColor = option.color
+            ).apply {
                 tag = option
                 isChecked = option == selectedBrushColor
             }
@@ -1065,6 +1145,15 @@ class MainActivity : AppCompatActivity() {
             penTypeGroup.addView(chip)
         }
 
+        eraserTypeGroup.removeAllViews()
+        eraserTypeOptions.forEach { (eraserType, label) ->
+            val chip = createChoiceChip(label).apply {
+                tag = eraserType
+                isChecked = eraserType == selectedEraserType
+            }
+            eraserTypeGroup.addView(chip)
+        }
+
         paperStyleGroup.removeAllViews()
         paperStyleOptions.forEach { option ->
             val chip = createChoiceChip(option.label, option.iconRes).apply {
@@ -1076,7 +1165,11 @@ class MainActivity : AppCompatActivity() {
 
         paperColorGroup.removeAllViews()
         paperColorOptions.forEach { option ->
-            val chip = createChoiceChip(option.label, R.drawable.ic_handwriting_color, option.color).apply {
+            val chip = createChoiceChip(
+                option.label,
+                showLabel = false,
+                fillColor = option.color
+            ).apply {
                 tag = option
                 isChecked = option == selectedPaperColor
             }
@@ -1106,12 +1199,15 @@ class MainActivity : AppCompatActivity() {
             clearButton.isEnabled = handwritingView.hasDrawing()
         }
 
+        applyCanvasCardWidth(selectedSize.width)
         handwritingView.setCanvasSize(selectedSize.width, selectedSize.height)
         handwritingView.setCanvasBackgroundColor(selectedPaperColor.color)
         handwritingView.setPaperStyle(selectedPaperStyle)
         handwritingView.setBrushColor(selectedBrushColor.color)
         handwritingView.setBrushSizeDp(selectedBrushSize)
         handwritingView.setPenType(selectedPenType)
+        handwritingView.setEraserType(selectedEraserType)
+        handwritingView.setEraserSizeDp(selectedEraserSize)
         handwritingView.setOnContentChangedListener { updateHistoryButtons() }
         existing?.path?.let { path ->
             loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
@@ -1139,6 +1235,14 @@ class MainActivity : AppCompatActivity() {
             handwritingView.setPenType(option)
         }
 
+        eraserTypeGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val option = group.findViewById<Chip>(checkedId)?.tag as? HandwritingEraserType
+                ?: return@setOnCheckedStateChangeListener
+            selectedEraserType = option
+            handwritingView.setEraserType(option)
+        }
+
         paperStyleGroup.setOnCheckedStateChangeListener { group, checkedIds ->
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
             val option = group.findViewById<Chip>(checkedId)?.tag as? PaperStyleOption ?: return@setOnCheckedStateChangeListener
@@ -1157,6 +1261,7 @@ class MainActivity : AppCompatActivity() {
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
             val option = group.findViewById<Chip>(checkedId)?.tag as? CanvasSizeOption ?: return@setOnCheckedStateChangeListener
             selectedSize = option
+            applyCanvasCardWidth(option.width)
             handwritingView.setCanvasSize(option.width, option.height)
         }
 
@@ -1176,17 +1281,77 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        fun showTool(buttonId: Int) {
-            val showingPen = buttonId == penButton.id
-            penOptionsContainer.isVisible = showingPen
-            paperOptionsContainer.isVisible = !showingPen
+        eraserSizeSlider.value = selectedEraserSize
+        updateEraserSizeLabel()
+        eraserSizeSlider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                selectedEraserSize = value
+                handwritingView.setEraserSizeDp(value)
+                updateEraserSizeLabel()
+            }
         }
 
-        toolToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (isChecked) showTool(checkedId)
+        var visiblePalette: HandwritingPaletteSection? = null
+
+        fun updateToolButtons() {
+            penButton.isChecked = selectedDrawingTool == HandwritingDrawingTool.PEN
+            eraserButton.isChecked = selectedDrawingTool == HandwritingDrawingTool.ERASER
+            canvasButton.isChecked = visiblePalette == HandwritingPaletteSection.CANVAS
         }
-        toolToggle.check(penButton.id)
-        showTool(penButton.id)
+
+        fun setDrawingTool(tool: HandwritingDrawingTool) {
+            selectedDrawingTool = tool
+            handwritingView.setDrawingTool(tool)
+            updateToolButtons()
+        }
+
+        fun showPalette(section: HandwritingPaletteSection) {
+            visiblePalette = section
+            selectedPalette = section
+            paletteCard.isVisible = true
+            penOptionsContainer.isVisible = section == HandwritingPaletteSection.PEN
+            eraserOptionsContainer.isVisible = section == HandwritingPaletteSection.ERASER
+            canvasOptionsContainer.isVisible = section == HandwritingPaletteSection.CANVAS
+            updateToolButtons()
+        }
+
+        fun hidePalette() {
+            visiblePalette = null
+            paletteCard.isGone = true
+            penOptionsContainer.isGone = true
+            eraserOptionsContainer.isGone = true
+            canvasOptionsContainer.isGone = true
+            updateToolButtons()
+        }
+
+        setDrawingTool(selectedDrawingTool)
+        hidePalette()
+
+        penButton.setOnClickListener {
+            setDrawingTool(HandwritingDrawingTool.PEN)
+            if (visiblePalette == HandwritingPaletteSection.PEN) {
+                hidePalette()
+            } else {
+                showPalette(HandwritingPaletteSection.PEN)
+            }
+        }
+
+        eraserButton.setOnClickListener {
+            setDrawingTool(HandwritingDrawingTool.ERASER)
+            if (visiblePalette == HandwritingPaletteSection.ERASER) {
+                hidePalette()
+            } else {
+                showPalette(HandwritingPaletteSection.ERASER)
+            }
+        }
+
+        canvasButton.setOnClickListener {
+            if (visiblePalette == HandwritingPaletteSection.CANVAS) {
+                hidePalette()
+            } else {
+                showPalette(HandwritingPaletteSection.CANVAS)
+            }
+        }
         updateHistoryButtons()
 
         val dialog = AlertDialog.Builder(this)
@@ -1202,6 +1367,10 @@ class MainActivity : AppCompatActivity() {
             .create()
 
         dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                 if (!handwritingView.hasDrawing()) {
                     snackbar(getString(R.string.snackbar_handwriting_required))
@@ -1220,7 +1389,9 @@ class MainActivity : AppCompatActivity() {
                     canvasHeight = selectedSize.height,
                     format = selectedFormat,
                     paperStyle = selectedPaperStyle,
-                    penType = selectedPenType
+                    penType = selectedPenType,
+                    eraserSizeDp = selectedEraserSize,
+                    eraserType = selectedEraserType
                 )
                 val saved = saveHandwritingContent(exportBitmap, options, existing)
                 exportBitmap.recycle()
@@ -1228,7 +1399,7 @@ class MainActivity : AppCompatActivity() {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
                 }
-                persistHandwritingDefaults(options)
+                persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
                 onSave(saved)
                 dialog.dismiss()
             }
@@ -1468,6 +1639,7 @@ class MainActivity : AppCompatActivity() {
         val storedBackground = parseColorString(prefs.getString(KEY_HANDWRITING_DEFAULT_BACKGROUND, null))
         val storedBrush = parseColorString(prefs.getString(KEY_HANDWRITING_DEFAULT_BRUSH, null))
         val storedBrushSize = prefs.getFloat(KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP, Float.NaN)
+        val storedEraserSize = prefs.getFloat(KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP, Float.NaN)
         val storedWidth = prefs.getInt(KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH, -1).takeIf { it > 0 }
         val storedHeight = prefs.getInt(KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT, -1).takeIf { it > 0 }
         val baseWidth = storedWidth ?: fallbackWidth
@@ -1475,9 +1647,15 @@ class MainActivity : AppCompatActivity() {
         val (canvasWidth, canvasHeight) = clampCanvasSize(baseWidth, baseHeight)
         val brushSize = if (storedBrushSize.isNaN()) DEFAULT_HANDWRITING_BRUSH_SIZE_DP
         else storedBrushSize.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
+        val eraserSize = if (storedEraserSize.isNaN()) {
+            DEFAULT_HANDWRITING_ERASER_SIZE_DP
+        } else {
+            storedEraserSize.coerceIn(MIN_HANDWRITING_ERASER_SIZE_DP, MAX_HANDWRITING_ERASER_SIZE_DP)
+        }
         val formatName = prefs.getString(KEY_HANDWRITING_DEFAULT_FORMAT, null)
         val paperStyleName = prefs.getString(KEY_HANDWRITING_DEFAULT_PAPER_STYLE, null)
         val penTypeName = prefs.getString(KEY_HANDWRITING_DEFAULT_PEN_TYPE, null)
+        val eraserTypeName = prefs.getString(KEY_HANDWRITING_DEFAULT_ERASER_TYPE, null)
         return HandwritingOptions(
             backgroundColor = storedBackground ?: DEFAULT_HANDWRITING_BACKGROUND,
             brushColor = storedBrush ?: DEFAULT_HANDWRITING_BRUSH,
@@ -1486,11 +1664,17 @@ class MainActivity : AppCompatActivity() {
             canvasHeight = canvasHeight,
             format = HandwritingFormat.fromName(formatName) ?: HandwritingFormat.PNG,
             paperStyle = HandwritingPaperStyle.fromName(paperStyleName) ?: DEFAULT_HANDWRITING_PAPER_STYLE,
-            penType = HandwritingPenType.fromName(penTypeName) ?: DEFAULT_HANDWRITING_PEN_TYPE
+            penType = HandwritingPenType.fromName(penTypeName) ?: DEFAULT_HANDWRITING_PEN_TYPE,
+            eraserSizeDp = eraserSize,
+            eraserType = HandwritingEraserType.fromName(eraserTypeName) ?: DEFAULT_HANDWRITING_ERASER_TYPE
         )
     }
 
-    private fun persistHandwritingDefaults(options: HandwritingOptions) {
+    private fun persistHandwritingDefaults(
+        options: HandwritingOptions,
+        palette: HandwritingPaletteSection,
+        drawingTool: HandwritingDrawingTool
+    ) {
         val (width, height) = clampCanvasSize(options.canvasWidth, options.canvasHeight)
         prefs.edit().apply {
             putString(KEY_HANDWRITING_DEFAULT_BACKGROUND, colorToString(options.backgroundColor))
@@ -1499,13 +1683,28 @@ class MainActivity : AppCompatActivity() {
                 KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP,
                 options.brushSizeDp.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
             )
+            putFloat(
+                KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP,
+                options.eraserSizeDp.coerceIn(MIN_HANDWRITING_ERASER_SIZE_DP, MAX_HANDWRITING_ERASER_SIZE_DP)
+            )
             putInt(KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH, width)
             putInt(KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT, height)
             putString(KEY_HANDWRITING_DEFAULT_FORMAT, options.format.name)
             putString(KEY_HANDWRITING_DEFAULT_PAPER_STYLE, options.paperStyle.name)
             putString(KEY_HANDWRITING_DEFAULT_PEN_TYPE, options.penType.name)
+            putString(KEY_HANDWRITING_DEFAULT_ERASER_TYPE, options.eraserType.name)
+            putString(KEY_HANDWRITING_LAST_PALETTE_SECTION, palette.name)
+            putString(KEY_HANDWRITING_LAST_DRAWING_TOOL, drawingTool.name)
         }.apply()
     }
+
+    private fun loadHandwritingPaletteSection(): HandwritingPaletteSection =
+        HandwritingPaletteSection.fromName(prefs.getString(KEY_HANDWRITING_LAST_PALETTE_SECTION, null))
+            ?: HandwritingPaletteSection.PEN
+
+    private fun loadHandwritingDrawingTool(): HandwritingDrawingTool =
+        HandwritingDrawingTool.fromName(prefs.getString(KEY_HANDWRITING_LAST_DRAWING_TOOL, null))
+            ?: HandwritingDrawingTool.PEN
 
     private fun parseHandwritingContent(cardObj: JSONObject): HandwritingContent? {
         val handwritingObj = cardObj.optJSONObject("handwriting")
@@ -1528,6 +1727,11 @@ class MainActivity : AppCompatActivity() {
             val paperStyle = HandwritingPaperStyle.fromName(paperStyleName) ?: baseOptions.paperStyle
             val penTypeName = optionsObj?.optString("penType")
             val penType = HandwritingPenType.fromName(penTypeName) ?: baseOptions.penType
+            val eraserSize = optionsObj?.optDouble("eraserSizeDp", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat()
+                ?.coerceIn(MIN_HANDWRITING_ERASER_SIZE_DP, MAX_HANDWRITING_ERASER_SIZE_DP)
+                ?: baseOptions.eraserSizeDp
+            val eraserTypeName = optionsObj?.optString("eraserType")
+            val eraserType = HandwritingEraserType.fromName(eraserTypeName) ?: baseOptions.eraserType
             return HandwritingContent(
                 path = path,
                 options = HandwritingOptions(
@@ -1538,7 +1742,9 @@ class MainActivity : AppCompatActivity() {
                     canvasHeight = canvasHeight,
                     format = format,
                     paperStyle = paperStyle,
-                    penType = penType
+                    penType = penType,
+                    eraserSizeDp = eraserSize,
+                    eraserType = eraserType
                 )
             )
         }
@@ -1785,11 +1991,13 @@ class MainActivity : AppCompatActivity() {
                         put("backgroundColor", colorToString(options.backgroundColor))
                         put("brushColor", colorToString(options.brushColor))
                         put("brushSizeDp", options.brushSizeDp.toDouble())
+                        put("eraserSizeDp", options.eraserSizeDp.toDouble())
                         put("canvasWidth", options.canvasWidth)
                         put("canvasHeight", options.canvasHeight)
                         put("format", options.format.name)
                         put("paperStyle", options.paperStyle.name)
                         put("penType", options.penType.name)
+                        put("eraserType", options.eraserType.name)
                     }
                     val handwritingObj = JSONObject().apply {
                         put("path", content.path)
@@ -2052,19 +2260,27 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
         private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
         private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
+        private const val KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP = "handwriting/default_eraser_size_dp"
         private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
         private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
         private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
         private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
         private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
+        private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
+        private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
+        private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
         private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
         private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
         private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
         private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
+        private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
+        private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
+        private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
         private const val DEFAULT_CANVAS_RATIO = 0.75f
         private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
         private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
         private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
         private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
+        private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
     }
 }

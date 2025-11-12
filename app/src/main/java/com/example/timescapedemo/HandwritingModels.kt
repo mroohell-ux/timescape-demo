@@ -34,10 +34,42 @@ enum class HandwritingPaperStyle {
 enum class HandwritingPenType {
     ROUND,
     MARKER,
-    CALLIGRAPHY;
+    CALLIGRAPHY,
+    HIGHLIGHTER;
 
     companion object {
         fun fromName(name: String?): HandwritingPenType? =
+            values().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+}
+
+enum class HandwritingEraserType {
+    ROUND,
+    BLOCK;
+
+    companion object {
+        fun fromName(name: String?): HandwritingEraserType? =
+            values().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+}
+
+enum class HandwritingPaletteSection {
+    PEN,
+    ERASER,
+    CANVAS;
+
+    companion object {
+        fun fromName(name: String?): HandwritingPaletteSection? =
+            values().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+}
+
+enum class HandwritingDrawingTool {
+    PEN,
+    ERASER;
+
+    companion object {
+        fun fromName(name: String?): HandwritingDrawingTool? =
             values().firstOrNull { it.name.equals(name, ignoreCase = true) }
     }
 }
@@ -50,7 +82,9 @@ data class HandwritingOptions(
     val canvasHeight: Int,
     val format: HandwritingFormat,
     val paperStyle: HandwritingPaperStyle,
-    val penType: HandwritingPenType
+    val penType: HandwritingPenType,
+    val eraserSizeDp: Float,
+    val eraserType: HandwritingEraserType
 )
 
 data class HandwritingContent(
