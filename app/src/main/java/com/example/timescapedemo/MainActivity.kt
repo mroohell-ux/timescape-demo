@@ -2006,7 +2006,7 @@ class MainActivity : AppCompatActivity() {
             }
             val resolvedIndex = indexById ?: flow.lastViewedCardIndex
             val clampedIndex = resolvedIndex.coerceIn(0, adapter.itemCount - 1)
-            val cardId = adapter.getItem(clampedIndex)?.id
+            val cardId = adapter.getItemAt(clampedIndex)?.id
             flow.lastViewedCardIndex = clampedIndex
             flow.lastViewedCardId = cardId
             val shouldFocus = flow.lastViewedCardFocused && indexById != null
@@ -2023,7 +2023,7 @@ class MainActivity : AppCompatActivity() {
             }
             val nearest = layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
             flow.lastViewedCardIndex = nearest
-            flow.lastViewedCardId = adapter.getItem(nearest)?.id
+            flow.lastViewedCardId = adapter.getItemAt(nearest)?.id
             flow.lastViewedCardFocused = layoutManager.isFocused(nearest)
         }
     }
