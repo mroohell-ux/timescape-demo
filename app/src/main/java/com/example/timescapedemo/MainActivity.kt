@@ -1102,13 +1102,22 @@ class MainActivity : AppCompatActivity() {
             HandwritingPaletteSection.CANVAS -> loadHandwritingDrawingTool()
         }
 
-        fun applyCanvasCardWidth(widthPx: Int) {
-            val targetWidth = widthPx.coerceAtLeast(1)
+        fun applyCanvasCardDisplaySize(contentWidthPx: Int, contentHeightPx: Int) {
+            if (contentWidthPx <= 0 || contentHeightPx <= 0) return
+            val widthScale = maxCanvasWidth.toFloat() / contentWidthPx.toFloat()
+            val heightScale = maxCanvasHeight.toFloat() / contentHeightPx.toFloat()
+            val scale = listOf(widthScale, heightScale)
+                .filter { it.isFinite() && it > 0f }
+                .minOrNull()
+                ?: 1f
+            val targetWidth = (contentWidthPx * scale).roundToInt().coerceAtLeast(1)
+            val targetHeight = (contentHeightPx * scale).roundToInt().coerceAtLeast(1)
             handwritingCard.updateLayoutParams<ViewGroup.LayoutParams> {
                 if (width != targetWidth) {
                     width = targetWidth
                 }
             }
+            handwritingView.minimumHeight = targetHeight
         }
 
         fun createChoiceChip(
@@ -1238,7 +1247,7 @@ class MainActivity : AppCompatActivity() {
             clearButton.isEnabled = handwritingView.hasDrawing()
         }
 
-        applyCanvasCardWidth(selectedSize.width)
+        applyCanvasCardDisplaySize(selectedSize.width, selectedSize.height)
         handwritingView.setCanvasSize(selectedSize.width, selectedSize.height)
         handwritingView.setCanvasBackgroundColor(selectedPaperColor.color)
         handwritingView.setPaperStyle(selectedPaperStyle)
@@ -1300,7 +1309,7 @@ class MainActivity : AppCompatActivity() {
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
             val option = group.findViewById<Chip>(checkedId)?.tag as? CanvasSizeOption ?: return@setOnCheckedStateChangeListener
             selectedSize = option
-            applyCanvasCardWidth(option.width)
+            applyCanvasCardDisplaySize(option.width, option.height)
             handwritingView.setCanvasSize(option.width, option.height)
         }
 
