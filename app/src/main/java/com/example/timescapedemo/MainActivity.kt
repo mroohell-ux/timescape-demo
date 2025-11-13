@@ -2461,6 +2461,12 @@ class MainActivity : AppCompatActivity() {
                     val delta = layoutManager.offsetTo(index)
                     if (delta == 0) {
                         layoutManager.focus(index)
+                        if (card.handwriting?.hasBack() == true) {
+                            val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                            if (vh != null && adapter.toggleHandwriting(vh) != null) {
+                                return
+                            }
+                        }
                     } else {
                         recycler.smoothScrollBy(0, delta)
                     }
