@@ -896,10 +896,12 @@ class MainActivity : AppCompatActivity() {
                             card.handwriting?.back?.path?.let { deleteHandwritingFile(it) }
                             card.handwriting?.back = null
                         } else {
+                            val frontOptions = card.handwriting?.options ?: savedContent.options
+                            val normalizedOptions = synchronizeBackPaper(frontOptions, savedContent.options)
                             if (card.handwriting == null) {
-                                card.handwriting = HandwritingContent(savedContent.path, savedContent.options)
+                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions)
                             }
-                            card.handwriting?.back = HandwritingSide(savedContent.path, savedContent.options)
+                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions)
                         }
                     } else {
                         val content = savedContent ?: run {
@@ -911,6 +913,9 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             card.handwriting?.path = content.path
                             card.handwriting?.options = content.options
+                            card.handwriting?.back?.let { backSide ->
+                                backSide.options = synchronizeBackPaper(content.options, backSide.options)
+                            }
                         }
                     }
                     card.updatedAt = System.currentTimeMillis()
@@ -1719,6 +1724,20 @@ class MainActivity : AppCompatActivity() {
             h = (h * scale).roundToInt().coerceAtLeast(1)
         }
         return w to h
+    }
+
+    private fun synchronizeBackPaper(
+        front: HandwritingOptions,
+        back: HandwritingOptions?
+    ): HandwritingOptions {
+        val base = back ?: front
+        return base.copy(
+            backgroundColor = front.backgroundColor,
+            paperStyle = front.paperStyle,
+            canvasWidth = front.canvasWidth,
+            canvasHeight = front.canvasHeight,
+            format = front.format
+        )
     }
 
     private fun defaultHandwritingOptions(): HandwritingOptions {
