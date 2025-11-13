@@ -4,6 +4,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -291,11 +292,22 @@ class CardsAdapter(
             onReady?.invoke()
             return
         }
-        val side = if (face == HandwritingFace.BACK && handwritingContent.back != null) {
-            handwritingContent.back!!
-        } else {
-            HandwritingSide(handwritingContent.path, handwritingContent.options)
+        if (face == HandwritingFace.BACK && handwritingContent.back == null) {
+            HandwritingBitmapLoader.clear(holder.handwriting)
+            val (targetWidth, targetHeight) = estimateTargetSize(holder, handwritingContent.options)
+            val placeholder = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(handwritingContent.options.backgroundColor)
+            }
+            holder.handwriting.setImageBitmap(placeholder)
+            holder.handwriting.contentDescription = holder.itemView.context.getString(
+                R.string.handwriting_card_content_desc
+            )
+            showHandwriting(holder, isVisible = true, fallbackText = fallbackText)
+            onReady?.invoke()
+            prefetchNeighbors(holder, position, handwritingContent.options)
+            return
         }
+        val side = handwritingContent.side(face)
         showHandwriting(holder, isVisible = false, fallbackText = fallbackText)
         val (targetWidth, targetHeight) = estimateTargetSize(holder, side.options)
         HandwritingBitmapLoader.load(
@@ -339,7 +351,6 @@ class CardsAdapter(
         if (position == RecyclerView.NO_POSITION) return null
         val item = getItem(position)
         val handwritingContent = item.handwriting ?: return null
-        if (!handwritingContent.hasBack()) return null
         val current = currentHandwritingFace(item.id, handwritingContent)
         val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
         handwritingFaces[item.id] = next
@@ -360,12 +371,7 @@ class CardsAdapter(
 
     private fun currentHandwritingFace(itemId: Long, content: HandwritingContent): HandwritingFace {
         val stored = handwritingFaces[itemId]
-        return if (stored == HandwritingFace.BACK && !content.hasBack()) {
-            handwritingFaces.remove(itemId)
-            HandwritingFace.FRONT
-        } else {
-            stored ?: HandwritingFace.FRONT
-        }
+        return stored ?: HandwritingFace.FRONT
     }
 
     private fun animateHandwritingFlip(

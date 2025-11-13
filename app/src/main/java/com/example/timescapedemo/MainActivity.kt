@@ -2471,7 +2471,8 @@ class MainActivity : AppCompatActivity() {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return
                 val card = adapter.getItemAt(index) ?: return
                 if (layoutManager.isFocused(index)) {
-                    if (card.handwriting?.hasBack() == true) {
+                    val handwritingContent = card.handwriting
+                    if (handwritingContent != null) {
                         val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
                         if (vh != null && adapter.toggleHandwriting(vh) != null) {
                             return
@@ -2482,12 +2483,6 @@ class MainActivity : AppCompatActivity() {
                     val delta = layoutManager.offsetTo(index)
                     if (delta == 0) {
                         layoutManager.focus(index)
-                        if (card.handwriting?.hasBack() == true) {
-                            val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
-                            if (vh != null && adapter.toggleHandwriting(vh) != null) {
-                                return
-                            }
-                        }
                     } else {
                         recycler.smoothScrollBy(0, delta)
                     }
