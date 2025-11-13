@@ -858,12 +858,17 @@ class MainActivity : AppCompatActivity() {
             titleRes = R.string.dialog_add_handwriting_title,
             existing = null,
             initialOptions = defaults,
+            face = HandwritingFace.FRONT,
             onSave = { savedContent ->
+                val content = savedContent ?: run {
+                    snackbar(getString(R.string.snackbar_handwriting_required))
+                    return@showHandwritingDialog
+                }
                 val card = CardItem(
                     id = nextCardId++,
                     title = "",
                     snippet = "",
-                    handwriting = HandwritingContent(savedContent.path, savedContent.options),
+                    handwriting = HandwritingContent(content.path, content.options),
                     updatedAt = System.currentTimeMillis()
                 )
                 flow.cards += card
@@ -884,18 +889,28 @@ class MainActivity : AppCompatActivity() {
                 initialOptions = if (face == HandwritingFace.BACK) {
                     handwritingContent.back?.options ?: handwritingContent.options
                 } else handwritingContent.options,
+                face = face,
                 onSave = { savedContent ->
                     if (face == HandwritingFace.BACK) {
-                        if (card.handwriting == null) {
-                            card.handwriting = HandwritingContent(savedContent.path, savedContent.options)
-                        }
-                        card.handwriting?.back = HandwritingSide(savedContent.path, savedContent.options)
-                    } else {
-                        if (card.handwriting == null) {
-                            card.handwriting = HandwritingContent(savedContent.path, savedContent.options)
+                        if (savedContent == null) {
+                            card.handwriting?.back?.path?.let { deleteHandwritingFile(it) }
+                            card.handwriting?.back = null
                         } else {
-                            card.handwriting?.path = savedContent.path
-                            card.handwriting?.options = savedContent.options
+                            if (card.handwriting == null) {
+                                card.handwriting = HandwritingContent(savedContent.path, savedContent.options)
+                            }
+                            card.handwriting?.back = HandwritingSide(savedContent.path, savedContent.options)
+                        }
+                    } else {
+                        val content = savedContent ?: run {
+                            snackbar(getString(R.string.snackbar_handwriting_required))
+                            return@showHandwritingDialog
+                        }
+                        if (card.handwriting == null) {
+                            card.handwriting = HandwritingContent(content.path, content.options)
+                        } else {
+                            card.handwriting?.path = content.path
+                            card.handwriting?.options = content.options
                         }
                     }
                     card.updatedAt = System.currentTimeMillis()
@@ -956,7 +971,8 @@ class MainActivity : AppCompatActivity() {
         titleRes: Int,
         existing: HandwritingSide?,
         initialOptions: HandwritingOptions,
-        onSave: (HandwritingSide) -> Unit,
+        face: HandwritingFace,
+        onSave: (HandwritingSide?) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
@@ -1435,7 +1451,12 @@ class MainActivity : AppCompatActivity() {
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                 if (!handwritingView.hasDrawing()) {
-                    snackbar(getString(R.string.snackbar_handwriting_required))
+                    if (face == HandwritingFace.BACK && existing != null) {
+                        onSave(null)
+                        dialog.dismiss()
+                    } else {
+                        snackbar(getString(R.string.snackbar_handwriting_required))
+                    }
                     return@setOnClickListener
                 }
                 val exportBitmap = handwritingView.exportBitmap()
