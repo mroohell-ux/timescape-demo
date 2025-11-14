@@ -46,7 +46,7 @@ class RightRailFlowLayoutManager(
     private val curveRotationPow: Float = 1.12f,
     private val curveMaxRotationDeg: Float = 9f,
     private val curveExtraRightShiftPx: Int = 32
-) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
+) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider, FlowLayoutManager {
 
     // focus animation state
     private var selectedIndex: Int? = null
@@ -86,26 +86,26 @@ class RightRailFlowLayoutManager(
         RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
 
     // ---- Public helpers ----
-    fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
+    override fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
 
     /** Center index given current scroll (rounded to nearest). */
-    fun nearestIndex(): Int {
+    override fun nearestIndex(): Int {
         val idx = ((scrollYPx + screenCenter() - yTop()) / itemPitchPx).roundToInt()
         return idx.coerceIn(0, max(0, itemCount - 1))
     }
 
     /** Pixel delta required to move `index` to vertical screen center. */
-    fun offsetTo(index: Int): Int {
+    override fun offsetTo(index: Int): Int {
         val desiredScroll = yTop() + index * itemPitchPx - screenCenter()
         return (desiredScroll - scrollYPx).toInt()
     }
 
-    fun focus(index: Int) {
+    override fun focus(index: Int) {
         if (selectedIndex == index && focusProgress >= 0.999f) return
         selectedIndex = index
         animateFocus(1f)
     }
-    fun clearFocus() {
+    override fun clearFocus() {
         if (selectedIndex == null && focusProgress == 0f) return
         animateFocus(0f) { selectedIndex = null }
     }
@@ -326,7 +326,7 @@ class RightRailFlowLayoutManager(
         return consumed
     }
 
-    fun restoreState(index: Int, focus: Boolean) {
+    override fun restoreState(index: Int, focus: Boolean) {
         if (applyRestore(index, focus)) {
             pendingRestore = null
             requestLayout()
@@ -356,6 +356,10 @@ class RightRailFlowLayoutManager(
         val desired = yTop() + targetPosition * itemPitchPx - screenCenter()
         val dir = if (desired > scrollYPx) 1f else -1f
         return PointF(0f, dir)
+    }
+
+    override fun smoothScrollBy(recycler: RecyclerView, delta: Int) {
+        recycler.smoothScrollBy(0, delta)
     }
 
     private fun computeCurvePlacement(py: Float, centerY: Float): CurvePlacement {

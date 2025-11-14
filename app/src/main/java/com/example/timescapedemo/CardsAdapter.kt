@@ -155,6 +155,8 @@ class CardsAdapter(
         notifyDataSetChanged()
     }
 
+    fun indexOfId(id: Long): Int = items.indexOfFirst { it.id == id }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
         val vh = VH(v)

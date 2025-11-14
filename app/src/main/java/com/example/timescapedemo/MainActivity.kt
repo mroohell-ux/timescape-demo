@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.graphics.*
@@ -32,6 +33,7 @@ import androidx.appcompat.widget.SearchView
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.GravityCompat
+import androidx.core.view.MarginLayoutParamsCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -123,7 +125,7 @@ class MainActivity : AppCompatActivity() {
     private var pagerBasePaddingTop: Int = 0
     private var pagerBasePaddingEnd: Int = 0
     private var pagerBasePaddingBottom: Int = 0
-    private var flowBarBaseMarginBottom: Int = 0
+    private var flowBarBaseMargin: Int = 0
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -238,8 +240,15 @@ class MainActivity : AppCompatActivity() {
         pagerBasePaddingTop = flowPager.paddingTop
         pagerBasePaddingEnd = flowPager.paddingEnd
         pagerBasePaddingBottom = flowPager.paddingBottom
-        flowBarBaseMarginBottom =
-            (flowBar.layoutParams as? CoordinatorLayout.LayoutParams)?.bottomMargin ?: 0
+        val orientation = resources.configuration.orientation
+        flowBarBaseMargin =
+            (flowBar.layoutParams as? CoordinatorLayout.LayoutParams)?.let { params ->
+                if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                    MarginLayoutParamsCompat.getMarginEnd(params)
+                } else {
+                    params.bottomMargin
+                }
+            } ?: 0
 
         toolbar.navigationIcon = AppCompatResources.getDrawable(this, R.drawable.ic_menu_drawer)
         toolbar.setNavigationOnClickListener { drawerLayout.openDrawer(GravityCompat.START) }
@@ -329,7 +338,11 @@ class MainActivity : AppCompatActivity() {
                 pagerBasePaddingBottom
             )
             flowBar.updateLayoutParams<CoordinatorLayout.LayoutParams> {
-                bottomMargin = flowBarBaseMarginBottom + systemBars.bottom
+                if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                    MarginLayoutParamsCompat.setMarginEnd(this, flowBarBaseMargin + systemBars.right)
+                } else {
+                    bottomMargin = flowBarBaseMargin + systemBars.bottom
+                }
             }
             insets
         }
@@ -695,7 +708,7 @@ class MainActivity : AppCompatActivity() {
         return flowControllers[flow.id]
     }
 
-    private fun createLayoutManager(): RightRailFlowLayoutManager {
+    private fun createLayoutManager(): FlowLayoutManager {
         val metrics = resources.displayMetrics
         val density = metrics.density
         val horizontalInsetPx = (32 * density).roundToInt()
@@ -703,13 +716,25 @@ class MainActivity : AppCompatActivity() {
         val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
         val baseSide = availableWidth
         val focusSide = availableWidth
-        val pitch = (availableWidth * 0.26f).roundToInt()
-        return RightRailFlowLayoutManager(
-            baseSidePx = baseSide,
-            focusSidePx = focusSide,
-            itemPitchPx = pitch,
-            rightInsetPx = (8 * density).roundToInt()
-        )
+        val pitch = (availableWidth * 0.26f).roundToInt().coerceAtLeast(1)
+        return if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            val verticalCap = (metrics.heightPixels - (48 * density)).roundToInt().coerceAtLeast(minSidePx)
+            val landscapeSide = min(baseSide, verticalCap)
+            val landscapePitch = (landscapeSide * 0.24f).roundToInt().coerceAtLeast(1)
+            LandscapeFlowLayoutManager(
+                baseSidePx = landscapeSide,
+                focusSidePx = landscapeSide,
+                itemPitchPx = landscapePitch,
+                rightInsetPx = (16 * density).roundToInt()
+            )
+        } else {
+            RightRailFlowLayoutManager(
+                baseSidePx = baseSide,
+                focusSidePx = focusSide,
+                itemPitchPx = pitch,
+                rightInsetPx = (8 * density).roundToInt()
+            )
+        }
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
@@ -2430,7 +2455,7 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val layoutManager = createLayoutManager()
-            recycler.layoutManager = layoutManager
+            recycler.layoutManager = layoutManager as RecyclerView.LayoutManager
             recycler.setHasFixedSize(true)
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
@@ -2464,7 +2489,7 @@ class MainActivity : AppCompatActivity() {
         inner class FlowVH(
             view: View,
             val recycler: RecyclerView,
-            val layoutManager: RightRailFlowLayoutManager,
+            val layoutManager: FlowLayoutManager,
             val adapter: CardsAdapter
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
@@ -2503,7 +2528,7 @@ class MainActivity : AppCompatActivity() {
                     if (delta == 0) {
                         layoutManager.focus(index)
                     } else {
-                        recycler.smoothScrollBy(0, delta)
+                        layoutManager.smoothScrollBy(recycler, delta)
                     }
                 }
             }
@@ -2519,7 +2544,7 @@ class MainActivity : AppCompatActivity() {
     private inner class FlowPageController(
         val flowId: Long,
         val recycler: RecyclerView,
-        val layoutManager: RightRailFlowLayoutManager,
+        val layoutManager: FlowLayoutManager,
         val adapter: CardsAdapter
     ) {
         private var activeQuery: String = ""
@@ -2567,7 +2592,7 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             val indexById = flow.lastViewedCardId?.let { id ->
-                flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 }
+                adapter.indexOfId(id).takeIf { it >= 0 }
             }
             val resolvedIndex = indexById ?: flow.lastViewedCardIndex
             val clampedIndex = resolvedIndex.coerceIn(0, adapter.itemCount - 1)
