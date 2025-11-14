@@ -660,7 +660,7 @@ class MainActivity : AppCompatActivity() {
         val removed = flows.removeAt(index)
         flowShuffleStates.remove(removed.id)
         removed.cards.forEach { card ->
-            card.handwriting?.path?.let { deleteHandwritingFile(it) }
+            card.handwriting?.let { deleteHandwritingFiles(it) }
         }
         flowControllers.remove(removed.id)
         flowAdapter.notifyItemRemoved(index)
@@ -858,12 +858,17 @@ class MainActivity : AppCompatActivity() {
             titleRes = R.string.dialog_add_handwriting_title,
             existing = null,
             initialOptions = defaults,
+            face = HandwritingFace.FRONT,
             onSave = { savedContent ->
+                val content = savedContent ?: run {
+                    snackbar(getString(R.string.snackbar_handwriting_required))
+                    return@showHandwritingDialog
+                }
                 val card = CardItem(
                     id = nextCardId++,
                     title = "",
                     snippet = "",
-                    handwriting = savedContent,
+                    handwriting = HandwritingContent(content.path, content.options),
                     updatedAt = System.currentTimeMillis()
                 )
                 flow.cards += card
@@ -874,23 +879,52 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun editCard(flow: CardFlow, index: Int) {
+    private fun editCard(flow: CardFlow, index: Int, face: HandwritingFace = HandwritingFace.FRONT) {
         val card = flow.cards.getOrNull(index) ?: return
         val handwritingContent = card.handwriting
         if (handwritingContent != null) {
             showHandwritingDialog(
                 titleRes = R.string.dialog_edit_handwriting_title,
-                existing = handwritingContent,
-                initialOptions = handwritingContent.options,
+                existing = if (face == HandwritingFace.BACK) handwritingContent.back else HandwritingSide(handwritingContent.path, handwritingContent.options),
+                initialOptions = if (face == HandwritingFace.BACK) {
+                    handwritingContent.back?.options ?: handwritingContent.options
+                } else handwritingContent.options,
+                face = face,
                 onSave = { savedContent ->
-                    card.handwriting = savedContent
+                    if (face == HandwritingFace.BACK) {
+                        if (savedContent == null) {
+                            card.handwriting?.back?.path?.let { deleteHandwritingFile(it) }
+                            card.handwriting?.back = null
+                        } else {
+                            val frontOptions = card.handwriting?.options ?: savedContent.options
+                            val normalizedOptions = synchronizeBackPaper(frontOptions, savedContent.options)
+                            if (card.handwriting == null) {
+                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions)
+                            }
+                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions)
+                        }
+                    } else {
+                        val content = savedContent ?: run {
+                            snackbar(getString(R.string.snackbar_handwriting_required))
+                            return@showHandwritingDialog
+                        }
+                        if (card.handwriting == null) {
+                            card.handwriting = HandwritingContent(content.path, content.options)
+                        } else {
+                            card.handwriting?.path = content.path
+                            card.handwriting?.options = content.options
+                            card.handwriting?.back?.let { backSide ->
+                                backSide.options = synchronizeBackPaper(content.options, backSide.options)
+                            }
+                        }
+                    }
                     card.updatedAt = System.currentTimeMillis()
                     refreshFlow(flow, scrollToTop = false)
                     saveState()
                     snackbar("Card updated")
                 },
                 onDelete = {
-                    card.handwriting?.path?.let { deleteHandwritingFile(it) }
+                    card.handwriting?.let { deleteHandwritingFiles(it) }
                     flow.cards.removeAt(index)
                     refreshFlow(flow, scrollToTop = true)
                     saveState()
@@ -906,7 +940,7 @@ class MainActivity : AppCompatActivity() {
                 saveState()
                 snackbar("Card updated")
             }, onDelete = {
-                card.handwriting?.path?.let { deleteHandwritingFile(it) }
+                card.handwriting?.let { deleteHandwritingFiles(it) }
                 flow.cards.remove(card)
                 refreshFlow(flow, scrollToTop = true)
                 saveState()
@@ -940,9 +974,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHandwritingDialog(
         titleRes: Int,
-        existing: HandwritingContent?,
+        existing: HandwritingSide?,
         initialOptions: HandwritingOptions,
-        onSave: (HandwritingContent) -> Unit,
+        face: HandwritingFace,
+        onSave: (HandwritingSide?) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_handwriting, null, false)
@@ -1421,7 +1456,12 @@ class MainActivity : AppCompatActivity() {
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                 if (!handwritingView.hasDrawing()) {
-                    snackbar(getString(R.string.snackbar_handwriting_required))
+                    if (face == HandwritingFace.BACK && existing != null) {
+                        onSave(null)
+                        dialog.dismiss()
+                    } else {
+                        snackbar(getString(R.string.snackbar_handwriting_required))
+                    }
                     return@setOnClickListener
                 }
                 val exportBitmap = handwritingView.exportBitmap()
@@ -1609,8 +1649,8 @@ class MainActivity : AppCompatActivity() {
     private fun saveHandwritingContent(
         bitmap: Bitmap,
         options: HandwritingOptions,
-        existing: HandwritingContent?
-    ): HandwritingContent? {
+        existing: HandwritingSide?
+    ): HandwritingSide? {
         val reuseExisting = existing?.takeIf { it.options.format == options.format }
         val filename = reuseExisting?.path ?: "handwriting_${System.currentTimeMillis()}.${options.format.extension}"
         val result = runCatching {
@@ -1622,7 +1662,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 bitmap.compress(options.format.compressFormat, quality, out)
             }
-            HandwritingContent(filename, options)
+            HandwritingSide(filename, options)
         }.getOrElse {
             if (reuseExisting == null) {
                 runCatching { deleteFile(filename) }
@@ -1644,6 +1684,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun deleteHandwritingFile(path: String) {
         runCatching { deleteFile(path) }
+    }
+
+    private fun deleteHandwritingFiles(content: HandwritingContent) {
+        deleteHandwritingFile(content.path)
+        content.back?.path?.let { deleteHandwritingFile(it) }
     }
 
     private fun cardCanvasBounds(): Pair<Int, Int> {
@@ -1679,6 +1724,20 @@ class MainActivity : AppCompatActivity() {
             h = (h * scale).roundToInt().coerceAtLeast(1)
         }
         return w to h
+    }
+
+    private fun synchronizeBackPaper(
+        front: HandwritingOptions,
+        back: HandwritingOptions?
+    ): HandwritingOptions {
+        val base = back ?: front
+        return base.copy(
+            backgroundColor = front.backgroundColor,
+            paperStyle = front.paperStyle,
+            canvasWidth = front.canvasWidth,
+            canvasHeight = front.canvasHeight,
+            format = front.format
+        )
     }
 
     private fun defaultHandwritingOptions(): HandwritingOptions {
@@ -1758,42 +1817,12 @@ class MainActivity : AppCompatActivity() {
         val handwritingObj = cardObj.optJSONObject("handwriting")
         val baseOptions = defaultHandwritingOptions()
         if (handwritingObj != null) {
-            val path = handwritingObj.optString("path")
-            if (path.isNullOrBlank()) return null
-            val optionsObj = handwritingObj.optJSONObject("options")
-            val background = parseColorString(optionsObj?.optString("backgroundColor")) ?: baseOptions.backgroundColor
-            val brushColor = parseColorString(optionsObj?.optString("brushColor")) ?: baseOptions.brushColor
-            val brushSize = optionsObj?.optDouble("brushSizeDp", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat()
-                ?.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
-                ?: baseOptions.brushSizeDp
-            val rawWidth = optionsObj?.optInt("canvasWidth", baseOptions.canvasWidth) ?: baseOptions.canvasWidth
-            val rawHeight = optionsObj?.optInt("canvasHeight", baseOptions.canvasHeight) ?: baseOptions.canvasHeight
-            val (canvasWidth, canvasHeight) = clampCanvasSize(rawWidth, rawHeight)
-            val formatName = optionsObj?.optString("format")
-            val format = HandwritingFormat.fromName(formatName) ?: baseOptions.format
-            val paperStyleName = optionsObj?.optString("paperStyle")
-            val paperStyle = HandwritingPaperStyle.fromName(paperStyleName) ?: baseOptions.paperStyle
-            val penTypeName = optionsObj?.optString("penType")
-            val penType = HandwritingPenType.fromName(penTypeName) ?: baseOptions.penType
-            val eraserSize = optionsObj?.optDouble("eraserSizeDp", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat()
-                ?.coerceIn(MIN_HANDWRITING_ERASER_SIZE_DP, MAX_HANDWRITING_ERASER_SIZE_DP)
-                ?: baseOptions.eraserSizeDp
-            val eraserTypeName = optionsObj?.optString("eraserType")
-            val eraserType = HandwritingEraserType.fromName(eraserTypeName) ?: baseOptions.eraserType
+            val front = parseHandwritingSide(handwritingObj, baseOptions) ?: return null
+            val back = handwritingObj.optJSONObject("back")?.let { parseHandwritingSide(it, baseOptions) }
             return HandwritingContent(
-                path = path,
-                options = HandwritingOptions(
-                    backgroundColor = background,
-                    brushColor = brushColor,
-                    brushSizeDp = brushSize,
-                    canvasWidth = canvasWidth,
-                    canvasHeight = canvasHeight,
-                    format = format,
-                    paperStyle = paperStyle,
-                    penType = penType,
-                    eraserSizeDp = eraserSize,
-                    eraserType = eraserType
-                )
+                path = front.path,
+                options = front.options,
+                back = back
             )
         }
 
@@ -1809,6 +1838,49 @@ class MainActivity : AppCompatActivity() {
                 canvasWidth = canvasWidth,
                 canvasHeight = canvasHeight,
                 format = format
+            )
+        )
+    }
+
+    private fun parseHandwritingSide(
+        obj: JSONObject,
+        baseOptions: HandwritingOptions
+    ): HandwritingSide? {
+        val path = obj.optString("path")
+        if (path.isNullOrBlank()) return null
+        val optionsObj = obj.optJSONObject("options")
+        val background = parseColorString(optionsObj?.optString("backgroundColor")) ?: baseOptions.backgroundColor
+        val brushColor = parseColorString(optionsObj?.optString("brushColor")) ?: baseOptions.brushColor
+        val brushSize = optionsObj?.optDouble("brushSizeDp", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat()
+            ?.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP)
+            ?: baseOptions.brushSizeDp
+        val rawWidth = optionsObj?.optInt("canvasWidth", baseOptions.canvasWidth) ?: baseOptions.canvasWidth
+        val rawHeight = optionsObj?.optInt("canvasHeight", baseOptions.canvasHeight) ?: baseOptions.canvasHeight
+        val (canvasWidth, canvasHeight) = clampCanvasSize(rawWidth, rawHeight)
+        val formatName = optionsObj?.optString("format")
+        val format = HandwritingFormat.fromName(formatName) ?: baseOptions.format
+        val paperStyleName = optionsObj?.optString("paperStyle")
+        val paperStyle = HandwritingPaperStyle.fromName(paperStyleName) ?: baseOptions.paperStyle
+        val penTypeName = optionsObj?.optString("penType")
+        val penType = HandwritingPenType.fromName(penTypeName) ?: baseOptions.penType
+        val eraserSize = optionsObj?.optDouble("eraserSizeDp", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat()
+            ?.coerceIn(MIN_HANDWRITING_ERASER_SIZE_DP, MAX_HANDWRITING_ERASER_SIZE_DP)
+            ?: baseOptions.eraserSizeDp
+        val eraserTypeName = optionsObj?.optString("eraserType")
+        val eraserType = HandwritingEraserType.fromName(eraserTypeName) ?: baseOptions.eraserType
+        return HandwritingSide(
+            path = path,
+            options = HandwritingOptions(
+                backgroundColor = background,
+                brushColor = brushColor,
+                brushSizeDp = brushSize,
+                canvasWidth = canvasWidth,
+                canvasHeight = canvasHeight,
+                format = format,
+                paperStyle = paperStyle,
+                penType = penType,
+                eraserSizeDp = eraserSize,
+                eraserType = eraserType
             )
         )
     }
@@ -1895,25 +1967,38 @@ class MainActivity : AppCompatActivity() {
         return ExportPayload(root.toString(2), flows.size, cardCount)
     }
 
+    private fun handwritingOptionsToJson(options: HandwritingOptions): JSONObject = JSONObject().apply {
+        put("backgroundColor", colorToString(options.backgroundColor))
+        put("brushColor", colorToString(options.brushColor))
+        put("brushSizeDp", options.brushSizeDp.toDouble())
+        put("canvasWidth", options.canvasWidth)
+        put("canvasHeight", options.canvasHeight)
+        put("format", options.format.name)
+        put("paperStyle", options.paperStyle.name)
+        put("penType", options.penType.name)
+        put("eraserSizeDp", options.eraserSizeDp.toDouble())
+        put("eraserType", options.eraserType.name)
+    }
+
     private fun handwritingToJson(content: HandwritingContent): JSONObject? {
         val bytes = readHandwritingBytes(content.path) ?: return null
-        val options = content.options
-        val optionsObj = JSONObject().apply {
-            put("backgroundColor", colorToString(options.backgroundColor))
-            put("brushColor", colorToString(options.brushColor))
-            put("brushSizeDp", options.brushSizeDp.toDouble())
-            put("canvasWidth", options.canvasWidth)
-            put("canvasHeight", options.canvasHeight)
-            put("format", options.format.name)
-            put("paperStyle", options.paperStyle.name)
-            put("penType", options.penType.name)
-            put("eraserSizeDp", options.eraserSizeDp.toDouble())
-            put("eraserType", options.eraserType.name)
-        }
-        return JSONObject().apply {
+        val optionsObj = handwritingOptionsToJson(content.options)
+        val root = JSONObject().apply {
             put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
             put("options", optionsObj)
         }
+        content.back?.let { back ->
+            val backBytes = readHandwritingBytes(back.path)
+            if (backBytes != null) {
+                val backOptions = handwritingOptionsToJson(back.options)
+                val backObj = JSONObject().apply {
+                    put("data", Base64.encodeToString(backBytes, Base64.NO_WRAP))
+                    put("options", backOptions)
+                }
+                root.put("back", backObj)
+            }
+        }
+        return root
     }
 
     private fun readHandwritingBytes(path: String): ByteArray? =
@@ -2006,14 +2091,23 @@ class MainActivity : AppCompatActivity() {
         createdFiles: MutableList<String>
     ): HandwritingContent? {
         if (handwritingObj == null) return null
-        val data = handwritingObj.optString("data").takeIf { it.isNotBlank() } ?: return null
+        val front = decodeHandwritingSideFromExport(handwritingObj, createdFiles) ?: return null
+        val back = handwritingObj.optJSONObject("back")?.let { decodeHandwritingSideFromExport(it, createdFiles) }
+        return HandwritingContent(front.path, front.options, back)
+    }
+
+    private fun decodeHandwritingSideFromExport(
+        sideObj: JSONObject,
+        createdFiles: MutableList<String>
+    ): HandwritingSide? {
+        val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
         val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return null
-        val options = parseHandwritingOptionsFromExport(handwritingObj.optJSONObject("options")) ?: return null
+        val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
         val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += filename
-            HandwritingContent(filename, options)
+            HandwritingSide(filename, options)
         }.getOrElse {
             createdFiles.remove(filename)
             null
@@ -2246,25 +2340,19 @@ class MainActivity : AppCompatActivity() {
                 obj.put("snippet", card.snippet)
                 obj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { content ->
-                    val options = content.options
-                    val optionsObj = JSONObject().apply {
-                        put("backgroundColor", colorToString(options.backgroundColor))
-                        put("brushColor", colorToString(options.brushColor))
-                        put("brushSizeDp", options.brushSizeDp.toDouble())
-                        put("eraserSizeDp", options.eraserSizeDp.toDouble())
-                        put("canvasWidth", options.canvasWidth)
-                        put("canvasHeight", options.canvasHeight)
-                        put("format", options.format.name)
-                        put("paperStyle", options.paperStyle.name)
-                        put("penType", options.penType.name)
-                        put("eraserType", options.eraserType.name)
-                    }
                     val handwritingObj = JSONObject().apply {
                         put("path", content.path)
-                        put("options", optionsObj)
+                        put("options", handwritingOptionsToJson(content.options))
+                        content.back?.let { backSide ->
+                            put("back", JSONObject().apply {
+                                put("path", backSide.path)
+                                put("options", handwritingOptionsToJson(backSide.options))
+                            })
+                        }
                     }
                     obj.put("handwriting", handwritingObj)
                     obj.put("handwritingPath", content.path)
+                    content.back?.path?.let { obj.put("handwritingBackPath", it) }
                 }
                 cardsArray.put(obj)
             }
@@ -2400,7 +2488,15 @@ class MainActivity : AppCompatActivity() {
 
             fun onCardTapped(index: Int) {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return
+                val card = adapter.getItemAt(index) ?: return
                 if (layoutManager.isFocused(index)) {
+                    val handwritingContent = card.handwriting
+                    if (handwritingContent != null) {
+                        val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                        if (vh != null && adapter.toggleHandwriting(vh) != null) {
+                            return
+                        }
+                    }
                     layoutManager.clearFocus()
                 } else {
                     val delta = layoutManager.offsetTo(index)
@@ -2414,7 +2510,8 @@ class MainActivity : AppCompatActivity() {
 
             fun onCardDoubleTapped(index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
-                editCard(flow, index)
+                val face = adapter.currentHandwritingFaceFor(index)
+                editCard(flow, index, face)
             }
         }
     }

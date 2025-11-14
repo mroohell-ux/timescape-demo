@@ -87,7 +87,23 @@ data class HandwritingOptions(
     val eraserType: HandwritingEraserType
 )
 
-data class HandwritingContent(
+enum class HandwritingFace { FRONT, BACK }
+
+data class HandwritingSide(
     var path: String,
     var options: HandwritingOptions
 )
+
+data class HandwritingContent(
+    var path: String,
+    var options: HandwritingOptions,
+    var back: HandwritingSide? = null
+) {
+    fun hasBack(): Boolean = back != null
+
+    fun side(face: HandwritingFace): HandwritingSide = if (face == HandwritingFace.BACK) {
+        back ?: HandwritingSide(path, options)
+    } else {
+        HandwritingSide(path, options)
+    }
+}

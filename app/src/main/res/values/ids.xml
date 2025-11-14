@@ -4,4 +4,5 @@
     <item name="tag_handwriting_path" type="id" />
     <item name="tag_card_id" type="id" />
     <item name="tag_bg_uri" type="id" />
+    <item name="tag_handwriting_flip_animator" type="id" />
 </resources>
