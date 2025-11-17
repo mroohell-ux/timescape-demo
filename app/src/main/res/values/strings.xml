@@ -125,11 +125,16 @@
     <string name="image_card_missing">Image preview unavailable</string>
     <string name="dialog_edit_image_card_title">Image card</string>
     <string name="image_card_option_replace">Replace photo</string>
+    <string name="image_card_option_annotate">Draw on image</string>
     <string name="image_card_option_edit_back">Edit back</string>
     <string name="image_card_option_remove_back">Remove back</string>
     <string name="image_card_option_delete">Delete card</string>
     <string name="image_card_handwriting_saved">Saved back handwriting</string>
     <string name="image_card_handwriting_removed">Removed back handwriting</string>
+    <string name="dialog_annotate_image_title">Annotate image</string>
+    <string name="image_card_annotation_saved">Saved annotated image</string>
+    <string name="image_card_annotation_failed">Couldnt save that edit.</string>
+    <string name="image_card_annotation_load_failed">Couldnt open that photo.</string>
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>
