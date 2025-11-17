@@ -120,7 +120,6 @@
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>
-    <string name="flow_chip_delete_content_desc">Delete flow %1$s</string>
     <string name="handwriting_eraser_size_label">Eraser size</string>
     <string name="handwriting_eraser_size_value">%1$.1f dp</string>
     <string name="handwriting_eraser_type_label">Eraser style</string>

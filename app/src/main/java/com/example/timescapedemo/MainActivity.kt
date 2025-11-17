@@ -11,6 +11,7 @@ import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Base64
 import android.view.ContextThemeWrapper
@@ -121,6 +122,8 @@ class MainActivity : AppCompatActivity() {
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
+    private var lastFlowChipTapId: Long = -1L
+    private var lastFlowChipTapTime: Long = 0L
 
     private var toolbarBasePaddingTop: Int = 0
     private var toolbarBasePaddingBottom: Int = 0
@@ -507,6 +510,20 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(position)
     }
 
+    private fun handleFlowChipTap(flowId: Long, index: Int) {
+        val now = SystemClock.elapsedRealtime()
+        val isDoubleTap = lastFlowChipTapId == flowId &&
+            now - lastFlowChipTapTime <= FLOW_DELETE_DOUBLE_TAP_WINDOW_MS
+        lastFlowChipTapId = flowId
+        lastFlowChipTapTime = now
+        if (isDoubleTap) {
+            val deleteIndex = flows.indexOfFirst { it.id == flowId }
+            if (deleteIndex >= 0) showDeleteFlowDialog(deleteIndex)
+        } else {
+            flowPager.setCurrentItem(index, true)
+        }
+    }
+
     private fun renderFlowChips(selectedIndex: Int = selectedFlowIndex) {
         val safeIndex = selectedIndex.coerceIn(0, max(0, flows.lastIndex))
         flowChipGroup.removeAllViews()
@@ -550,15 +567,8 @@ class MainActivity : AppCompatActivity() {
                 textSize = 14f
                 setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
                 isChecked = index == safeIndex
-                setOnClickListener { flowPager.setCurrentItem(index, true) }
+                setOnClickListener { handleFlowChipTap(flow.id, index) }
                 tag = flow.id
-                closeIcon = AppCompatResources.getDrawable(context, R.drawable.ic_chip_close)
-                closeIconContentDescription = getString(R.string.flow_chip_delete_content_desc, flow.name)
-                isCloseIconVisible = flows.size > 1
-                setOnCloseIconClickListener {
-                    val currentIndex = flows.indexOfFirst { it.id == flow.id }
-                    if (currentIndex >= 0) showDeleteFlowDialog(currentIndex)
-                }
                 setOnLongClickListener { startFlowMergeDrag(this, flow.id) }
                 setOnDragListener(dragListener)
             }
@@ -2848,6 +2858,7 @@ private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_era
 private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
 private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
+private const val FLOW_DELETE_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
 private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
