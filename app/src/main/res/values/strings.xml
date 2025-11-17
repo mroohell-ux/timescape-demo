@@ -32,8 +32,13 @@
     <string name="snackbar_cannot_delete_last_flow">Keep at least one flow active.</string>
     <string name="dialog_delete_flow_title">Delete "%1$s"?</string>
     <string name="dialog_delete_flow_message">This will remove the flow and its cards.</string>
+    <string name="dialog_merge_flows_title">Merge "%1$s" into "%2$s"?</string>
+    <string name="dialog_merge_flows_message">This moves every card from "%1$s" into "%2$s".</string>
+    <string name="dialog_merge">Merge</string>
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_added_handwriting">Added handwriting card</string>
+    <string name="snackbar_merged_flows">Merged "%1$s" into "%2$s"</string>
+    <string name="snackbar_need_another_flow_to_merge">Add another flow before merging.</string>
     <string name="snackbar_handwriting_required">Draw something before saving.</string>
     <string name="snackbar_handwriting_save_failed">Couldnt save that handwriting.</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
@@ -115,6 +120,7 @@
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>
+    <string name="flow_chip_delete_content_desc">Delete flow %1$s</string>
     <string name="handwriting_eraser_size_label">Eraser size</string>
     <string name="handwriting_eraser_size_value">%1$.1f dp</string>
     <string name="handwriting_eraser_type_label">Eraser style</string>
