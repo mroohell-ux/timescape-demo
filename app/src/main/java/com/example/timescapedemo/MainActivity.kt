@@ -2712,6 +2712,7 @@ class MainActivity : AppCompatActivity() {
         var highestFlowId = -1L
         var highestCardId = -1L
 
+        val baseHandwritingOptions = defaultHandwritingOptions()
         val flowsJson = prefs.getString(KEY_FLOWS, null)
         if (!flowsJson.isNullOrBlank()) {
             try {
@@ -2741,7 +2742,9 @@ class MainActivity : AppCompatActivity() {
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
                                 handwriting = handwriting,
-                                imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let { parseHandwritingSide(it, baseOptions) }
+                                imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
+                                    parseHandwritingSide(it, baseHandwritingOptions)
+                                }
                             )
                         }
                     }
