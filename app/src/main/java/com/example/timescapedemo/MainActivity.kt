@@ -45,6 +45,7 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
+import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -1111,6 +1112,7 @@ class MainActivity : AppCompatActivity() {
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
         val paletteCard = paletteView.findViewById<MaterialCardView>(R.id.cardHandwritingOptions)
+        val paletteScroll = paletteView.findViewById<NestedScrollView>(R.id.scrollPaletteOptions)
         val penOptionsContainer = paletteView.findViewById<ViewGroup>(R.id.containerPenOptions)
         val eraserOptionsContainer = paletteView.findViewById<ViewGroup>(R.id.containerEraserOptions)
         val canvasOptionsContainer = paletteView.findViewById<ViewGroup>(R.id.containerCanvasOptions)
@@ -1412,6 +1414,23 @@ class MainActivity : AppCompatActivity() {
             elevation = 6f * density
         }
 
+        fun measurePaletteHeight(width: Int): Int {
+            if (width <= 0) return 0
+            val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+            val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            paletteCard.measure(widthSpec, heightSpec)
+            return paletteCard.measuredHeight
+        }
+
+        fun computeAvailableDropDownSpace(anchor: View, yOffset: Int): Int {
+            val windowRect = Rect()
+            dialogView.rootView.getWindowVisibleDisplayFrame(windowRect)
+            val anchorLocation = IntArray(2)
+            anchor.getLocationOnScreen(anchorLocation)
+            val anchorBottom = anchorLocation[1] + anchor.height
+            return (windowRect.bottom - anchorBottom - yOffset).coerceAtLeast(0)
+        }
+
         fun updateHistoryButtons() {
             undoButton.isEnabled = handwritingView.canUndo()
             clearButton.isEnabled = handwritingView.hasDrawing()
@@ -1554,10 +1573,21 @@ class MainActivity : AppCompatActivity() {
             canvasOptionsContainer.isVisible = section == HandwritingPaletteSection.CANVAS
             palettePopup.width = computePaletteWidth()
             val yOffset = (8 * density).roundToInt()
+            val desiredHeight = measurePaletteHeight(palettePopup.width)
+            val availableHeight = computeAvailableDropDownSpace(anchor, yOffset)
+            val constrainedHeight = if (availableHeight > 0 && desiredHeight > availableHeight) {
+                availableHeight
+            } else {
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+            palettePopup.height = constrainedHeight
+            paletteScroll.scrollTo(0, 0)
+            paletteScroll.isVerticalScrollBarEnabled =
+                constrainedHeight != ViewGroup.LayoutParams.WRAP_CONTENT && desiredHeight > availableHeight
             if (!palettePopup.isShowing) {
                 palettePopup.showAsDropDown(anchor, 0, yOffset)
             } else {
-                palettePopup.update(anchor, palettePopup.width, ViewGroup.LayoutParams.WRAP_CONTENT)
+                palettePopup.update(anchor, palettePopup.width, constrainedHeight)
             }
             updateToolButtons()
         }
