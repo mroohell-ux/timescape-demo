@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Base: soft sky gradient -->
+    <!-- Base: brighter sky gradient -->
     <item>
         <shape android:shape="rectangle">
             <gradient
                 android:type="linear"
                 android:angle="315"
-                android:startColor="#FDFBFF"
-            android:endColor="#F2F7FF"/>  <!-- airy blue -->
+                android:startColor="#E0ECFF"
+                android:endColor="#BEDCFF"/>  <!-- airy blue with more color -->
         </shape>
     </item>
 
@@ -21,8 +21,8 @@
                 android:centerX="78%"
                 android:centerY="10%"
                 android:gradientRadius="520dp"
-                android:startColor="#4DFFD89A"
-            android:endColor="#00FFD89A"/>
+                android:startColor="#80FFD89A"
+                android:endColor="#00FFD89A"/>
         </shape>
     </item>
 
@@ -35,8 +35,8 @@
                 android:centerX="16%"
                 android:centerY="86%"
                 android:gradientRadius="560dp"
-                android:startColor="#40A8FFE0"
-            android:endColor="#00A8FFE0"/>
+                android:startColor="#66A8FFE0"
+                android:endColor="#00A8FFE0"/>
         </shape>
     </item>
 
