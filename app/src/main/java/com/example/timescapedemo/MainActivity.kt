@@ -2627,7 +2627,6 @@ class MainActivity : AppCompatActivity() {
 
         private fun owningFlow(): CardFlow? = flows.firstOrNull { it.id == flowId }
     }
-    }
 
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
         fun syncWith(flow: CardFlow) {
@@ -2653,42 +2652,41 @@ class MainActivity : AppCompatActivity() {
         val handwriting: HandwritingContent?
     )
 
-    companion object {
-        private const val PREFS_NAME = "timescape_state"
-        private const val KEY_CARDS = "cards"
-        private const val KEY_IMAGES = "images"
-        private const val KEY_FLOWS = "flows"
-        private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
-        private const val KEY_APP_BACKGROUND = "app_background"
-        private const val KEY_NEXT_CARD_ID = "next_card_id"
-        private const val KEY_NEXT_FLOW_ID = "next_flow_id"
-        private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
-        private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
-        private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
-        private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
-        private const val KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP = "handwriting/default_eraser_size_dp"
-        private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
-        private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
-        private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
-        private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
-        private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
-        private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
-        private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
-        private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
-        private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
-        private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
-        private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
-        private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
-        private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
-        private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
-        private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
-        private const val DEFAULT_CANVAS_RATIO = 0.75f
-        private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
-        private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
-        private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
-        private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
-        private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
-        private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
-        private const val NOTES_EXPORT_VERSION = 1
-    }
 }
+
+private const val PREFS_NAME = "timescape_state"
+private const val KEY_CARDS = "cards"
+private const val KEY_IMAGES = "images"
+private const val KEY_FLOWS = "flows"
+private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
+private const val KEY_APP_BACKGROUND = "app_background"
+private const val KEY_NEXT_CARD_ID = "next_card_id"
+private const val KEY_NEXT_FLOW_ID = "next_flow_id"
+private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
+private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
+private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
+private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
+private const val KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP = "handwriting/default_eraser_size_dp"
+private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
+private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
+private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
+private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
+private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
+private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
+private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
+private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
+private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
+private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
+private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
+private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
+private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
+private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
+private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
+private const val DEFAULT_CANVAS_RATIO = 0.75f
+private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
+private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
+private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
+private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
+private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
+private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
+private const val NOTES_EXPORT_VERSION = 1
