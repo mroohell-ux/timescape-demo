@@ -23,6 +23,8 @@ object HandwritingBitmapLoader {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val inFlight = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
     private val lock = Any()
+    private val generationLock = Any()
+    private val generations = mutableMapOf<String, Int>()
 
     fun load(
         context: Context,
@@ -33,8 +35,9 @@ object HandwritingBitmapLoader {
         onResult: (Bitmap?) -> Unit
     ) {
         val appContext = context.applicationContext
-        imageView.setTag(R.id.tag_handwriting_path, path)
-        val cacheKey = cacheKey(path, targetWidth, targetHeight)
+        val generation = currentGeneration(path)
+        val cacheKey = cacheKey(path, targetWidth, targetHeight, generation)
+        imageView.setTag(R.id.tag_handwriting_path, cacheKey)
         cache.get(cacheKey)?.let { cached ->
             onResult(cached)
             return
@@ -42,13 +45,13 @@ object HandwritingBitmapLoader {
 
         val callback: (Bitmap?) -> Unit = { bitmap ->
             val currentTag = imageView.getTag(R.id.tag_handwriting_path)
-            if (currentTag == path) {
+            if (currentTag == cacheKey) {
                 onResult(bitmap)
             }
         }
         val shouldStart = registerCallback(cacheKey, callback)
         if (shouldStart) {
-            enqueueDecode(appContext, cacheKey, path, targetWidth, targetHeight)
+            enqueueDecode(appContext, cacheKey, path, targetWidth, targetHeight, generation)
         }
     }
 
@@ -57,17 +60,28 @@ object HandwritingBitmapLoader {
         imageView.setImageDrawable(null)
     }
 
+    fun invalidate(path: String) {
+        bumpGeneration(path)
+        val prefix = "$path@"
+        val keys = synchronized(cache) {
+            cache.snapshot().keys.filter { it.startsWith(prefix) }
+        }
+        keys.forEach { key -> cache.remove(key) }
+        cancelInFlight(prefix)
+    }
+
     fun prefetch(
         context: Context,
         path: String,
         targetWidth: Int? = null,
         targetHeight: Int? = null
     ) {
-        val cacheKey = cacheKey(path, targetWidth, targetHeight)
+        val generation = currentGeneration(path)
+        val cacheKey = cacheKey(path, targetWidth, targetHeight, generation)
         if (cache.get(cacheKey) != null) return
         val shouldStart = registerCallback(cacheKey, null)
         if (shouldStart) {
-            enqueueDecode(context.applicationContext, cacheKey, path, targetWidth, targetHeight)
+            enqueueDecode(context.applicationContext, cacheKey, path, targetWidth, targetHeight, generation)
         }
     }
 
@@ -76,15 +90,17 @@ object HandwritingBitmapLoader {
         cacheKey: String,
         path: String,
         targetWidth: Int?,
-        targetHeight: Int?
+        targetHeight: Int?,
+        generation: Int
     ) {
         executor.execute {
             val bitmap = decode(context, path, targetWidth, targetHeight)
-            if (bitmap != null) {
+            val callbacks = finishCallbacks(cacheKey)
+            val isCurrent = generation == currentGeneration(path)
+            if (isCurrent && bitmap != null) {
                 cache.put(cacheKey, bitmap)
             }
-            val callbacks = finishCallbacks(cacheKey)
-            if (callbacks.isEmpty()) return@execute
+            if (!isCurrent || callbacks.isEmpty()) return@execute
             mainHandler.post {
                 callbacks.forEach { it(bitmap) }
             }
@@ -168,15 +184,37 @@ object HandwritingBitmapLoader {
         return desired.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 
-    private fun cacheKey(path: String, targetWidth: Int?, targetHeight: Int?): String {
+    private fun cacheKey(path: String, targetWidth: Int?, targetHeight: Int?, generation: Int): String {
         val widthBucket = bucketDimension(targetWidth)
         val heightBucket = bucketDimension(targetHeight)
-        return "$path@$widthBucket@$heightBucket"
+        return "$path@$widthBucket@$heightBucket@$generation"
     }
 
     private fun bucketDimension(dimension: Int?): Int {
         if (dimension == null || dimension <= 0) return 0
         val bucketSize = 32
         return ((dimension + bucketSize - 1) / bucketSize) * bucketSize
+    }
+
+    private fun cancelInFlight(prefix: String) {
+        synchronized(lock) {
+            val iterator = inFlight.keys.iterator()
+            while (iterator.hasNext()) {
+                val key = iterator.next()
+                if (key.startsWith(prefix)) {
+                    iterator.remove()
+                }
+            }
+        }
+    }
+
+    private fun currentGeneration(path: String): Int = synchronized(generationLock) {
+        generations[path] ?: 0
+    }
+
+    private fun bumpGeneration(path: String): Int = synchronized(generationLock) {
+        val next = (generations[path] ?: 0) + 1
+        generations[path] = next
+        next
     }
 }

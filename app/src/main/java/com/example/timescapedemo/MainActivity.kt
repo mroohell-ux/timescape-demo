@@ -1,16 +1,22 @@
 package com.example.timescapedemo
 
+import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Base64
 import android.view.ContextThemeWrapper
+import android.view.DragEvent
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.View
@@ -20,6 +26,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
+import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -39,6 +46,7 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
+import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -48,6 +56,7 @@ import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
@@ -115,6 +124,8 @@ class MainActivity : AppCompatActivity() {
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
+    private var lastFlowChipTapId: Long = -1L
+    private var lastFlowChipTapTime: Long = 0L
 
     private var toolbarBasePaddingTop: Int = 0
     private var toolbarBasePaddingBottom: Int = 0
@@ -501,10 +512,53 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(position)
     }
 
+    private fun handleFlowChipTap(flowId: Long, index: Int) {
+        val now = SystemClock.elapsedRealtime()
+        val isDoubleTap = lastFlowChipTapId == flowId &&
+            now - lastFlowChipTapTime <= FLOW_DELETE_DOUBLE_TAP_WINDOW_MS
+        lastFlowChipTapId = flowId
+        lastFlowChipTapTime = now
+        if (isDoubleTap) {
+            val deleteIndex = flows.indexOfFirst { it.id == flowId }
+            if (deleteIndex >= 0) showDeleteFlowDialog(deleteIndex)
+        } else {
+            flowPager.setCurrentItem(index, true)
+        }
+    }
+
     private fun renderFlowChips(selectedIndex: Int = selectedFlowIndex) {
         val safeIndex = selectedIndex.coerceIn(0, max(0, flows.lastIndex))
         flowChipGroup.removeAllViews()
         val density = resources.displayMetrics.density
+        val dragListener = View.OnDragListener { view, event ->
+            val targetChip = view as? Chip ?: return@OnDragListener false
+            val targetId = targetChip.tag as? Long ?: return@OnDragListener false
+            val sourceId = event.localState as? Long ?: return@OnDragListener false
+            val isSelf = sourceId == targetId
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> event.clipDescription?.label == FLOW_MERGE_DRAG_LABEL
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    if (!isSelf) targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
+                    true
+                }
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    targetChip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    targetChip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
+                    if (!isSelf) {
+                        confirmMergeFlows(sourceId, targetId)
+                    }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    resetFlowChipDragState()
+                    true
+                }
+                else -> false
+            }
+        }
         flows.forEachIndexed { index, flow ->
             val chip = Chip(this).apply {
                 text = flow.name
@@ -515,15 +569,82 @@ class MainActivity : AppCompatActivity() {
                 textSize = 14f
                 setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
                 isChecked = index == safeIndex
-                setOnClickListener { flowPager.setCurrentItem(index, true) }
-                setOnLongClickListener {
-                    showDeleteFlowDialog(index)
-                    true
-                }
+                setOnClickListener { handleFlowChipTap(flow.id, index) }
+                tag = flow.id
+                setOnLongClickListener { startFlowMergeDrag(this, flow.id) }
+                setOnDragListener(dragListener)
             }
             flowChipGroup.addView(chip)
         }
         centerSelectedChip(safeIndex)
+    }
+
+    private fun resetFlowChipDragState() {
+        for (i in 0 until flowChipGroup.childCount) {
+            val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
+            chip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
+            chip.alpha = 1f
+        }
+    }
+
+    private fun startFlowMergeDrag(chip: Chip, flowId: Long): Boolean {
+        if (flows.size <= 1) {
+            snackbar(getString(R.string.snackbar_need_another_flow_to_merge))
+            return false
+        }
+        val dragData = ClipData.newPlainText(FLOW_MERGE_DRAG_LABEL, flowId.toString())
+        val shadow = View.DragShadowBuilder(chip)
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            chip.startDragAndDrop(dragData, shadow, flowId, View.DRAG_FLAG_OPAQUE)
+        } else {
+            @Suppress("DEPRECATION")
+            chip.startDrag(dragData, shadow, flowId, 0)
+        }
+        if (started) {
+            chip.alpha = 0.6f
+        }
+        return started
+    }
+
+    private fun confirmMergeFlows(sourceId: Long, targetId: Long) {
+        val sourceIndex = flows.indexOfFirst { it.id == sourceId }
+        val targetIndex = flows.indexOfFirst { it.id == targetId }
+        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) return
+        val source = flows[sourceIndex]
+        val target = flows[targetIndex]
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_merge_flows_title, source.name, target.name))
+            .setMessage(getString(R.string.dialog_merge_flows_message, source.name, target.name))
+            .setPositiveButton(R.string.dialog_merge) { _, _ -> mergeFlows(sourceIndex, targetIndex) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun mergeFlows(sourceIndex: Int, targetIndex: Int) {
+        if (sourceIndex !in flows.indices || targetIndex !in flows.indices || sourceIndex == targetIndex) return
+        val sourceFlow = flows[sourceIndex]
+        val targetFlow = flows[targetIndex]
+        val sourceId = sourceFlow.id
+        val targetId = targetFlow.id
+        if (sourceId == targetId) return
+        val cardsToMove = sourceFlow.cards.toList()
+        targetFlow.cards.addAll(cardsToMove)
+        applyCardBackgrounds(targetFlow)
+        flowShuffleStates.remove(sourceId)
+        flowShuffleStates.remove(targetId)
+        flowControllers.remove(sourceId)?.dispose()
+        flows.removeAt(sourceIndex)
+        flowAdapter.notifyItemRemoved(sourceIndex)
+        val newTargetIndex = flows.indexOfFirst { it.id == targetId }.coerceAtLeast(0)
+        flowAdapter.notifyItemChanged(newTargetIndex)
+        refreshFlow(targetFlow)
+        selectedFlowIndex = newTargetIndex
+        renderFlowChips(newTargetIndex)
+        flowPager.setCurrentItem(newTargetIndex, false)
+        updateToolbarSubtitle()
+        updateShuffleMenuState()
+        saveState()
+        snackbar(getString(R.string.snackbar_merged_flows, sourceFlow.name, targetFlow.name))
     }
 
     private fun toggleShuffleCards() {
@@ -880,6 +1001,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun editCard(flow: CardFlow, index: Int, face: HandwritingFace = HandwritingFace.FRONT) {
+        flowControllers[flow.id]?.captureState(flow)
         val card = flow.cards.getOrNull(index) ?: return
         val handwritingContent = card.handwriting
         if (handwritingContent != null) {
@@ -985,24 +1107,27 @@ class MainActivity : AppCompatActivity() {
         val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
-        val paletteCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingOptions)
+        val toolToggleGroup = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.groupPaletteToggles)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
-        val penOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerPenOptions)
-        val eraserOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerEraserOptions)
-        val canvasOptionsContainer = dialogView.findViewById<ViewGroup>(R.id.containerCanvasOptions)
-        val brushColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupBrushColors)
-        val penTypeGroup = dialogView.findViewById<ChipGroup>(R.id.groupPenTypes)
-        val brushSizeValue = dialogView.findViewById<TextView>(R.id.textBrushSizeValue)
-        val brushSizeSlider = dialogView.findViewById<Slider>(R.id.sliderBrushSize)
-        val eraserSizeValue = dialogView.findViewById<TextView>(R.id.textEraserSizeValue)
-        val eraserSizeSlider = dialogView.findViewById<Slider>(R.id.sliderEraserSize)
-        val eraserTypeGroup = dialogView.findViewById<ChipGroup>(R.id.groupEraserTypes)
-        val paperStyleGroup = dialogView.findViewById<ChipGroup>(R.id.groupPaperStyles)
-        val paperColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupPaperColors)
-        val canvasSizeGroup = dialogView.findViewById<ChipGroup>(R.id.groupCanvasSizes)
-        val formatGroup = dialogView.findViewById<ChipGroup>(R.id.groupExportFormats)
+        val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
+        val paletteCard = paletteView.findViewById<MaterialCardView>(R.id.cardHandwritingOptions)
+        val paletteScroll = paletteView.findViewById<NestedScrollView>(R.id.scrollPaletteOptions)
+        val penOptionsContainer = paletteView.findViewById<ViewGroup>(R.id.containerPenOptions)
+        val eraserOptionsContainer = paletteView.findViewById<ViewGroup>(R.id.containerEraserOptions)
+        val canvasOptionsContainer = paletteView.findViewById<ViewGroup>(R.id.containerCanvasOptions)
+        val brushColorGroup = paletteView.findViewById<ChipGroup>(R.id.groupBrushColors)
+        val penTypeGroup = paletteView.findViewById<ChipGroup>(R.id.groupPenTypes)
+        val brushSizeValue = paletteView.findViewById<TextView>(R.id.textBrushSizeValue)
+        val brushSizeSlider = paletteView.findViewById<Slider>(R.id.sliderBrushSize)
+        val eraserSizeValue = paletteView.findViewById<TextView>(R.id.textEraserSizeValue)
+        val eraserSizeSlider = paletteView.findViewById<Slider>(R.id.sliderEraserSize)
+        val eraserTypeGroup = paletteView.findViewById<ChipGroup>(R.id.groupEraserTypes)
+        val paperStyleGroup = paletteView.findViewById<ChipGroup>(R.id.groupPaperStyles)
+        val paperColorGroup = paletteView.findViewById<ChipGroup>(R.id.groupPaperColors)
+        val canvasSizeGroup = paletteView.findViewById<ChipGroup>(R.id.groupCanvasSizes)
+        val formatGroup = paletteView.findViewById<ChipGroup>(R.id.groupExportFormats)
 
         val (maxCanvasWidth, maxCanvasHeight) = cardCanvasBounds()
         data class CanvasSizeOption(val key: String, val label: String, val width: Int, val height: Int)
@@ -1277,6 +1402,27 @@ class MainActivity : AppCompatActivity() {
             formatGroup.addView(chip)
         }
 
+        val density = resources.displayMetrics.density
+        val palettePopup = PopupWindow(
+            paletteView,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        ).apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            isOutsideTouchable = true
+            isFocusable = true
+            elevation = 6f * density
+        }
+
+        fun measurePaletteHeight(width: Int): Int {
+            if (width <= 0) return 0
+            val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+            val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            paletteCard.measure(widthSpec, heightSpec)
+            return paletteCard.measuredHeight
+        }
+
         fun updateHistoryButtons() {
             undoButton.isEnabled = handwritingView.canUndo()
             clearButton.isEnabled = handwritingView.hasDrawing()
@@ -1377,9 +1523,19 @@ class MainActivity : AppCompatActivity() {
         var visiblePalette: HandwritingPaletteSection? = null
 
         fun updateToolButtons() {
-            penButton.isChecked = selectedDrawingTool == HandwritingDrawingTool.PEN
-            eraserButton.isChecked = selectedDrawingTool == HandwritingDrawingTool.ERASER
-            canvasButton.isChecked = visiblePalette == HandwritingPaletteSection.CANVAS
+            penButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.PEN) 1f else 0.65f
+            eraserButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.ERASER) 1f else 0.65f
+            val checkedId = when (visiblePalette) {
+                HandwritingPaletteSection.PEN -> penButton.id
+                HandwritingPaletteSection.ERASER -> eraserButton.id
+                HandwritingPaletteSection.CANVAS -> canvasButton.id
+                else -> View.NO_ID
+            }
+            if (checkedId == View.NO_ID) {
+                toolToggleGroup.clearChecked()
+            } else if (toolToggleGroup.checkedButtonId != checkedId) {
+                toolToggleGroup.check(checkedId)
+            }
         }
 
         fun setDrawingTool(tool: HandwritingDrawingTool) {
@@ -1388,17 +1544,103 @@ class MainActivity : AppCompatActivity() {
             updateToolButtons()
         }
 
-        fun showPalette(section: HandwritingPaletteSection) {
+        fun computePaletteWidth(): Int {
+            val minWidth = (280 * density).roundToInt()
+            val cardWidth = handwritingCard.width
+            val dialogWidth = dialogView.width
+            val fallback = if (dialogWidth > 0) dialogWidth - (32 * density).roundToInt() else minWidth
+            return when {
+                cardWidth > 0 -> cardWidth
+                fallback > 0 -> fallback
+                else -> minWidth
+            }.coerceAtLeast(minWidth)
+        }
+
+        fun showPalette(section: HandwritingPaletteSection, anchor: View) {
             visiblePalette = section
             selectedPalette = section
             paletteCard.isVisible = true
             penOptionsContainer.isVisible = section == HandwritingPaletteSection.PEN
             eraserOptionsContainer.isVisible = section == HandwritingPaletteSection.ERASER
             canvasOptionsContainer.isVisible = section == HandwritingPaletteSection.CANVAS
+            val yOffset = (8 * density).roundToInt()
+            val safeMargin = (12 * density).roundToInt()
+            val windowRect = Rect()
+            dialogView.getWindowVisibleDisplayFrame(windowRect)
+            if (windowRect.width() <= 0 || windowRect.height() <= 0) {
+                val metrics = resources.displayMetrics
+                windowRect.set(0, 0, metrics.widthPixels, metrics.heightPixels)
+            }
+            val maxPopupWidth = windowRect.width() - safeMargin * 2
+            val computedWidth = computePaletteWidth()
+            val popupWidth = if (maxPopupWidth > 0) {
+                computedWidth.coerceAtMost(maxPopupWidth)
+            } else {
+                computedWidth
+            }
+            if (palettePopup.width != popupWidth) {
+                palettePopup.width = popupWidth
+            }
+            val desiredHeight = measurePaletteHeight(popupWidth)
+            val maxPopupHeight = windowRect.height() - safeMargin * 2
+            val popupHeight = if (maxPopupHeight > 0) {
+                desiredHeight.coerceAtMost(maxPopupHeight)
+            } else {
+                desiredHeight
+            }
+            palettePopup.height = popupHeight
+            val anchorLocation = IntArray(2)
+            anchor.getLocationOnScreen(anchorLocation)
+            val anchorLeft = anchorLocation[0]
+            val anchorTop = anchorLocation[1]
+            val anchorBottom = anchorTop + anchor.height
+            val anchorCenterX = anchorLeft + anchor.width / 2
+            val horizontalMin = windowRect.left + safeMargin
+            val horizontalMax = windowRect.right - popupWidth - safeMargin
+            val popupX = if (horizontalMin <= horizontalMax) {
+                (anchorCenterX - popupWidth / 2).coerceIn(horizontalMin, horizontalMax)
+            } else {
+                horizontalMin
+            }
+            val availableBelow = windowRect.bottom - anchorBottom - yOffset
+            val availableAbove = anchorTop - windowRect.top - yOffset
+            val shouldShowAbove = popupHeight > availableBelow && availableAbove > availableBelow
+            val verticalMin = windowRect.top + safeMargin
+            val verticalMax = windowRect.bottom - popupHeight - safeMargin
+            val popupY = if (verticalMin <= verticalMax) {
+                val desiredY = if (shouldShowAbove) {
+                    anchorTop - yOffset - popupHeight
+                } else {
+                    anchorBottom + yOffset
+                }
+                desiredY.coerceIn(verticalMin, verticalMax)
+            } else {
+                verticalMin
+            }
+            paletteScroll.scrollTo(0, 0)
+            paletteScroll.isVerticalScrollBarEnabled = popupHeight < desiredHeight
+            if (!palettePopup.isShowing) {
+                palettePopup.showAtLocation(dialogView, Gravity.NO_GRAVITY, popupX, popupY)
+            } else {
+                palettePopup.update(popupX, popupY, popupWidth, popupHeight)
+            }
             updateToolButtons()
         }
 
         fun hidePalette() {
+            visiblePalette = null
+            if (palettePopup.isShowing) {
+                palettePopup.dismiss()
+            } else {
+                paletteCard.isGone = true
+                penOptionsContainer.isGone = true
+                eraserOptionsContainer.isGone = true
+                canvasOptionsContainer.isGone = true
+            }
+            updateToolButtons()
+        }
+
+        palettePopup.setOnDismissListener {
             visiblePalette = null
             paletteCard.isGone = true
             penOptionsContainer.isGone = true
@@ -1410,29 +1652,29 @@ class MainActivity : AppCompatActivity() {
         setDrawingTool(selectedDrawingTool)
         hidePalette()
 
-        penButton.setOnClickListener {
+        penButton.setOnClickListener { view ->
             setDrawingTool(HandwritingDrawingTool.PEN)
             if (visiblePalette == HandwritingPaletteSection.PEN) {
                 hidePalette()
             } else {
-                showPalette(HandwritingPaletteSection.PEN)
+                showPalette(HandwritingPaletteSection.PEN, view)
             }
         }
 
-        eraserButton.setOnClickListener {
+        eraserButton.setOnClickListener { view ->
             setDrawingTool(HandwritingDrawingTool.ERASER)
             if (visiblePalette == HandwritingPaletteSection.ERASER) {
                 hidePalette()
             } else {
-                showPalette(HandwritingPaletteSection.ERASER)
+                showPalette(HandwritingPaletteSection.ERASER, view)
             }
         }
 
-        canvasButton.setOnClickListener {
+        canvasButton.setOnClickListener { view ->
             if (visiblePalette == HandwritingPaletteSection.CANVAS) {
                 hidePalette()
             } else {
-                showPalette(HandwritingPaletteSection.CANVAS)
+                showPalette(HandwritingPaletteSection.CANVAS, view)
             }
         }
         updateHistoryButtons()
@@ -1455,15 +1697,6 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
-                if (!handwritingView.hasDrawing()) {
-                    if (face == HandwritingFace.BACK && existing != null) {
-                        onSave(null)
-                        dialog.dismiss()
-                    } else {
-                        snackbar(getString(R.string.snackbar_handwriting_required))
-                    }
-                    return@setOnClickListener
-                }
                 val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
@@ -1496,6 +1729,12 @@ class MainActivity : AppCompatActivity() {
                     deleteCallback()
                     dialog.dismiss()
                 }
+            }
+        }
+
+        dialog.setOnDismissListener {
+            if (palettePopup.isShowing) {
+                palettePopup.dismiss()
             }
         }
 
@@ -1669,6 +1908,9 @@ class MainActivity : AppCompatActivity() {
             }
             null
         }
+        if (result != null) {
+            HandwritingBitmapLoader.invalidate(result.path)
+        }
         if (result != null && existing != null && reuseExisting == null) {
             if (existing.path != result.path) {
                 deleteHandwritingFile(existing.path)
@@ -1683,6 +1925,7 @@ class MainActivity : AppCompatActivity() {
         }.getOrNull()
 
     private fun deleteHandwritingFile(path: String) {
+        HandwritingBitmapLoader.invalidate(path)
         runCatching { deleteFile(path) }
     }
 
@@ -2456,7 +2699,7 @@ class MainActivity : AppCompatActivity() {
         override fun onViewRecycled(holder: FlowVH) {
             holder.boundFlowId?.let {
                 persistControllerState(it)
-                flowControllers.remove(it)
+                flowControllers.remove(it)?.dispose()
             }
             super.onViewRecycled(holder)
         }
@@ -2472,7 +2715,7 @@ class MainActivity : AppCompatActivity() {
             fun bind(flow: CardFlow) {
                 boundFlowId?.let {
                     persistControllerState(it)
-                    flowControllers.remove(it)
+                    flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
                 val controller = FlowPageController(flow.id, recycler, layoutManager, adapter)
@@ -2523,6 +2766,17 @@ class MainActivity : AppCompatActivity() {
         val adapter: CardsAdapter
     ) {
         private var activeQuery: String = ""
+        private val scrollListener = object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    owningFlow()?.let { ensureMainCard(it) }
+                }
+            }
+        }
+
+        init {
+            recycler.addOnScrollListener(scrollListener)
+        }
 
         fun updateDisplayedCards(
             flow: CardFlow,
@@ -2532,24 +2786,8 @@ class MainActivity : AppCompatActivity() {
         ) {
             activeQuery = query
             val displayed = filterCardsForSearch(flow.cards, query)
-            adapter.submitList(displayed)
-            if (displayed.isEmpty()) {
-                layoutManager.clearFocus()
-                layoutManager.restoreState(0, false)
-                return
-            }
-            if (query.isBlank()) {
-                if (shouldRestoreState) {
-                    restoreState(flow)
-                } else if (shouldScrollToTop) {
-                    layoutManager.clearFocus()
-                    layoutManager.restoreState(0, false)
-                }
-                return
-            }
-            layoutManager.clearFocus()
-            if (shouldScrollToTop) {
-                layoutManager.restoreState(0, false)
+            adapter.submitList(displayed) {
+                handleListCommitted(flow, displayed, shouldRestoreState, shouldScrollToTop)
             }
         }
 
@@ -2586,11 +2824,55 @@ class MainActivity : AppCompatActivity() {
                 flow.lastViewedCardFocused = false
                 return
             }
+            val selectedIndex = layoutManager.currentSelectionIndex()
             val nearest = layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
-            flow.lastViewedCardIndex = nearest
-            flow.lastViewedCardId = adapter.getItemAt(nearest)?.id
-            flow.lastViewedCardFocused = layoutManager.isFocused(nearest)
+            val resolved = selectedIndex?.coerceIn(0, adapter.itemCount - 1) ?: nearest
+            flow.lastViewedCardIndex = resolved
+            flow.lastViewedCardId = adapter.getItemAt(resolved)?.id
+            flow.lastViewedCardFocused = layoutManager.hasSelection()
         }
+
+        fun dispose() {
+            recycler.removeOnScrollListener(scrollListener)
+        }
+
+        private fun handleListCommitted(
+            flow: CardFlow,
+            displayed: List<CardItem>,
+            shouldRestoreState: Boolean,
+            shouldScrollToTop: Boolean
+        ) {
+            if (displayed.isEmpty()) {
+                layoutManager.clearFocus()
+                layoutManager.restoreState(0, false)
+                return
+            }
+            if (activeQuery.isBlank()) {
+                when {
+                    shouldRestoreState -> restoreState(flow)
+                    shouldScrollToTop -> {
+                        layoutManager.clearFocus()
+                        layoutManager.restoreState(0, false)
+                    }
+                }
+            } else {
+                layoutManager.clearFocus()
+                if (shouldScrollToTop) {
+                    layoutManager.restoreState(0, false)
+                }
+            }
+            ensureMainCard(flow)
+        }
+
+        private fun ensureMainCard(flow: CardFlow) {
+            if (adapter.itemCount == 0) return
+            val selection = layoutManager.currentSelectionIndex()?.coerceIn(0, adapter.itemCount - 1)
+            val target = selection ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            layoutManager.focus(target)
+            captureState(flow)
+        }
+
+        private fun owningFlow(): CardFlow? = flows.firstOrNull { it.id == flowId }
     }
 
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
@@ -2617,42 +2899,43 @@ class MainActivity : AppCompatActivity() {
         val handwriting: HandwritingContent?
     )
 
-    companion object {
-        private const val PREFS_NAME = "timescape_state"
-        private const val KEY_CARDS = "cards"
-        private const val KEY_IMAGES = "images"
-        private const val KEY_FLOWS = "flows"
-        private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
-        private const val KEY_APP_BACKGROUND = "app_background"
-        private const val KEY_NEXT_CARD_ID = "next_card_id"
-        private const val KEY_NEXT_FLOW_ID = "next_flow_id"
-        private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
-        private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
-        private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
-        private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
-        private const val KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP = "handwriting/default_eraser_size_dp"
-        private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
-        private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
-        private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
-        private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
-        private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
-        private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
-        private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
-        private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
-        private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
-        private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
-        private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
-        private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
-        private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
-        private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
-        private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
-        private const val DEFAULT_CANVAS_RATIO = 0.75f
-        private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
-        private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
-        private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
-        private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
-        private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
-        private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
-        private const val NOTES_EXPORT_VERSION = 1
-    }
 }
+
+private const val PREFS_NAME = "timescape_state"
+private const val KEY_CARDS = "cards"
+private const val KEY_IMAGES = "images"
+private const val KEY_FLOWS = "flows"
+private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
+private const val KEY_APP_BACKGROUND = "app_background"
+private const val KEY_NEXT_CARD_ID = "next_card_id"
+private const val KEY_NEXT_FLOW_ID = "next_flow_id"
+private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
+private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
+private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
+private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
+private const val KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP = "handwriting/default_eraser_size_dp"
+private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
+private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
+private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
+private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
+private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
+private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
+private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
+private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
+private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
+private const val FLOW_DELETE_DOUBLE_TAP_WINDOW_MS = 350L
+private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
+private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
+private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
+private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
+private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
+private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
+private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
+private const val DEFAULT_CANVAS_RATIO = 0.75f
+private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
+private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
+private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
+private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
+private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
+private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
+private const val NOTES_EXPORT_VERSION = 1

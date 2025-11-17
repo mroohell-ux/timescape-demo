@@ -100,6 +100,10 @@ class RightRailFlowLayoutManager(
         return (desiredScroll - scrollYPx).toInt()
     }
 
+    fun currentSelectionIndex(): Int? = selectedIndex
+
+    fun hasSelection(): Boolean = selectedIndex != null
+
     fun focus(index: Int) {
         if (selectedIndex == index && focusProgress >= 0.999f) return
         selectedIndex = index

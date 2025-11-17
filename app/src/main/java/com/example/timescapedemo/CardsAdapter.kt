@@ -123,10 +123,17 @@ class CardsAdapter(
     }
 
     override fun submitList(list: List<CardItem>?) {
+        super.submitList(prepareList(list))
+    }
+
+    override fun submitList(list: List<CardItem>?, commitCallback: Runnable?) {
+        super.submitList(prepareList(list), commitCallback)
+    }
+
+    private fun prepareList(list: List<CardItem>?): List<CardItem>? {
         if (list == null) {
             blockedUris.clear()
-            super.submitList(null)
-            return
+            return null
         }
         val now = System.currentTimeMillis()
         val copies = list.map { item ->
@@ -143,7 +150,7 @@ class CardsAdapter(
         blockedUris.retainAll(activeUris)
         val activeIds = copies.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(activeIds)
-        super.submitList(copies)
+        return copies
     }
 
     fun getItemAt(index: Int): CardItem? = currentList.getOrNull(index)
