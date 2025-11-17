@@ -16,6 +16,7 @@ import android.text.InputType
 import android.util.Base64
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.View
@@ -1422,15 +1423,6 @@ class MainActivity : AppCompatActivity() {
             return paletteCard.measuredHeight
         }
 
-        fun computeAvailableDropDownSpace(anchor: View, yOffset: Int): Int {
-            val windowRect = Rect()
-            dialogView.rootView.getWindowVisibleDisplayFrame(windowRect)
-            val anchorLocation = IntArray(2)
-            anchor.getLocationOnScreen(anchorLocation)
-            val anchorBottom = anchorLocation[1] + anchor.height
-            return (windowRect.bottom - anchorBottom - yOffset).coerceAtLeast(0)
-        }
-
         fun updateHistoryButtons() {
             undoButton.isEnabled = handwritingView.canUndo()
             clearButton.isEnabled = handwritingView.hasDrawing()
@@ -1571,23 +1563,66 @@ class MainActivity : AppCompatActivity() {
             penOptionsContainer.isVisible = section == HandwritingPaletteSection.PEN
             eraserOptionsContainer.isVisible = section == HandwritingPaletteSection.ERASER
             canvasOptionsContainer.isVisible = section == HandwritingPaletteSection.CANVAS
-            palettePopup.width = computePaletteWidth()
             val yOffset = (8 * density).roundToInt()
-            val desiredHeight = measurePaletteHeight(palettePopup.width)
-            val availableHeight = computeAvailableDropDownSpace(anchor, yOffset)
-            val constrainedHeight = if (availableHeight > 0 && desiredHeight > availableHeight) {
-                availableHeight
-            } else {
-                ViewGroup.LayoutParams.WRAP_CONTENT
+            val safeMargin = (12 * density).roundToInt()
+            val windowRect = Rect()
+            dialogView.getWindowVisibleDisplayFrame(windowRect)
+            if (windowRect.width() <= 0 || windowRect.height() <= 0) {
+                val metrics = resources.displayMetrics
+                windowRect.set(0, 0, metrics.widthPixels, metrics.heightPixels)
             }
-            palettePopup.height = constrainedHeight
-            paletteScroll.scrollTo(0, 0)
-            paletteScroll.isVerticalScrollBarEnabled =
-                constrainedHeight != ViewGroup.LayoutParams.WRAP_CONTENT && desiredHeight > availableHeight
-            if (!palettePopup.isShowing) {
-                palettePopup.showAsDropDown(anchor, 0, yOffset)
+            val maxPopupWidth = windowRect.width() - safeMargin * 2
+            val computedWidth = computePaletteWidth()
+            val popupWidth = if (maxPopupWidth > 0) {
+                computedWidth.coerceAtMost(maxPopupWidth)
             } else {
-                palettePopup.update(anchor, palettePopup.width, constrainedHeight)
+                computedWidth
+            }
+            if (palettePopup.width != popupWidth) {
+                palettePopup.width = popupWidth
+            }
+            val desiredHeight = measurePaletteHeight(popupWidth)
+            val maxPopupHeight = windowRect.height() - safeMargin * 2
+            val popupHeight = if (maxPopupHeight > 0) {
+                desiredHeight.coerceAtMost(maxPopupHeight)
+            } else {
+                desiredHeight
+            }
+            palettePopup.height = popupHeight
+            val anchorLocation = IntArray(2)
+            anchor.getLocationOnScreen(anchorLocation)
+            val anchorLeft = anchorLocation[0]
+            val anchorTop = anchorLocation[1]
+            val anchorBottom = anchorTop + anchor.height
+            val anchorCenterX = anchorLeft + anchor.width / 2
+            val horizontalMin = windowRect.left + safeMargin
+            val horizontalMax = windowRect.right - popupWidth - safeMargin
+            val popupX = if (horizontalMin <= horizontalMax) {
+                (anchorCenterX - popupWidth / 2).coerceIn(horizontalMin, horizontalMax)
+            } else {
+                horizontalMin
+            }
+            val availableBelow = windowRect.bottom - anchorBottom - yOffset
+            val availableAbove = anchorTop - windowRect.top - yOffset
+            val shouldShowAbove = popupHeight > availableBelow && availableAbove > availableBelow
+            val verticalMin = windowRect.top + safeMargin
+            val verticalMax = windowRect.bottom - popupHeight - safeMargin
+            val popupY = if (verticalMin <= verticalMax) {
+                val desiredY = if (shouldShowAbove) {
+                    anchorTop - yOffset - popupHeight
+                } else {
+                    anchorBottom + yOffset
+                }
+                desiredY.coerceIn(verticalMin, verticalMax)
+            } else {
+                verticalMin
+            }
+            paletteScroll.scrollTo(0, 0)
+            paletteScroll.isVerticalScrollBarEnabled = popupHeight < desiredHeight
+            if (!palettePopup.isShowing) {
+                palettePopup.showAtLocation(dialogView, Gravity.NO_GRAVITY, popupX, popupY)
+            } else {
+                palettePopup.update(popupX, popupY, popupWidth, popupHeight)
             }
             updateToolButtons()
         }
