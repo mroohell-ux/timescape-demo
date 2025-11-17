@@ -880,6 +880,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun editCard(flow: CardFlow, index: Int, face: HandwritingFace = HandwritingFace.FRONT) {
+        flowControllers[flow.id]?.captureState(flow)
         val card = flow.cards.getOrNull(index) ?: return
         val handwritingContent = card.handwriting
         if (handwritingContent != null) {
@@ -1455,15 +1456,6 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
-                if (!handwritingView.hasDrawing()) {
-                    if (face == HandwritingFace.BACK && existing != null) {
-                        onSave(null)
-                        dialog.dismiss()
-                    } else {
-                        snackbar(getString(R.string.snackbar_handwriting_required))
-                    }
-                    return@setOnClickListener
-                }
                 val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
@@ -1669,6 +1661,9 @@ class MainActivity : AppCompatActivity() {
             }
             null
         }
+        if (result != null) {
+            HandwritingBitmapLoader.invalidate(result.path)
+        }
         if (result != null && existing != null && reuseExisting == null) {
             if (existing.path != result.path) {
                 deleteHandwritingFile(existing.path)
@@ -1683,6 +1678,7 @@ class MainActivity : AppCompatActivity() {
         }.getOrNull()
 
     private fun deleteHandwritingFile(path: String) {
+        HandwritingBitmapLoader.invalidate(path)
         runCatching { deleteFile(path) }
     }
 
@@ -2456,7 +2452,7 @@ class MainActivity : AppCompatActivity() {
         override fun onViewRecycled(holder: FlowVH) {
             holder.boundFlowId?.let {
                 persistControllerState(it)
-                flowControllers.remove(it)
+                flowControllers.remove(it)?.dispose()
             }
             super.onViewRecycled(holder)
         }
@@ -2472,7 +2468,7 @@ class MainActivity : AppCompatActivity() {
             fun bind(flow: CardFlow) {
                 boundFlowId?.let {
                     persistControllerState(it)
-                    flowControllers.remove(it)
+                    flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
                 val controller = FlowPageController(flow.id, recycler, layoutManager, adapter)
@@ -2523,6 +2519,17 @@ class MainActivity : AppCompatActivity() {
         val adapter: CardsAdapter
     ) {
         private var activeQuery: String = ""
+        private val scrollListener = object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    owningFlow()?.let { ensureMainCard(it) }
+                }
+            }
+        }
+
+        init {
+            recycler.addOnScrollListener(scrollListener)
+        }
 
         fun updateDisplayedCards(
             flow: CardFlow,
@@ -2532,24 +2539,8 @@ class MainActivity : AppCompatActivity() {
         ) {
             activeQuery = query
             val displayed = filterCardsForSearch(flow.cards, query)
-            adapter.submitList(displayed)
-            if (displayed.isEmpty()) {
-                layoutManager.clearFocus()
-                layoutManager.restoreState(0, false)
-                return
-            }
-            if (query.isBlank()) {
-                if (shouldRestoreState) {
-                    restoreState(flow)
-                } else if (shouldScrollToTop) {
-                    layoutManager.clearFocus()
-                    layoutManager.restoreState(0, false)
-                }
-                return
-            }
-            layoutManager.clearFocus()
-            if (shouldScrollToTop) {
-                layoutManager.restoreState(0, false)
+            adapter.submitList(displayed) {
+                handleListCommitted(flow, displayed, shouldRestoreState, shouldScrollToTop)
             }
         }
 
@@ -2586,11 +2577,56 @@ class MainActivity : AppCompatActivity() {
                 flow.lastViewedCardFocused = false
                 return
             }
+            val selectedIndex = layoutManager.currentSelectionIndex()
             val nearest = layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
-            flow.lastViewedCardIndex = nearest
-            flow.lastViewedCardId = adapter.getItemAt(nearest)?.id
-            flow.lastViewedCardFocused = layoutManager.isFocused(nearest)
+            val resolved = selectedIndex?.coerceIn(0, adapter.itemCount - 1) ?: nearest
+            flow.lastViewedCardIndex = resolved
+            flow.lastViewedCardId = adapter.getItemAt(resolved)?.id
+            flow.lastViewedCardFocused = layoutManager.hasSelection()
         }
+
+        fun dispose() {
+            recycler.removeOnScrollListener(scrollListener)
+        }
+
+        private fun handleListCommitted(
+            flow: CardFlow,
+            displayed: List<CardItem>,
+            shouldRestoreState: Boolean,
+            shouldScrollToTop: Boolean
+        ) {
+            if (displayed.isEmpty()) {
+                layoutManager.clearFocus()
+                layoutManager.restoreState(0, false)
+                return
+            }
+            if (activeQuery.isBlank()) {
+                when {
+                    shouldRestoreState -> restoreState(flow)
+                    shouldScrollToTop -> {
+                        layoutManager.clearFocus()
+                        layoutManager.restoreState(0, false)
+                    }
+                }
+            } else {
+                layoutManager.clearFocus()
+                if (shouldScrollToTop) {
+                    layoutManager.restoreState(0, false)
+                }
+            }
+            ensureMainCard(flow)
+        }
+
+        private fun ensureMainCard(flow: CardFlow) {
+            if (adapter.itemCount == 0) return
+            val selection = layoutManager.currentSelectionIndex()?.coerceIn(0, adapter.itemCount - 1)
+            val target = selection ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            layoutManager.focus(target)
+            captureState(flow)
+        }
+
+        private fun owningFlow(): CardFlow? = flows.firstOrNull { it.id == flowId }
+    }
     }
 
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {

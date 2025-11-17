@@ -57,6 +57,14 @@ object HandwritingBitmapLoader {
         imageView.setImageDrawable(null)
     }
 
+    fun invalidate(path: String) {
+        val prefix = "$path@"
+        val keys = synchronized(cache) {
+            cache.snapshot().keys.filter { it.startsWith(prefix) }
+        }
+        keys.forEach { key -> cache.remove(key) }
+    }
+
     fun prefetch(
         context: Context,
         path: String,
