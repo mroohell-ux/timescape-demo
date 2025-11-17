@@ -1,5 +1,6 @@
 package com.example.timescapedemo
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -8,8 +9,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
 import android.widget.ImageView
+import java.io.File
+import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -126,12 +130,11 @@ object BackgroundImageLoader {
         targetWidth: Int?,
         targetHeight: Int?
     ): Bitmap? {
-        val resolver = context.contentResolver
         val width = targetWidth
         val height = targetHeight
         val options = if (width != null && height != null) {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            resolver.openInputStream(uri)?.use { input ->
+            openStream(context, uri)?.use { input ->
                 BitmapFactory.decodeStream(input, null, bounds)
             }
             val sampleSize = calculateSampleSize(bounds, width, height)
@@ -144,8 +147,17 @@ object BackgroundImageLoader {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
         }
-        return resolver.openInputStream(uri)?.use { input ->
+        return openStream(context, uri)?.use { input ->
             BitmapFactory.decodeStream(input, null, options)
+        }
+    }
+
+    private fun openStream(context: Context, uri: Uri): InputStream? {
+        return if (uri.scheme.equals(ContentResolver.SCHEME_FILE, ignoreCase = true)) {
+            val path = uri.path ?: return null
+            FileInputStream(File(path))
+        } else {
+            context.contentResolver.openInputStream(uri)
         }
     }
 
