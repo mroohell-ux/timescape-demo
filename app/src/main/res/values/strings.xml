@@ -10,6 +10,7 @@
     <string name="menu_add_image_card">Add image</string>
     <string name="menu_add_handwriting">Add handwriting</string>
     <string name="menu_add_flow">Add flow</string>
+    <string name="menu_export_flow">Export flow</string>
     <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
     <string name="menu_unshuffle_cards">Restore order</string>
@@ -20,6 +21,7 @@
     <string name="drawer_clear_images">Clear all</string>
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
+    <string name="drawer_export_current_flow">Export current flow</string>
     <string name="drawer_import_notes">Import notes</string>
     <string name="drawer_app_background">App background</string>
     <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
@@ -47,6 +49,8 @@
     <string name="snackbar_handwriting_required">Draw something before saving.</string>
     <string name="snackbar_handwriting_save_failed">Couldnt save that handwriting.</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>
+    <string name="snackbar_no_flow_to_export">Add a flow before exporting.</string>
+    <string name="snackbar_flow_not_found_for_export">That flow was removed before it could be exported.</string>
     <string name="snackbar_removed_image">Removed 1 image</string>
     <string name="snackbar_removed_image_reset_app_background">Removed image and reset app background</string>
     <string name="snackbar_no_images_to_clear">No images to clear</string>

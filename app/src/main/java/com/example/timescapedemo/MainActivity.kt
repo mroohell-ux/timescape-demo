@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerPickAppBackgroundButton: MaterialButton
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
     private lateinit var drawerExportNotesButton: MaterialButton
+    private lateinit var drawerExportCurrentFlowButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
@@ -170,6 +171,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var pendingImageCardRequest: ImageCardRequest? = null
+    private var pendingExportFlowId: Long? = null
 
     private data class HandwritingDialogExtras(
         val baseBitmap: Bitmap? = null,
@@ -251,6 +253,22 @@ class MainActivity : AppCompatActivity() {
             } else snackbar(getString(R.string.snackbar_export_cancelled))
         }
 
+    private val exportFlowLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            val flowId = pendingExportFlowId
+            pendingExportFlowId = null
+            if (uri != null && flowId != null) {
+                val flow = flows.firstOrNull { it.id == flowId }
+                if (flow != null) {
+                    exportSingleFlow(flow, uri)
+                } else snackbar(getString(R.string.snackbar_flow_not_found_for_export))
+            } else if (uri == null) {
+                snackbar(getString(R.string.snackbar_export_cancelled))
+            } else {
+                snackbar(getString(R.string.snackbar_flow_not_found_for_export))
+            }
+        }
+
     private val importNotesLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -266,6 +284,8 @@ class MainActivity : AppCompatActivity() {
         pendingImageCardRequest = ImageCardRequest.fromBundle(
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
         )
+        pendingExportFlowId = savedInstanceState?.getLong(STATE_PENDING_EXPORT_FLOW_ID, Long.MIN_VALUE)
+            ?.takeIf { it != Long.MIN_VALUE }
 
         initializeTextToSpeech()
 
@@ -291,6 +311,7 @@ class MainActivity : AppCompatActivity() {
 
         val header = navigationView.getHeaderView(0)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
+        drawerExportCurrentFlowButton = header.findViewById(R.id.buttonDrawerExportCurrentFlow)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
@@ -349,6 +370,10 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton.setOnClickListener {
             val defaultName = buildExportFileName()
             exportNotesLauncher.launch(defaultName)
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerExportCurrentFlowButton.setOnClickListener {
+            launchExportCurrentFlow()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
         drawerImportNotesButton.setOnClickListener {
@@ -471,9 +496,10 @@ class MainActivity : AppCompatActivity() {
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
-            R.id.action_add_card -> { showAddCardDialog(); true }
-            R.id.action_add_image_card -> { showAddImageCardDialog(); true }
-            R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
+                R.id.action_export_flow -> { launchExportCurrentFlow(); true }
+                R.id.action_add_card -> { showAddCardDialog(); true }
+                R.id.action_add_image_card -> { showAddImageCardDialog(); true }
+                R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
                 else -> false
             }
@@ -2658,18 +2684,51 @@ class MainActivity : AppCompatActivity() {
         snack.show()
     }
 
-    private fun buildExportFileName(): String {
+    private fun launchExportCurrentFlow() {
+        val flow = currentFlow()
+        if (flow == null) {
+            snackbar(getString(R.string.snackbar_no_flow_to_export))
+            return
+        }
+        pendingExportFlowId = flow.id
+        val defaultName = buildExportFileName(flow.name)
+        exportFlowLauncher.launch(defaultName)
+    }
+
+    private fun buildExportFileName(flowName: String? = null): String {
         val formatter = SimpleDateFormat(EXPORT_FILE_DATE_PATTERN, Locale.US)
         val timestamp = formatter.format(Date())
-        return "timescape_notes_${'$'}timestamp.json"
+        val prefix = flowName?.takeIf { it.isNotBlank() }?.let {
+            "timescape_flow_${sanitizeFileComponent(it)}"
+        } ?: "timescape_notes"
+        return "${'$'}prefix_${'$'}timestamp.json"
+    }
+
+    private fun sanitizeFileComponent(name: String): String {
+        val normalized = name.trim().lowercase(Locale.US)
+        val replaced = normalized.replace(Regex("[^a-z0-9_-]"), "_")
+        val collapsed = replaced.replace(Regex("_+"), "_").trim('_')
+        return collapsed.ifEmpty { "flow" }
     }
 
     private fun exportNotes(uri: Uri) {
+        exportFlows(uri, flows.toList())
+    }
+
+    private fun exportSingleFlow(flow: CardFlow, uri: Uri) {
+        exportFlows(uri, listOf(flow))
+    }
+
+    private fun exportFlows(uri: Uri, flowsToExport: List<CardFlow>) {
+        if (flowsToExport.isEmpty()) {
+            snackbar(getString(R.string.snackbar_no_flow_to_export))
+            return
+        }
         captureVisibleFlowStates()
         lifecycleScope.launch {
             val payload = withContext(Dispatchers.IO) {
                 runCatching {
-                    val exportPayload = buildNotesExportPayload()
+                    val exportPayload = buildExportPayload(flowsToExport)
                     contentResolver.openOutputStream(uri, "w")?.use { stream ->
                         OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
                             writer.write(exportPayload.json)
@@ -2687,13 +2746,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildNotesExportPayload(): ExportPayload {
+    private fun buildExportPayload(flowsToExport: List<CardFlow>): ExportPayload {
         val root = JSONObject()
         root.put("version", NOTES_EXPORT_VERSION)
         root.put("generatedAt", System.currentTimeMillis())
         val flowsArray = JSONArray()
         var cardCount = 0
-        flows.forEach { flow ->
+        flowsToExport.forEach { flow ->
             val flowObj = JSONObject()
             flowObj.put("name", flow.name)
             val cardsArray = JSONArray()
@@ -2720,7 +2779,7 @@ class MainActivity : AppCompatActivity() {
             flowsArray.put(flowObj)
         }
         root.put("flows", flowsArray)
-        return ExportPayload(root.toString(2), flows.size, cardCount)
+        return ExportPayload(root.toString(2), flowsToExport.size, cardCount)
     }
 
     private fun handwritingOptionsToJson(options: HandwritingOptions): JSONObject = JSONObject().apply {
@@ -3255,6 +3314,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        pendingExportFlowId?.let { outState.putLong(STATE_PENDING_EXPORT_FLOW_ID, it) }
         pendingImageCardRequest?.toBundle()?.let { bundle ->
             outState.putBundle(STATE_PENDING_IMAGE_CARD_REQUEST, bundle)
         }
@@ -3571,6 +3631,7 @@ private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_ty
 private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
 private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
 private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
+private const val STATE_PENDING_EXPORT_FLOW_ID = "state/pending_export_flow_id"
 private const val STATE_PENDING_IMAGE_CARD_REQUEST = "state/pending_image_card_request"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE = "state/image_card/type"
 private const val STATE_IMAGE_CARD_REQUEST_FLOW_ID = "state/image_card/flow_id"

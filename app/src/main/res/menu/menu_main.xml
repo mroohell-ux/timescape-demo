@@ -17,6 +17,12 @@
         app:showAsAction="always"/>
 
     <item
+        android:id="@+id/action_export_flow"
+        android:title="@string/menu_export_flow"
+        android:icon="@android:drawable/ic_menu_save"
+        app:showAsAction="always"/>
+
+    <item
         android:id="@+id/action_add_card"
         android:title="@string/menu_add_card"
         android:icon="@android:drawable/ic_menu_edit"
