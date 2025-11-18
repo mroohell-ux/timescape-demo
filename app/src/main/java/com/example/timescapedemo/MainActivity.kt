@@ -37,6 +37,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
+import androidx.appcompat.widget.Toolbar
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.applyCanvas
 import androidx.core.view.GravityCompat
@@ -539,7 +540,10 @@ class MainActivity : AppCompatActivity() {
                     controller.captureState(flow)
                 }
                 view.setQuery(searchQueryText, false)
-                view.post { view.requestFocus() }
+                view.post {
+                    view.requestFocus()
+                    expandSearchViewToToolbarWidth(view)
+                }
                 return true
             }
 
@@ -588,6 +592,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateToolbarSubtitle() {
         toolbar.subtitle = ""
+    }
+
+    private fun expandSearchViewToToolbarWidth(view: SearchView) {
+        val displayWidth = resources.displayMetrics.widthPixels
+        val toolbarWidth = toolbar.width.takeIf { it > 0 } ?: displayWidth
+        val insetStart = toolbar.contentInsetStartWithNavigation
+        val insetEnd = toolbar.contentInsetEndWithActions
+        val paddingStart = toolbar.paddingStart
+        val paddingEnd = toolbar.paddingEnd
+        val availableWidth = (toolbarWidth - insetStart - insetEnd - paddingStart - paddingEnd)
+            .coerceAtLeast(0)
+        val targetWidth = availableWidth.takeIf { it > 0 } ?: displayWidth
+        view.maxWidth = targetWidth
+        val layoutParams = (view.layoutParams as? Toolbar.LayoutParams)
+            ?: Toolbar.LayoutParams(targetWidth, Toolbar.LayoutParams.WRAP_CONTENT)
+        layoutParams.width = targetWidth
+        view.layoutParams = layoutParams
+        view.requestLayout()
     }
 
     private fun updateShuffleMenuState() {
