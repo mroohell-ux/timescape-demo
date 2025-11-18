@@ -1417,7 +1417,7 @@ class MainActivity : AppCompatActivity() {
             computeSizeForRatio("portrait", R.string.handwriting_size_portrait, 4f / 3f)
         ).distinctBy { it.width to it.height }.toMutableList()
 
-        var selectedSize = sizeOptions.firstOrNull { it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight }
+        var selectedSize = sizeOptions.firstOrNull { it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight }?: sizeOptions.first()
         if (selectedSize == null) {
             selectedSize = CanvasSizeOption(
                 key = "custom",
