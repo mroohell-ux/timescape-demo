@@ -13,10 +13,19 @@
         android:paddingBottom="8dp">
 
         <EditText
-            android:id="@+id/inputSnippet"
+            android:id="@+id/inputTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
+            android:hint="@string/dialog_title_hint"
+            android:inputType="textCapSentences|textMultiLine"
+            android:maxLines="2" />
+
+        <EditText
+            android:id="@+id/inputSnippet"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:hint="@string/dialog_snippet_hint"
             android:inputType="textCapSentences|textMultiLine"
             android:minLines="3"

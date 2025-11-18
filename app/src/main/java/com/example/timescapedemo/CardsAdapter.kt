@@ -22,6 +22,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
@@ -100,11 +101,15 @@ class CardsAdapter(
     private val tint: TintStyle,
     private val onItemClick: (index: Int) -> Unit,
     private val onItemDoubleClick: (index: Int) -> Unit,
+    private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val time: TextView = v.findViewById(R.id.time)
+        val titleContainer: View = v.findViewById(R.id.titleContainer)
+        val title: TextView = v.findViewById(R.id.title)
+        val titleSpeakButton: ImageButton = v.findViewById(R.id.buttonSpeakTitle)
         val snippet: TextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
@@ -236,13 +241,16 @@ class CardsAdapter(
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
             bindHandwriting(holder, item, handwritingContent, face, fallbackText, position)
+            clearTitle(holder)
         } else if (imageContent != null) {
             bindImageCard(holder, item, face, fallbackText, position)
+            clearTitle(holder)
         } else {
             HandwritingBitmapLoader.clear(holder.handwriting)
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
             setCardMode(holder, CardMode.TEXT, fallbackText)
+            bindTitle(holder, item)
         }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
@@ -313,7 +321,7 @@ class CardsAdapter(
         holder.textScrim.alpha = 0.45f
         holder.snippet.setTextColor(Color.WHITE)
         holder.time.setTextColor(0xF2FFFFFF.toInt())
-        addShadow(holder.time, holder.snippet)
+        addShadow(holder.time, holder.title, holder.snippet)
     }
 
     override fun getItemId(position: Int): Long = getItem(position).id
@@ -725,6 +733,8 @@ class CardsAdapter(
                 holder.time.isVisible = true
                 holder.snippet.isVisible = true
                 holder.snippet.text = fallbackText
+                holder.titleContainer.isVisible = false
+                holder.titleSpeakButton.isVisible = false
                 holder.handwritingContainer.isVisible = false
                 holder.handwriting.isVisible = false
                 holder.imageCardContainer.isVisible = false
@@ -736,6 +746,8 @@ class CardsAdapter(
                 holder.textScrim.isVisible = false
                 holder.time.isVisible = false
                 holder.snippet.isVisible = false
+                holder.titleContainer.isVisible = false
+                holder.titleSpeakButton.isVisible = false
                 holder.handwritingContainer.isVisible = false
                 holder.handwriting.isVisible = false
                 holder.imageCardContainer.isVisible = true
@@ -747,6 +759,8 @@ class CardsAdapter(
                 holder.textScrim.isVisible = false
                 holder.time.isVisible = false
                 holder.snippet.isVisible = false
+                holder.titleContainer.isVisible = false
+                holder.titleSpeakButton.isVisible = false
                 holder.handwritingContainer.isVisible = true
                 holder.handwriting.isVisible = true
                 holder.imageCardContainer.isVisible = false
@@ -754,6 +768,39 @@ class CardsAdapter(
                 holder.bg.isVisible = false
             }
         }
+    }
+
+    private fun bindTitle(holder: VH, item: CardItem) {
+        val titleText = item.title.trim()
+        if (titleText.isEmpty()) {
+            clearTitle(holder)
+            return
+        }
+        holder.titleContainer.isVisible = true
+        holder.title.text = titleText
+        val speakButton = holder.titleSpeakButton
+        val speakCallback = onTitleSpeakClick
+        if (speakCallback != null) {
+            speakButton.isVisible = true
+            speakButton.isEnabled = true
+            speakButton.contentDescription = holder.itemView.context.getString(
+                R.string.card_title_speak_content_desc,
+                titleText
+            )
+            speakButton.setOnClickListener { speakCallback(item) }
+        } else {
+            speakButton.isVisible = false
+            speakButton.setOnClickListener(null)
+            speakButton.contentDescription = null
+        }
+    }
+
+    private fun clearTitle(holder: VH) {
+        holder.titleContainer.isVisible = false
+        holder.title.text = ""
+        holder.titleSpeakButton.isVisible = false
+        holder.titleSpeakButton.setOnClickListener(null)
+        holder.titleSpeakButton.contentDescription = null
     }
 
     private fun cancelOngoingFlip(container: View) {

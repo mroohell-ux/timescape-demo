@@ -84,6 +84,39 @@
                 android:textStyle="bold"
                 android:letterSpacing="0.02"/>
 
+            <LinearLayout
+                android:id="@+id/titleContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:maxLines="2"
+                    android:ellipsize="end"/>
+
+                <ImageButton
+                    android:id="@+id/buttonSpeakTitle"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@null"
+                    android:padding="6dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_title_speak"
+                    android:tint="#FFFFFFFF"
+                    android:visibility="gone"/>
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/snippet"
                 android:layout_width="match_parent"

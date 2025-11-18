@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.text.InputType
+import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
@@ -83,6 +84,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.collections.ArrayDeque
 
 class MainActivity : AppCompatActivity() {
 
@@ -128,6 +130,10 @@ class MainActivity : AppCompatActivity() {
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var lastFlowChipTapId: Long = -1L
     private var lastFlowChipTapTime: Long = 0L
+    private var textToSpeech: TextToSpeech? = null
+    private var textToSpeechReady: Boolean = false
+    private var textToSpeechInitializing: Boolean = false
+    private val pendingTextToSpeechRequests: ArrayDeque<String> = ArrayDeque()
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -260,6 +266,8 @@ class MainActivity : AppCompatActivity() {
         pendingImageCardRequest = ImageCardRequest.fromBundle(
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
         )
+
+        initializeTextToSpeech()
 
         drawerLayout = findViewById(R.id.drawerLayout)
         val navigationView = findViewById<NavigationView>(R.id.navigationView)
@@ -1025,11 +1033,12 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_add_flow_first))
             return
         }
-        showCardEditor(initialSnippet = "", isNew = true, onSave = { snippet ->
+        showCardEditor(initialTitle = "", initialSnippet = "", isNew = true, onSave = { title, snippet ->
+            val finalTitle = title.trim()
             val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
             val card = CardItem(
                 id = nextCardId++,
-                title = "",
+                title = finalTitle,
                 snippet = finalSnippet,
                 updatedAt = System.currentTimeMillis()
             )
@@ -1140,7 +1149,8 @@ class MainActivity : AppCompatActivity() {
             )
             }
             else -> {
-            showCardEditor(initialSnippet = card.snippet, isNew = false, onSave = { newSnippet ->
+            showCardEditor(initialTitle = card.title, initialSnippet = card.snippet, isNew = false, onSave = { newTitle, newSnippet ->
+                card.title = newTitle.trim()
                 val snippetValue = newSnippet.trim()
                 if (snippetValue.isNotEmpty()) card.snippet = snippetValue
                 card.updatedAt = System.currentTimeMillis()
@@ -1343,21 +1353,111 @@ class MainActivity : AppCompatActivity() {
         HandwritingFormat.WEBP -> "image/webp"
     }
 
+    private fun initializeTextToSpeech() {
+        if (textToSpeech != null || textToSpeechInitializing) return
+        textToSpeechReady = false
+        textToSpeechInitializing = true
+        textToSpeech = TextToSpeech(this) { status ->
+            textToSpeechReady = status == TextToSpeech.SUCCESS
+            textToSpeechInitializing = false
+            if (textToSpeechReady) {
+                val languageResult = textToSpeech?.setLanguage(Locale.getDefault())
+                    ?: TextToSpeech.LANG_MISSING_DATA
+                if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                    languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    textToSpeechReady = false
+                    pendingTextToSpeechRequests.clear()
+                    textToSpeech?.shutdown()
+                    textToSpeech = null
+                    if (languageResult == TextToSpeech.LANG_MISSING_DATA) {
+                        promptInstallTextToSpeechData()
+                    } else {
+                        snackbar(getString(R.string.snackbar_tts_unavailable))
+                    }
+                    return@TextToSpeech
+                }
+                playMostRecentPendingSpeech()
+            } else {
+                pendingTextToSpeechRequests.clear()
+                textToSpeech?.shutdown()
+                textToSpeech = null
+                snackbar(getString(R.string.snackbar_tts_unavailable))
+            }
+        }
+    }
+
+    private fun playMostRecentPendingSpeech() {
+        if (!textToSpeechReady || pendingTextToSpeechRequests.isEmpty()) return
+        val text = pendingTextToSpeechRequests.removeLast()
+        pendingTextToSpeechRequests.clear()
+        speakTextNow(text)
+    }
+
+    private fun speakCardTitle(card: CardItem) {
+        val text = card.title.trim()
+        if (text.isEmpty()) return
+        initializeTextToSpeech()
+        if (textToSpeechReady) {
+            speakTextNow(text)
+            return
+        }
+        pendingTextToSpeechRequests.addLast(text)
+        if (!textToSpeechInitializing && textToSpeech == null) {
+            initializeTextToSpeech()
+        }
+        if (textToSpeechInitializing) {
+            if (pendingTextToSpeechRequests.size == 1) {
+                snackbar(getString(R.string.snackbar_tts_initializing))
+            }
+            return
+        }
+        // Initialization already failed, so notify the user and clear pending requests.
+        pendingTextToSpeechRequests.clear()
+        snackbar(getString(R.string.snackbar_tts_unavailable))
+    }
+
+    private fun speakTextNow(text: String) {
+        if (!textToSpeechReady) return
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f)
+        }
+        val utteranceId = "card_title_${'$'}{SystemClock.elapsedRealtime()}"
+        textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    }
+
+    private fun promptInstallTextToSpeechData() {
+        val installIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)
+        if (installIntent.resolveActivity(packageManager) != null) {
+            snackbarWithAction(
+                getString(R.string.snackbar_tts_missing_data),
+                getString(R.string.snackbar_tts_missing_data_action)
+            ) {
+                startActivity(installIntent)
+            }
+        } else {
+            snackbar(getString(R.string.snackbar_tts_install_error))
+        }
+    }
+
     private fun showCardEditor(
+        initialTitle: String,
         initialSnippet: String,
         isNew: Boolean,
-        onSave: (snippet: String) -> Unit,
+        onSave: (title: String, snippet: String) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_card, null, false)
+        val titleInput = dialogView.findViewById<EditText>(R.id.inputTitle)
         val snippetInput = dialogView.findViewById<EditText>(R.id.inputSnippet)
+        titleInput.setText(initialTitle)
         snippetInput.setText(initialSnippet)
 
         val builder = AlertDialog.Builder(this)
             .setTitle(if (isNew) getString(R.string.dialog_add_card_title) else getString(R.string.dialog_edit_card_title))
             .setView(dialogView)
             .setPositiveButton(R.string.dialog_save) { _, _ ->
-                onSave(snippetInput.text.toString())
+                onSave(titleInput.text.toString(), snippetInput.text.toString())
             }
             .setNegativeButton(android.R.string.cancel, null)
         if (onDelete != null) {
@@ -2551,6 +2651,13 @@ class MainActivity : AppCompatActivity() {
         snack.show()
     }
 
+    private fun snackbarWithAction(msg: String, actionText: String, action: () -> Unit) {
+        val snack = Snackbar.make(findViewById(R.id.content), msg, Snackbar.LENGTH_LONG)
+        if (flowBar.isVisible) snack.anchorView = flowBar
+        snack.setAction(actionText) { action() }
+        snack.show()
+    }
+
     private fun buildExportFileName(): String {
         val formatter = SimpleDateFormat(EXPORT_FILE_DATE_PATTERN, Locale.US)
         val timestamp = formatter.format(Date())
@@ -3159,6 +3266,16 @@ class MainActivity : AppCompatActivity() {
         saveState()
     }
 
+    override fun onDestroy() {
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
+        textToSpeech = null
+        textToSpeechReady = false
+        textToSpeechInitializing = false
+        pendingTextToSpeechRequests.clear()
+        super.onDestroy()
+    }
+
     private fun defaultFlowName(index: Int): String =
         getString(R.string.default_flow_name, index + 1)
 
@@ -3176,7 +3293,8 @@ class MainActivity : AppCompatActivity() {
             val adapter = CardsAdapter(
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
+                onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) },
+                onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
             adapter.setBodyTextSize(cardFontSizeSp)
             recycler.adapter = adapter
