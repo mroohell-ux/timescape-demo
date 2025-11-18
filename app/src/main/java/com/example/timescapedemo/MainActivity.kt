@@ -638,7 +638,12 @@ class MainActivity : AppCompatActivity() {
             }
             flowChipGroup.addView(chip)
         }
+        updateFlowBarVisibility()
         centerSelectedChip(safeIndex)
+    }
+
+    private fun updateFlowBarVisibility() {
+        flowBar.isVisible = flows.size > 1
     }
 
     private fun resetFlowChipDragState() {
@@ -696,6 +701,7 @@ class MainActivity : AppCompatActivity() {
         flowShuffleStates.remove(targetId)
         flowControllers.remove(sourceId)?.dispose()
         flows.removeAt(sourceIndex)
+        updateFlowBarVisibility()
         flowAdapter.notifyItemRemoved(sourceIndex)
         val newTargetIndex = flows.indexOfFirst { it.id == targetId }.coerceAtLeast(0)
         flowAdapter.notifyItemChanged(newTargetIndex)
@@ -810,6 +816,7 @@ class MainActivity : AppCompatActivity() {
     private fun addFlow(name: String) {
         val flow = CardFlow(id = nextFlowId++, name = name)
         flows += flow
+        updateFlowBarVisibility()
         flowAdapter.notifyItemInserted(flows.lastIndex)
         selectedFlowIndex = flows.lastIndex
         renderFlowChips(selectedFlowIndex)
@@ -841,6 +848,7 @@ class MainActivity : AppCompatActivity() {
         }
         val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
+        updateFlowBarVisibility()
         flowShuffleStates.remove(removed.id)
         removed.cards.forEach(::disposeCardResources)
         flowControllers.remove(removed.id)
@@ -3158,6 +3166,7 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
+            val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
@@ -3171,7 +3180,7 @@ class MainActivity : AppCompatActivity() {
             )
             adapter.setBodyTextSize(cardFontSizeSp)
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter)
+            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
             return holder
         }
 
@@ -3194,7 +3203,8 @@ class MainActivity : AppCompatActivity() {
             view: View,
             val recycler: RecyclerView,
             val layoutManager: RightRailFlowLayoutManager,
-            val adapter: CardsAdapter
+            val adapter: CardsAdapter,
+            val cardCountView: TextView
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
 
@@ -3204,7 +3214,7 @@ class MainActivity : AppCompatActivity() {
                     flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
-                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter)
+                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView)
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 controller.updateDisplayedCards(
@@ -3248,9 +3258,12 @@ class MainActivity : AppCompatActivity() {
         val flowId: Long,
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
-        val adapter: CardsAdapter
+        val adapter: CardsAdapter,
+        val cardCountView: TextView
     ) {
         private var activeQuery: String = ""
+        private var indicatorTotal: Int = 0
+        private val selectionCallback: (Int?) -> Unit = { index -> updateCardCounter(index) }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
@@ -3261,6 +3274,8 @@ class MainActivity : AppCompatActivity() {
 
         init {
             recycler.addOnScrollListener(scrollListener)
+            layoutManager.selectionListener = selectionCallback
+            cardCountView.isVisible = false
         }
 
         fun updateDisplayedCards(
@@ -3271,6 +3286,11 @@ class MainActivity : AppCompatActivity() {
         ) {
             activeQuery = query
             val displayed = filterCardsForSearch(flow.cards, query)
+            indicatorTotal = displayed.size
+            if (indicatorTotal == 0) {
+                cardCountView.isVisible = false
+                cardCountView.text = ""
+            }
             adapter.submitList(displayed) {
                 handleListCommitted(flow, displayed, shouldRestoreState, shouldScrollToTop)
             }
@@ -3319,6 +3339,9 @@ class MainActivity : AppCompatActivity() {
 
         fun dispose() {
             recycler.removeOnScrollListener(scrollListener)
+            if (layoutManager.selectionListener === selectionCallback) {
+                layoutManager.selectionListener = null
+            }
         }
 
         private fun handleListCommitted(
@@ -3330,6 +3353,8 @@ class MainActivity : AppCompatActivity() {
             if (displayed.isEmpty()) {
                 layoutManager.clearFocus()
                 layoutManager.restoreState(0, false)
+                cardCountView.isVisible = false
+                cardCountView.text = ""
                 return
             }
             if (activeQuery.isBlank()) {
@@ -3347,6 +3372,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             ensureMainCard(flow)
+            updateCardCounter(layoutManager.currentSelectionIndex())
         }
 
         private fun ensureMainCard(flow: CardFlow) {
@@ -3358,6 +3384,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun owningFlow(): CardFlow? = flows.firstOrNull { it.id == flowId }
+
+        private fun updateCardCounter(selectionIndex: Int?) {
+            if (indicatorTotal <= 0) {
+                cardCountView.isVisible = false
+                cardCountView.text = ""
+                return
+            }
+            val safeIndex = (
+                selectionIndex ?: layoutManager.nearestIndex()
+            ).coerceIn(0, indicatorTotal - 1)
+            cardCountView.text = "${safeIndex + 1}/$indicatorTotal"
+            cardCountView.isVisible = true
+        }
     }
 
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {

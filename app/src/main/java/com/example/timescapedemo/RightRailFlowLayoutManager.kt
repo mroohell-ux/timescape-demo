@@ -58,6 +58,12 @@ class RightRailFlowLayoutManager(
     private var scrollYPx = 0f
     private var pendingRestore: PendingRestore? = null
 
+    var selectionListener: ((Int?) -> Unit)? = null
+        set(value) {
+            field = value
+            value?.invoke(currentSelectionIndex())
+        }
+
     // Precomputed helpers to reduce per-frame work
     private val gainLookup = GainLookup(itemPitchPx * 0.95f)
     private val widthQuantizer = WidthQuantizer()
@@ -100,18 +106,40 @@ class RightRailFlowLayoutManager(
         return (desiredScroll - scrollYPx).toInt()
     }
 
-    fun currentSelectionIndex(): Int? = selectedIndex
+    fun currentSelectionIndex(): Int? {
+        val sel = selectedIndex ?: return null
+        if (itemCount == 0) return null
+        return sel.coerceIn(0, itemCount - 1)
+    }
 
     fun hasSelection(): Boolean = selectedIndex != null
 
     fun focus(index: Int) {
-        if (selectedIndex == index && focusProgress >= 0.999f) return
-        selectedIndex = index
+        if (itemCount == 0) return
+        val clamped = index.coerceIn(0, max(0, itemCount - 1))
+        if (selectedIndex == clamped && focusProgress >= 0.999f) return
+        val changed = selectedIndex != clamped
+        selectedIndex = clamped
+        if (changed) notifySelectionChanged()
         animateFocus(1f)
     }
-    fun clearFocus() {
+    fun clearFocus(immediate: Boolean = false) {
         if (selectedIndex == null && focusProgress == 0f) return
-        animateFocus(0f) { selectedIndex = null }
+        if (immediate) {
+            val hadSelection = selectedIndex != null
+            focusAnimator?.cancel()
+            focusAnimator = null
+            focusProgress = 0f
+            selectedIndex = null
+            requestLayout()
+            if (hadSelection) notifySelectionChanged()
+        } else {
+            animateFocus(0f) {
+                val hadSelection = selectedIndex != null
+                selectedIndex = null
+                if (hadSelection) notifySelectionChanged()
+            }
+        }
     }
 
     private fun animateFocus(to: Float, end: (() -> Unit)? = null) {
@@ -319,7 +347,9 @@ class RightRailFlowLayoutManager(
 
     override fun scrollVerticallyBy(dy: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
         if (itemCount == 0 || height == 0) return 0
-        if (dy != 0 && selectedIndex != null && focusProgress > 0f) clearFocus()
+        if (dy != 0 && selectedIndex != null && focusProgress > 0f) {
+            clearFocus(immediate = true)
+        }
 
         val old = scrollYPx
         val newY = (old + dy).coerceIn(minScroll(), maxScroll())
@@ -347,13 +377,21 @@ class RightRailFlowLayoutManager(
         scrollYPx = desired.coerceIn(minScroll(), maxScroll())
         focusAnimator?.cancel()
         if (focus) {
+            val changed = selectedIndex != clamped
             selectedIndex = clamped
             focusProgress = 1f
+            if (changed) notifySelectionChanged()
         } else {
+            val hadSelection = selectedIndex != null
             selectedIndex = null
             focusProgress = 0f
+            if (hadSelection) notifySelectionChanged()
         }
         return true
+    }
+
+    private fun notifySelectionChanged() {
+        selectionListener?.invoke(currentSelectionIndex())
     }
 
     override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {
