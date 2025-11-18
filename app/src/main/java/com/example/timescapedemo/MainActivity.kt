@@ -2693,10 +2693,9 @@ class MainActivity : AppCompatActivity() {
                 val flowId = nextFlowId++
                 val flowName = importedFlow.name.takeIf { it.isNotBlank() }
                     ?: defaultFlowName(baseIndex + index)
-                val newFlow = CardFlow(id = flowId, name = flowName)
-                importedFlow.cards.forEach { importedCard ->
+                val newCards = importedFlow.cards.map { importedCard ->
                     val cardId = nextCardId++
-                    val card = CardItem(
+                    CardItem(
                         id = cardId,
                         title = importedCard.title,
                         snippet = importedCard.snippet,
@@ -2705,12 +2704,16 @@ class MainActivity : AppCompatActivity() {
                         handwriting = importedCard.handwriting,
                         imageHandwriting = importedCard.imageHandwriting
                     )
-                    newFlow.cards += card
-                }
-                insertedCards += newFlow.cards.size
-                newFlow.lastViewedCardIndex = 0
-                newFlow.lastViewedCardId = newFlow.cards.firstOrNull()?.id
-                newFlow.lastViewedCardFocused = false
+                }.toMutableList()
+                val newFlow = CardFlow(
+                    id = flowId,
+                    name = flowName,
+                    cards = newCards,
+                    lastViewedCardId = newCards.firstOrNull()?.id,
+                    lastViewedCardIndex = 0,
+                    lastViewedCardFocused = false
+                )
+                insertedCards += newCards.size
                 prepareFlowCards(newFlow)
                 flows += newFlow
             }
