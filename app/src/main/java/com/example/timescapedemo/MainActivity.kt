@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.text.InputType
+import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
@@ -128,6 +129,8 @@ class MainActivity : AppCompatActivity() {
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var lastFlowChipTapId: Long = -1L
     private var lastFlowChipTapTime: Long = 0L
+    private var textToSpeech: TextToSpeech? = null
+    private var textToSpeechReady: Boolean = false
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -260,6 +263,13 @@ class MainActivity : AppCompatActivity() {
         pendingImageCardRequest = ImageCardRequest.fromBundle(
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
         )
+
+        textToSpeech = TextToSpeech(this) { status ->
+            textToSpeechReady = status == TextToSpeech.SUCCESS
+            if (textToSpeechReady) {
+                textToSpeech?.language = Locale.getDefault()
+            }
+        }
 
         drawerLayout = findViewById(R.id.drawerLayout)
         val navigationView = findViewById<NavigationView>(R.id.navigationView)
@@ -1025,11 +1035,12 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_add_flow_first))
             return
         }
-        showCardEditor(initialSnippet = "", isNew = true, onSave = { snippet ->
+        showCardEditor(initialTitle = "", initialSnippet = "", isNew = true, onSave = { title, snippet ->
+            val finalTitle = title.trim()
             val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
             val card = CardItem(
                 id = nextCardId++,
-                title = "",
+                title = finalTitle,
                 snippet = finalSnippet,
                 updatedAt = System.currentTimeMillis()
             )
@@ -1140,7 +1151,8 @@ class MainActivity : AppCompatActivity() {
             )
             }
             else -> {
-            showCardEditor(initialSnippet = card.snippet, isNew = false, onSave = { newSnippet ->
+            showCardEditor(initialTitle = card.title, initialSnippet = card.snippet, isNew = false, onSave = { newTitle, newSnippet ->
+                card.title = newTitle.trim()
                 val snippetValue = newSnippet.trim()
                 if (snippetValue.isNotEmpty()) card.snippet = snippetValue
                 card.updatedAt = System.currentTimeMillis()
@@ -1343,21 +1355,38 @@ class MainActivity : AppCompatActivity() {
         HandwritingFormat.WEBP -> "image/webp"
     }
 
+    private fun speakCardTitle(card: CardItem) {
+        val text = card.title.trim()
+        if (text.isEmpty()) return
+        if (!textToSpeechReady) {
+            snackbar(getString(R.string.snackbar_tts_unavailable))
+            return
+        }
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f)
+        }
+        val utteranceId = "card_title_${'$'}{card.id}_${'$'}{SystemClock.elapsedRealtime()}"
+        textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    }
+
     private fun showCardEditor(
+        initialTitle: String,
         initialSnippet: String,
         isNew: Boolean,
-        onSave: (snippet: String) -> Unit,
+        onSave: (title: String, snippet: String) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_card, null, false)
+        val titleInput = dialogView.findViewById<EditText>(R.id.inputTitle)
         val snippetInput = dialogView.findViewById<EditText>(R.id.inputSnippet)
+        titleInput.setText(initialTitle)
         snippetInput.setText(initialSnippet)
 
         val builder = AlertDialog.Builder(this)
             .setTitle(if (isNew) getString(R.string.dialog_add_card_title) else getString(R.string.dialog_edit_card_title))
             .setView(dialogView)
             .setPositiveButton(R.string.dialog_save) { _, _ ->
-                onSave(snippetInput.text.toString())
+                onSave(titleInput.text.toString(), snippetInput.text.toString())
             }
             .setNegativeButton(android.R.string.cancel, null)
         if (onDelete != null) {
@@ -3159,6 +3188,14 @@ class MainActivity : AppCompatActivity() {
         saveState()
     }
 
+    override fun onDestroy() {
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
+        textToSpeech = null
+        textToSpeechReady = false
+        super.onDestroy()
+    }
+
     private fun defaultFlowName(index: Int): String =
         getString(R.string.default_flow_name, index + 1)
 
@@ -3176,7 +3213,8 @@ class MainActivity : AppCompatActivity() {
             val adapter = CardsAdapter(
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) }
+                onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) },
+                onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
             adapter.setBodyTextSize(cardFontSizeSp)
             recycler.adapter = adapter

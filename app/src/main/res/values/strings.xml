@@ -3,6 +3,7 @@
     <string name="dialog_add_card_title">Add card</string>
     <string name="dialog_edit_card_title">Edit card</string>
     <string name="dialog_save">Save</string>
+    <string name="dialog_title_hint">Title (optional)</string>
     <string name="dialog_snippet_hint">Details</string>
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
@@ -60,6 +61,7 @@
     <string name="snackbar_import_cancelled">Import cancelled</string>
     <string name="snackbar_export_success">%1$s across %2$s.</string>
     <string name="snackbar_import_success">Imported %1$s across %2$s.</string>
+    <string name="snackbar_tts_unavailable">Text to speech is unavailable right now.</string>
     <plurals name="count_notes">
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>
@@ -135,6 +137,7 @@
     <string name="image_card_annotation_saved">Saved annotated image</string>
     <string name="image_card_annotation_failed">Couldnt save that edit.</string>
     <string name="image_card_annotation_load_failed">Couldnt open that photo.</string>
+    <string name="card_title_speak_content_desc">Speak "%1$s"</string>
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>
