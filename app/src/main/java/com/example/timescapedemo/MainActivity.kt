@@ -1285,15 +1285,18 @@ class MainActivity : AppCompatActivity() {
             contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
             val width = boundsOptions.outWidth
             val height = boundsOptions.outHeight
-            if (width <= 0 || height <= 0) return null
-            val metrics = resources.displayMetrics
-            val targetEdge = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1024)
-            val sample = computeSample(width, height, targetEdge)
-            val decodeOptions = BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+            if (width <= 0 || height <= 0) {
+                null
+            } else {
+                val metrics = resources.displayMetrics
+                val targetEdge = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1024)
+                val sample = computeSample(width, height, targetEdge)
+                val decodeOptions = BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
             }
-            contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
         } catch (_: Exception) {
             null
         }
