@@ -638,6 +638,7 @@ class MainActivity : AppCompatActivity() {
             }
             flowChipGroup.addView(chip)
         }
+        flowBar.isVisible = flows.size > 1
         centerSelectedChip(safeIndex)
     }
 

@@ -109,9 +109,17 @@ class RightRailFlowLayoutManager(
         selectedIndex = index
         animateFocus(1f)
     }
-    fun clearFocus() {
+    fun clearFocus(immediate: Boolean = false) {
         if (selectedIndex == null && focusProgress == 0f) return
-        animateFocus(0f) { selectedIndex = null }
+        if (immediate) {
+            focusAnimator?.cancel()
+            focusAnimator = null
+            focusProgress = 0f
+            selectedIndex = null
+            requestLayout()
+        } else {
+            animateFocus(0f) { selectedIndex = null }
+        }
     }
 
     private fun animateFocus(to: Float, end: (() -> Unit)? = null) {
@@ -319,7 +327,9 @@ class RightRailFlowLayoutManager(
 
     override fun scrollVerticallyBy(dy: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
         if (itemCount == 0 || height == 0) return 0
-        if (dy != 0 && selectedIndex != null && focusProgress > 0f) clearFocus()
+        if (dy != 0 && selectedIndex != null && focusProgress > 0f) {
+            clearFocus(immediate = true)
+        }
 
         val old = scrollYPx
         val newY = (old + dy).coerceIn(minScroll(), maxScroll())
