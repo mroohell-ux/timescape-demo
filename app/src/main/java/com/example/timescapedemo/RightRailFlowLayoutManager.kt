@@ -12,16 +12,15 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * Timescape-like vertical flow with variable-height cards:
+ * Timescape-like floating stack with variable-height cards:
  *  - Height grows with text (wrap-content), capped at 2/3 of the screen.
- *  - Width still follows center "gain" + focus animation.
- *  - Only near neighbors overlap slightly (itemPitchPx).
- *  - Cards remain STRAIGHT (no rotation).
+ *  - Cards follow a diagonal rail that leans toward the lower-right of the screen.
+ *  - Farther cards shrink, fade, and shift backward to create a depthy glass-stack look.
+ *  - Near cards bloom and sit above neighbors; focus animation still enlarges the active card.
  */
 class RightRailFlowLayoutManager(
     private val baseSidePx: Int,          // width near center (non-focused)
@@ -32,20 +31,9 @@ class RightRailFlowLayoutManager(
     private val bottomInsetPx: Int = 0,
 
     // Visual tuning
-    private val minEdgeScale: Float = 0.72f,
-    private val edgeAlphaMin: Float = 0.30f,
-    private val depthScaleDrop: Float = 0.05f,
-
-    // Horizontal rail shaping (controls inflow/outflow direction)
-    private val edgeRightShiftPx: Int = 48,     // far cards to the RIGHT by this many px
-    private val centerLeftShiftPx: Int = 0,     // center card stays centered on the rail
-    private val railCurvePow: Float = 1.1f,     // curvature; 1 = linear, >1 stronger S-curve
-
-    // S-curve styling
-    private val curveRotationRadiusItems: Float = 4.5f,
-    private val curveRotationPow: Float = 1.12f,
-    private val curveMaxRotationDeg: Float = 9f,
-    private val curveExtraRightShiftPx: Int = 32
+    private val minEdgeScale: Float = 0.78f,
+    private val edgeAlphaMin: Float = 0.45f,
+    private val depthScaleDrop: Float = 0.18f
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
 
     // focus animation state
@@ -68,11 +56,7 @@ class RightRailFlowLayoutManager(
     private val gainLookup = GainLookup(itemPitchPx * 0.95f)
     private val widthQuantizer = WidthQuantizer()
     private val scatterCalculator = ScatterCalculator()
-
-    private data class CurvePlacement(
-        val extraX: Float,
-        val rotationDeg: Float
-    )
+    private var resolvedCameraDistance = 0f
 
     private data class ScatterOffsets(
         val shiftX: Float,
@@ -258,7 +242,7 @@ class RightRailFlowLayoutManager(
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
         val cy = screenCenter()
-        val baseX = railX()
+        val rail = railX()
         val yT = yTop(); val yB = yBottom()
 
         // Visible window of indices
@@ -283,9 +267,6 @@ class RightRailFlowLayoutManager(
         // Size growth radius (how quickly a card "blooms" near center)
         val heightCap = (height * 2f / 3f).roundToInt()
 
-        val nearest = nearestIndex()
-        val nearestY = yT + nearest * itemPitchPx - scrollYPx
-
         for (i in firstIdx..lastIdx) {
             val child = findViewByPosition(i) ?: recycler.getViewForPosition(i).also { addView(it) }
             val cache = ensureCache(child)
@@ -297,18 +278,21 @@ class RightRailFlowLayoutManager(
             // Gain ~ 1 at center, ~ 0 at edges
             val gain = gainLookup.gainFor(dist)
 
-            // ---- X rail shaping: edges right, center left (S-curve) ----
-            val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
-            val toLeft  = gain * centerLeftShiftPx
-            val curve = computeCurvePlacement(py, cy)
-            val px = baseX + toRight - toLeft + curve.extraX
+            val progress = stackProgress(py)
+            val closeness = 1f - progress
+
+            val stackAnchorX = (rail - baseSidePx * STACK_BASE_OFFSET_FRACTION)
+            val diagonalShift = baseSidePx * STACK_DIAGONAL_RANGE_FRACTION * progress
+            val pxBase = stackAnchorX + diagonalShift
 
             val isSelected = (selectedIndex == i)
 
-            // Width: far small -> base -> (if selected) focused
-            val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
-            val easedGain = interp.getInterpolation(gain)
-            var side = (edgeSide + (baseSidePx - edgeSide) * easedGain).roundToInt()
+            val clampedMinWidth = minEdgeScale.coerceIn(0.2f, 0.98f)
+            var sideFraction = clampedMinWidth + (1f - clampedMinWidth) * closeness
+            if (isSelected) {
+                sideFraction = (sideFraction + (1f - sideFraction) * focusProgress).coerceIn(clampedMinWidth, 1f)
+            }
+            var side = (baseSidePx * sideFraction).roundToInt()
             if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
             side = widthQuantizer.snap(side)
 
@@ -320,16 +304,35 @@ class RightRailFlowLayoutManager(
 
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
+            val px = pxBase.coerceIn(
+                paddingLeft + w / 2f,
+                width - paddingRight - w / 2f
+            )
             val l = (px - w / 2f).toInt()
             val t = (py - h / 2f).toInt()
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
-            // Alpha / depth (z-order so nearer items render above)
-            child.alpha = 0.92f + 0.08f * gain
-            val dIdx = abs(nearestY - py) / itemPitchPx
-            val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
-            child.scaleX = depthS
-            child.scaleY = depthS
+            if (resolvedCameraDistance == 0f && child.resources != null) {
+                val density = child.resources.displayMetrics.density
+                resolvedCameraDistance = CAMERA_DISTANCE_DP * density
+            }
+            if (resolvedCameraDistance > 0f) child.cameraDistance = resolvedCameraDistance
+
+            val clampedAlphaMin = edgeAlphaMin.coerceIn(0f, 1f)
+            val alpha = if (isSelected) 1f else clampedAlphaMin + (1f - clampedAlphaMin) * closeness
+
+            val drop = depthScaleDrop.coerceIn(0f, 0.8f)
+            val minScale = max(0.1f, 1f - drop)
+            val maxScale = 1f + drop
+            val scale = if (isSelected) maxScale + focusProgress * 0.08f
+            else minScale + (maxScale - minScale) * closeness
+
+            val baseRotationZ = STACK_ROTATION_Z_FAR + (STACK_ROTATION_Z_NEAR - STACK_ROTATION_Z_FAR) * closeness
+            val rotationY = STACK_ROTATION_Y_FAR + (STACK_ROTATION_Y_NEAR - STACK_ROTATION_Y_FAR) * closeness
+
+            val zBase = STACK_FAR_Z + closeness * (STACK_NEAR_Z - STACK_FAR_Z)
+            val z = if (isSelected) STACK_NEAR_Z + 600f else zBase
+
             val scatter = scatterCalculator.compute(
                 index = i,
                 gain = gain,
@@ -337,11 +340,19 @@ class RightRailFlowLayoutManager(
                 isSelected = isSelected,
                 focusProgress = focusProgress
             )
+            val verticalOverlap = -baseSidePx * STACK_VERTICAL_OVERLAP_FRACTION * progress
+
+            child.pivotX = w * 0.3f
+            child.pivotY = h * 0.45f
+            child.alpha = alpha
+            child.scaleX = scale
+            child.scaleY = scale
             child.translationX = scatter.shiftX
-            child.translationY = scatter.shiftY
-            child.rotation = curve.rotationDeg + scatter.rotationDeg
-            val z = if (isSelected) 6000f else (1000f - dist / 10f)
-            child.translationZ = z; child.elevation = z
+            child.translationY = scatter.shiftY + verticalOverlap
+            child.rotation = baseRotationZ + scatter.rotationDeg
+            child.rotationY = rotationY
+            child.translationZ = z
+            child.elevation = z
         }
     }
 
@@ -400,17 +411,12 @@ class RightRailFlowLayoutManager(
         return PointF(0f, dir)
     }
 
-    private fun computeCurvePlacement(py: Float, centerY: Float): CurvePlacement {
-        if (itemPitchPx == 0) return CurvePlacement(0f, 0f)
-
-        val signedStepsFromCenter = (py - centerY) / itemPitchPx
-        val direction = if (signedStepsFromCenter >= 0f) 1f else -1f
-        val magnitude = abs(signedStepsFromCenter) / curveRotationRadiusItems
-        val eased = magnitude.coerceAtMost(1f).pow(curveRotationPow)
-        val rotation = -direction * eased * curveMaxRotationDeg
-        val extraRight = eased * curveExtraRightShiftPx
-
-        return CurvePlacement(extraRight, rotation)
+    private fun stackProgress(py: Float): Float {
+        val start = yTop()
+        val bottomLimit = height - paddingBottom - bottomInsetPx - baseSidePx * STACK_BOTTOM_BUFFER_FRACTION
+        val span = (bottomLimit - start).coerceAtLeast(1f)
+        val raw = (py - start) / span
+        return raw.coerceIn(0f, 1f)
     }
 
     private class GainLookup(private val focusRadiusPx: Float) {
@@ -475,5 +481,19 @@ class RightRailFlowLayoutManager(
 
             return ScatterOffsets(shiftX, shiftY, rotation)
         }
+    }
+
+    private companion object {
+        private const val STACK_BASE_OFFSET_FRACTION = 0.38f
+        private const val STACK_DIAGONAL_RANGE_FRACTION = 0.42f
+        private const val STACK_VERTICAL_OVERLAP_FRACTION = 0.08f
+        private const val STACK_BOTTOM_BUFFER_FRACTION = 0.35f
+        private const val STACK_NEAR_Z = 6200f
+        private const val STACK_FAR_Z = 900f
+        private const val STACK_ROTATION_Y_NEAR = -18f
+        private const val STACK_ROTATION_Y_FAR = 8f
+        private const val STACK_ROTATION_Z_NEAR = -6f
+        private const val STACK_ROTATION_Z_FAR = 3f
+        private const val CAMERA_DISTANCE_DP = 6400f
     }
 }
