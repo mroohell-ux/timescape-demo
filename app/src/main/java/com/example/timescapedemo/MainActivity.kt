@@ -101,6 +101,7 @@ class MainActivity : AppCompatActivity() {
     private var searchView: SearchView? = null
     private var searchQueryText: String = ""
     private var searchQueryNormalized: String = ""
+    private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -543,6 +544,7 @@ class MainActivity : AppCompatActivity() {
                 view.post {
                     view.requestFocus()
                     expandSearchViewToToolbarWidth(view)
+                    setToolbarItemsHiddenForSearch(true)
                 }
                 return true
             }
@@ -552,6 +554,7 @@ class MainActivity : AppCompatActivity() {
                 if (searchQueryText.isNotEmpty()) {
                     view.setQuery("", false)
                 }
+                setToolbarItemsHiddenForSearch(false)
                 return true
             }
         })
@@ -610,6 +613,26 @@ class MainActivity : AppCompatActivity() {
         layoutParams.width = targetWidth
         view.layoutParams = layoutParams
         view.requestLayout()
+    }
+
+    private fun setToolbarItemsHiddenForSearch(hidden: Boolean) {
+        val menu = toolbar.menu
+        if (hidden) {
+            menuVisibilityCacheDuringSearch.clear()
+            for (i in 0 until menu.size()) {
+                val item = menu.getItem(i)
+                if (item.itemId == R.id.action_search_cards) continue
+                menuVisibilityCacheDuringSearch[item.itemId] = item.isVisible
+                item.isVisible = false
+            }
+        } else {
+            for ((id, wasVisible) in menuVisibilityCacheDuringSearch) {
+                val item = menu.findItem(id) ?: continue
+                item.isVisible = wasVisible
+            }
+            menuVisibilityCacheDuringSearch.clear()
+            updateShuffleMenuState()
+        }
     }
 
     private fun updateShuffleMenuState() {
