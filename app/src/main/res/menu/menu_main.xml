@@ -23,6 +23,12 @@
         app:showAsAction="always"/>
 
     <item
+        android:id="@+id/action_add_image_card"
+        android:title="@string/menu_add_image_card"
+        android:icon="@android:drawable/ic_menu_gallery"
+        app:showAsAction="always"/>
+
+    <item
         android:id="@+id/action_add_handwriting"
         android:title="@string/menu_add_handwriting"
         android:icon="@drawable/ic_handwriting"
