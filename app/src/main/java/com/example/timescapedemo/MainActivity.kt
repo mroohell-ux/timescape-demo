@@ -513,6 +513,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         searchView = view
+        view.maxWidth = resources.displayMetrics.widthPixels
         view.queryHint = getString(R.string.search_cards_hint)
         view.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         view.imeOptions = EditorInfo.IME_ACTION_SEARCH
