@@ -62,6 +62,7 @@
     <string name="snackbar_export_success">%1$s across %2$s.</string>
     <string name="snackbar_import_success">Imported %1$s across %2$s.</string>
     <string name="snackbar_tts_unavailable">Text to speech is unavailable right now.</string>
+    <string name="snackbar_tts_initializing">Preparing text to speech…</string>
     <plurals name="count_notes">
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>

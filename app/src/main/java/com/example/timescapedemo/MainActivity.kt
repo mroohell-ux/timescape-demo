@@ -84,6 +84,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.collections.ArrayDeque
 
 class MainActivity : AppCompatActivity() {
 
@@ -131,6 +132,8 @@ class MainActivity : AppCompatActivity() {
     private var lastFlowChipTapTime: Long = 0L
     private var textToSpeech: TextToSpeech? = null
     private var textToSpeechReady: Boolean = false
+    private var textToSpeechInitializing: Boolean = false
+    private val pendingTextToSpeechRequests: ArrayDeque<String> = ArrayDeque()
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -264,12 +267,7 @@ class MainActivity : AppCompatActivity() {
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
         )
 
-        textToSpeech = TextToSpeech(this) { status ->
-            textToSpeechReady = status == TextToSpeech.SUCCESS
-            if (textToSpeechReady) {
-                textToSpeech?.language = Locale.getDefault()
-            }
-        }
+        initializeTextToSpeech()
 
         drawerLayout = findViewById(R.id.drawerLayout)
         val navigationView = findViewById<NavigationView>(R.id.navigationView)
@@ -1355,17 +1353,72 @@ class MainActivity : AppCompatActivity() {
         HandwritingFormat.WEBP -> "image/webp"
     }
 
+    private fun initializeTextToSpeech() {
+        if (textToSpeech != null || textToSpeechInitializing) return
+        textToSpeechReady = false
+        textToSpeechInitializing = true
+        textToSpeech = TextToSpeech(this) { status ->
+            textToSpeechReady = status == TextToSpeech.SUCCESS
+            textToSpeechInitializing = false
+            if (textToSpeechReady) {
+                val languageResult = textToSpeech?.setLanguage(Locale.getDefault())
+                    ?: TextToSpeech.LANG_MISSING_DATA
+                if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                    languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    textToSpeechReady = false
+                    pendingTextToSpeechRequests.clear()
+                    textToSpeech?.shutdown()
+                    textToSpeech = null
+                    snackbar(getString(R.string.snackbar_tts_unavailable))
+                    return@TextToSpeech
+                }
+                playMostRecentPendingSpeech()
+            } else {
+                pendingTextToSpeechRequests.clear()
+                textToSpeech?.shutdown()
+                textToSpeech = null
+                snackbar(getString(R.string.snackbar_tts_unavailable))
+            }
+        }
+    }
+
+    private fun playMostRecentPendingSpeech() {
+        if (!textToSpeechReady || pendingTextToSpeechRequests.isEmpty()) return
+        val text = pendingTextToSpeechRequests.removeLast()
+        pendingTextToSpeechRequests.clear()
+        speakTextNow(text)
+    }
+
     private fun speakCardTitle(card: CardItem) {
         val text = card.title.trim()
         if (text.isEmpty()) return
-        if (!textToSpeechReady) {
-            snackbar(getString(R.string.snackbar_tts_unavailable))
+        initializeTextToSpeech()
+        if (textToSpeechReady) {
+            speakTextNow(text)
             return
         }
+        pendingTextToSpeechRequests.addLast(text)
+        if (!textToSpeechInitializing && textToSpeech == null) {
+            initializeTextToSpeech()
+        }
+        if (textToSpeechInitializing) {
+            if (pendingTextToSpeechRequests.size == 1) {
+                snackbar(getString(R.string.snackbar_tts_initializing))
+            }
+            return
+        }
+        // Initialization already failed, so notify the user and clear pending requests.
+        pendingTextToSpeechRequests.clear()
+        snackbar(getString(R.string.snackbar_tts_unavailable))
+    }
+
+    private fun speakTextNow(text: String) {
+        if (!textToSpeechReady) return
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f)
         }
-        val utteranceId = "card_title_${'$'}{card.id}_${'$'}{SystemClock.elapsedRealtime()}"
+        val utteranceId = "card_title_${'$'}{SystemClock.elapsedRealtime()}"
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
@@ -3193,6 +3246,8 @@ class MainActivity : AppCompatActivity() {
         textToSpeech?.shutdown()
         textToSpeech = null
         textToSpeechReady = false
+        textToSpeechInitializing = false
+        pendingTextToSpeechRequests.clear()
         super.onDestroy()
     }
 
