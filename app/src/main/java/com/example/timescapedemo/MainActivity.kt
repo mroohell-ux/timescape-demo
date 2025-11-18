@@ -2747,7 +2747,7 @@ class MainActivity : AppCompatActivity() {
         val prefix = flowName?.takeIf { it.isNotBlank() }?.let {
             "timescape_flow_${sanitizeFileComponent(it)}"
         } ?: "timescape_notes"
-        return "${'$'}prefix_${'$'}timestamp.json"
+        return "${prefix}_${timestamp}.json"
     }
 
     private fun sanitizeFileComponent(name: String): String {
