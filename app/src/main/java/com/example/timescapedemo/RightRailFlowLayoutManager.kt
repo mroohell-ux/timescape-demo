@@ -8,13 +8,11 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
  * Timescape-like vertical flow with variable-height cards:
@@ -67,7 +65,8 @@ class RightRailFlowLayoutManager(
     // Precomputed helpers to reduce per-frame work
     private val gainLookup = GainLookup(itemPitchPx * 0.95f)
     private val widthQuantizer = WidthQuantizer()
-    private val scatterCalculator = ScatterCalculator()
+    private val trigLookup = TrigLookup()
+    private val scatterCalculator = ScatterCalculator(trigLookup)
 
     private data class CurvePlacement(
         val extraX: Float,
@@ -148,15 +147,92 @@ class RightRailFlowLayoutManager(
         focusAnimator = ValueAnimator.ofFloat(from, to).apply {
             duration = if (to > from) 280 else 220
             interpolator = interp
-            addUpdateListener { focusProgress = it.animatedValue as Float; requestLayout() }
+            addUpdateListener {
+                focusProgress = it.animatedValue as Float
+                handleFocusProgressChanged()
+            }
             if (end != null) {
                 addListener(object : android.animation.AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: android.animation.Animator) {
-                        if (focusProgress <= 0.001f) end()
+                        if (focusProgress <= 0.001f) {
+                            end()
+                            handleFocusProgressChanged()
+                        }
                     }
                 })
             }
             start()
+        }
+    }
+
+    private fun handleFocusProgressChanged() {
+        if (childCount == 0 || width == 0 || height == 0) return
+
+        val cy = screenCenter()
+        val baseX = railX()
+        val yT = yTop()
+        val nearest = nearestIndex()
+        val nearestY = yT + nearest * itemPitchPx - scrollYPx
+
+        var needsLayout = false
+
+        val normalizedScroll = if (itemPitchPx == 0) 0f else scrollYPx / itemPitchPx
+
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            val position = getPosition(child)
+            val cache = ensureCache(child)
+
+            val py = yT + position * itemPitchPx - scrollYPx
+            val dist = abs(py - cy)
+            val gain = gainLookup.gainFor(dist)
+
+            val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
+            val toLeft = gain * centerLeftShiftPx
+            val curve = computeCurvePlacement(py, cy)
+            val px = baseX + toRight - toLeft + curve.extraX
+
+            val isSelected = selectedIndex == position
+
+            val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
+            val easedGain = interp.getInterpolation(gain)
+            var side = (edgeSide + (baseSidePx - edgeSide) * easedGain).roundToInt()
+            if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
+            side = widthQuantizer.snap(side)
+
+            val textChanged = applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
+            if (cache.lastQuantizedSide != side || textChanged) {
+                needsLayout = true
+                continue
+            }
+
+            val dIdx = abs(nearestY - py) / itemPitchPx
+            val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
+
+            val scatter = scatterCalculator.compute(
+                index = position,
+                gain = gain,
+                normalizedScroll = normalizedScroll,
+                isSelected = isSelected,
+                focusProgress = focusProgress
+            )
+
+            child.alpha = 0.92f + 0.08f * gain
+            child.scaleX = depthS
+            child.scaleY = depthS
+
+            val centerOffsetX = px - (child.left + child.right) / 2f
+            child.translationX = centerOffsetX + scatter.shiftX
+            child.translationY = scatter.shiftY
+            child.rotation = curve.rotationDeg + scatter.rotationDeg
+
+            val z = if (isSelected) 6000f else (1000f - dist / 10f)
+            child.translationZ = z
+            child.elevation = z
+        }
+
+        if (needsLayout) {
+            requestLayout()
         }
     }
 
@@ -449,7 +525,7 @@ class RightRailFlowLayoutManager(
         }
     }
 
-    private class ScatterCalculator {
+    private class ScatterCalculator(private val trigLookup: TrigLookup) {
         fun compute(
             index: Int,
             gain: Float,
@@ -461,9 +537,9 @@ class RightRailFlowLayoutManager(
             val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
             val tertiaryPhase = (index + normalizedScroll) * 0.55f
 
-            val waveA = sin(basePhase)
-            val waveB = cos(secondaryPhase)
-            val waveC = sin(tertiaryPhase + waveB * 0.35f)
+            val waveA = trigLookup.sin(basePhase)
+            val waveB = trigLookup.cos(secondaryPhase)
+            val waveC = trigLookup.sin(tertiaryPhase + waveB * 0.35f)
 
             val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
             val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
@@ -475,5 +551,30 @@ class RightRailFlowLayoutManager(
 
             return ScatterOffsets(shiftX, shiftY, rotation)
         }
+    }
+
+    private class TrigLookup(private val tableSize: Int = 2048) {
+        private val twoPi = (Math.PI * 2.0).toFloat()
+        private val halfPi = (Math.PI / 2.0).toFloat()
+        private val step = twoPi / tableSize
+        private val sinTable = FloatArray(tableSize) { index ->
+            kotlin.math.sin(step.toDouble() * index).toFloat()
+        }
+
+        fun sin(angle: Float): Float {
+            if (angle.isNaN()) return 0f
+            var wrapped = angle % twoPi
+            if (wrapped < 0f) wrapped += twoPi
+            val pos = wrapped / step
+            val baseIndex = pos.toInt()
+            val idx = baseIndex % tableSize
+            val next = (idx + 1) % tableSize
+            val frac = pos - baseIndex
+            val a = sinTable[idx]
+            val b = sinTable[next]
+            return a + (b - a) * frac
+        }
+
+        fun cos(angle: Float): Float = sin(angle + halfPi)
     }
 }
