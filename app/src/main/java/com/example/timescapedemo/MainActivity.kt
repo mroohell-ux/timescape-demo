@@ -1370,7 +1370,11 @@ class MainActivity : AppCompatActivity() {
                     pendingTextToSpeechRequests.clear()
                     textToSpeech?.shutdown()
                     textToSpeech = null
-                    snackbar(getString(R.string.snackbar_tts_unavailable))
+                    if (languageResult == TextToSpeech.LANG_MISSING_DATA) {
+                        promptInstallTextToSpeechData()
+                    } else {
+                        snackbar(getString(R.string.snackbar_tts_unavailable))
+                    }
                     return@TextToSpeech
                 }
                 playMostRecentPendingSpeech()
@@ -1420,6 +1424,20 @@ class MainActivity : AppCompatActivity() {
         }
         val utteranceId = "card_title_${'$'}{SystemClock.elapsedRealtime()}"
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    }
+
+    private fun promptInstallTextToSpeechData() {
+        val installIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)
+        if (installIntent.resolveActivity(packageManager) != null) {
+            snackbarWithAction(
+                getString(R.string.snackbar_tts_missing_data),
+                getString(R.string.snackbar_tts_missing_data_action)
+            ) {
+                startActivity(installIntent)
+            }
+        } else {
+            snackbar(getString(R.string.snackbar_tts_install_error))
+        }
     }
 
     private fun showCardEditor(
@@ -2630,6 +2648,13 @@ class MainActivity : AppCompatActivity() {
     private fun snackbar(msg: String) {
         val snack = Snackbar.make(findViewById(R.id.content), msg, Snackbar.LENGTH_SHORT)
         if (flowBar.isVisible) snack.anchorView = flowBar
+        snack.show()
+    }
+
+    private fun snackbarWithAction(msg: String, actionText: String, action: () -> Unit) {
+        val snack = Snackbar.make(findViewById(R.id.content), msg, Snackbar.LENGTH_LONG)
+        if (flowBar.isVisible) snack.anchorView = flowBar
+        snack.setAction(actionText) { action() }
         snack.show()
     }
 
