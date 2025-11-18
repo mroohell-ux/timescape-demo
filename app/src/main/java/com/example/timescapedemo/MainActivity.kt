@@ -1279,15 +1279,14 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_deleted_card))
     }
 
-    private fun loadEditableCardBitmap(image: CardImage): Bitmap? {
-        return try {
-            val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
-            val width = boundsOptions.outWidth
-            val height = boundsOptions.outHeight
-            if (width <= 0 || height <= 0) {
-                null
-            } else {
+    private fun loadEditableCardBitmap(image: CardImage): Bitmap? = try {
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
+        val width = boundsOptions.outWidth
+        val height = boundsOptions.outHeight
+        when {
+            width <= 0 || height <= 0 -> null
+            else -> {
                 val metrics = resources.displayMetrics
                 val targetEdge = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1024)
                 val sample = computeSample(width, height, targetEdge)
@@ -1295,11 +1294,13 @@ class MainActivity : AppCompatActivity() {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
-                contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
+                contentResolver.openInputStream(image.uri)?.use {
+                    BitmapFactory.decodeStream(it, null, decodeOptions)
+                }
             }
-        } catch (_: Exception) {
-            null
         }
+    } catch (_: Exception) {
+        null
     }
 
     private fun mimeTypeToHandwritingFormat(mimeType: String?): HandwritingFormat = when (mimeType?.lowercase(Locale.ROOT)) {
