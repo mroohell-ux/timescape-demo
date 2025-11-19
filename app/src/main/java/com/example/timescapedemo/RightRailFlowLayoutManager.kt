@@ -173,7 +173,7 @@ class RightRailFlowLayoutManager(
         return max(minScroll(), lastCentered)
     }
 
-    private val overScrollLimitPx = max(48f, itemPitchPx * 0.85f)
+    private val baseOverScrollLimitPx = max(48f, itemPitchPx * 1.1f)
 
     override fun onLayoutChildren(recycler: RecyclerView.Recycler, state: RecyclerView.State) {
         detachAndScrapAttachedViews(recycler)
@@ -455,26 +455,21 @@ class RightRailFlowLayoutManager(
     }
 
     private fun applyOverScrollResistance(candidate: Float): Float {
-        if (itemCount == 0 || height == 0) return candidate
+        if (itemCount == 0) return candidate
         val minBound = minScroll()
         val maxBound = maxScroll()
-        val minLimit = minBound - overScrollLimitPx
-        val maxLimit = maxBound + overScrollLimitPx
-        var value = candidate.coerceIn(minLimit, maxLimit)
-        if (value < minBound) {
-            val over = minBound - value
-            value = minBound - dampen(over)
-        } else if (value > maxBound) {
-            val over = value - maxBound
-            value = maxBound + dampen(over)
-        }
-        return value
+        val allowance = maxOverScrollPx()
+        if (allowance <= 0f) return candidate.coerceIn(minBound, maxBound)
+
+        val minLimit = minBound - allowance
+        val maxLimit = maxBound + allowance
+        return candidate.coerceIn(minLimit, maxLimit)
     }
 
-    private fun dampen(overScroll: Float): Float {
-        if (overScrollLimitPx <= 0f) return 0f
-        val clamped = overScroll.coerceIn(0f, overScrollLimitPx)
-        return clamped / 3f
+    private fun maxOverScrollPx(): Float {
+        val screenAllowance = if (height > 0) height * 0.9f else 0f
+        val pitchAllowance = itemPitchPx * 3f
+        return max(baseOverScrollLimitPx, max(screenAllowance, pitchAllowance))
     }
 
     private fun cancelSettleAnimation() {
