@@ -64,7 +64,8 @@ class RightRailFlowLayoutManager(
 
     // Precomputed helpers to reduce per-frame work
     private val gainLookup = GainLookup(itemPitchPx * 0.95f)
-    private val widthQuantizer = WidthQuantizer()
+    private val widthQuantizer = IntQuantizer()
+    private val heightQuantizer = IntQuantizer(stepPx = 12)
     private val scatterCalculator = ScatterCalculator()
 
     private data class CurvePlacement(
@@ -187,9 +188,10 @@ class RightRailFlowLayoutManager(
         cache: ChildCache,
         forceMeasure: Boolean
     ) {
+        val quantizedHeightCap = heightQuantizer.snap(maxHeightPx)
         val lp = child.layoutParams as RecyclerView.LayoutParams
         if (!forceMeasure && !child.isLayoutRequested &&
-            cache.lastQuantizedSide == widthPx && cache.lastMaxHeight == maxHeightPx
+            cache.lastQuantizedSide == widthPx && cache.lastMaxHeight == quantizedHeightCap
         ) {
             cache.lastMeasuredWidth = widthPx
             cache.lastQuantizedSide = widthPx
@@ -204,9 +206,9 @@ class RightRailFlowLayoutManager(
             needsMeasure = true
         }
 
-        if (cache.lastMaxHeight != maxHeightPx) {
-            cache.container?.setMaxHeightPx(maxHeightPx)
-            cache.lastMaxHeight = maxHeightPx
+        if (cache.lastMaxHeight != quantizedHeightCap) {
+            cache.container?.setMaxHeightPx(quantizedHeightCap)
+            cache.lastMaxHeight = quantizedHeightCap
             needsMeasure = true
         }
 
@@ -219,19 +221,36 @@ class RightRailFlowLayoutManager(
 
     private fun applyTextByGain(
         cache: ChildCache,
-        @Suppress("UNUSED_PARAMETER") gain: Float,
-        @Suppress("UNUSED_PARAMETER") focused: Boolean
+        gain: Float,
+        focused: Boolean
     ): Boolean {
-        var textChanged = false
-        val snippet = cache.snippet
+        val snippet = cache.snippet ?: return false
+        val targetBand = gainBandFor(gain, focused)
+        if (cache.lastGainBand == targetBand) return false
 
-        if (snippet != null && cache.lastSnippetMaxLines != Integer.MAX_VALUE) {
-            snippet.maxLines = Integer.MAX_VALUE
-            cache.lastSnippetMaxLines = Integer.MAX_VALUE
-            textChanged = true
+        val desiredLines = snippetLinesFor(targetBand)
+        if (snippet.maxLines != desiredLines) {
+            snippet.maxLines = desiredLines
         }
+        cache.lastSnippetMaxLines = desiredLines
+        cache.lastGainBand = targetBand
+        return true
+    }
 
-        return textChanged
+    private fun gainBandFor(gain: Float, focused: Boolean): GainBand {
+        if (focused) return GainBand.FOCUSED
+        return when {
+            gain >= 0.78f -> GainBand.PRIMARY
+            gain >= 0.55f -> GainBand.SECONDARY
+            else -> GainBand.TERTIARY
+        }
+    }
+
+    private fun snippetLinesFor(band: GainBand): Int = when (band) {
+        GainBand.FOCUSED -> Integer.MAX_VALUE
+        GainBand.PRIMARY -> 8
+        GainBand.SECONDARY -> 5
+        GainBand.TERTIARY -> 3
     }
 
     private fun ensureCache(child: View): ChildCache {
@@ -251,7 +270,8 @@ class RightRailFlowLayoutManager(
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
         var lastSnippetMaxLines: Int = -1,
-        var lastQuantizedSide: Int = -1
+        var lastQuantizedSide: Int = -1,
+        var lastGainBand: GainBand? = null
     )
 
     private fun layoutAll(recycler: RecyclerView.Recycler) {
@@ -439,12 +459,19 @@ class RightRailFlowLayoutManager(
         }
     }
 
-    private class WidthQuantizer(private val stepPx: Int = 4) {
+    private class IntQuantizer(private val stepPx: Int = 4) {
         fun snap(value: Int): Int {
             if (stepPx <= 1) return value
             val snapped = ((value + stepPx / 2) / stepPx) * stepPx
             return snapped.coerceAtLeast(0)
         }
+    }
+
+    private enum class GainBand {
+        FOCUSED,
+        PRIMARY,
+        SECONDARY,
+        TERTIARY
     }
 
     private class ScatterCalculator {
