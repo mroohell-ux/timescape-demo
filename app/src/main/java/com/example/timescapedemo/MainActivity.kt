@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -65,6 +66,15 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
+import com.google.android.gms.tasks.Task
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
+import com.google.mlkit.vision.digitalink.DigitalInkRecognition
+import com.google.mlkit.vision.digitalink.DigitalInkRecognitionModel
+import com.google.mlkit.vision.digitalink.DigitalInkRecognitionModelIdentifier
+import com.google.mlkit.vision.digitalink.DigitalInkRecognizer
+import com.google.mlkit.vision.digitalink.DigitalInkRecognizerOptions
+import com.google.mlkit.vision.digitalink.Ink
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
@@ -84,8 +94,11 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class MainActivity : AppCompatActivity() {
 
@@ -174,6 +187,11 @@ class MainActivity : AppCompatActivity() {
 
     private var pendingImageCardRequest: ImageCardRequest? = null
     private var pendingExportFlowId: Long? = null
+    private val remoteModelManager: RemoteModelManager by lazy {
+        RemoteModelManager.getInstance()
+    }
+    private var digitalInkModel: DigitalInkRecognitionModel? = null
+    private var digitalInkRecognizer: DigitalInkRecognizer? = null
 
     private data class HandwritingDialogExtras(
         val baseBitmap: Bitmap? = null,
@@ -995,7 +1013,33 @@ class MainActivity : AppCompatActivity() {
         if (trimmed.isEmpty()) return cards.toList()
         return cards.filter { card ->
             card.title.contains(trimmed, ignoreCase = true) ||
-                card.snippet.contains(trimmed, ignoreCase = true)
+                card.snippet.contains(trimmed, ignoreCase = true) ||
+                matchesRecognizedText(card, trimmed)
+        }
+    }
+
+    private fun matchesRecognizedText(card: CardItem, query: String): Boolean {
+        val candidates = listOfNotNull(
+            card.handwriting?.recognizedText,
+            card.handwriting?.back?.recognizedText,
+            card.imageHandwriting?.recognizedText
+        )
+        return candidates.any { it.contains(query, ignoreCase = true) }
+    }
+
+    private fun normalizeRecognizedText(text: String?): String? {
+        if (text.isNullOrBlank()) return null
+        val collapsed = WHITESPACE_REGEX.replace(text.trim(), " ")
+        return collapsed.takeIf { it.isNotEmpty() }
+    }
+
+    private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont ->
+        addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                cont.resume(task.result)
+            } else {
+                cont.resumeWithException(task.exception ?: RuntimeException("Task $task failed"))
+            }
         }
     }
 
@@ -1151,7 +1195,11 @@ class MainActivity : AppCompatActivity() {
                     id = nextCardId++,
                     title = "",
                     snippet = "",
-                    handwriting = HandwritingContent(content.path, content.options),
+                    handwriting = HandwritingContent(
+                        path = content.path,
+                        options = content.options,
+                        recognizedText = content.recognizedText
+                    ),
                     updatedAt = System.currentTimeMillis()
                 )
                 flow.cards += card
@@ -1173,7 +1221,15 @@ class MainActivity : AppCompatActivity() {
             handwritingContent != null -> {
             showHandwritingDialog(
                 titleRes = R.string.dialog_edit_handwriting_title,
-                existing = if (face == HandwritingFace.BACK) handwritingContent.back else HandwritingSide(handwritingContent.path, handwritingContent.options),
+                existing = if (face == HandwritingFace.BACK) {
+                    handwritingContent.back
+                } else {
+                    HandwritingSide(
+                        handwritingContent.path,
+                        handwritingContent.options,
+                        handwritingContent.recognizedText
+                    )
+                },
                 initialOptions = if (face == HandwritingFace.BACK) {
                     handwritingContent.back?.options ?: handwritingContent.options
                 } else handwritingContent.options,
@@ -1187,9 +1243,16 @@ class MainActivity : AppCompatActivity() {
                             val frontOptions = card.handwriting?.options ?: savedContent.options
                             val normalizedOptions = synchronizeBackPaper(frontOptions, savedContent.options)
                             if (card.handwriting == null) {
-                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions)
+                                card.handwriting = HandwritingContent(
+                                    path = savedContent.path,
+                                    options = normalizedOptions
+                                )
                             }
-                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions)
+                            card.handwriting?.back = HandwritingSide(
+                                savedContent.path,
+                                normalizedOptions,
+                                savedContent.recognizedText
+                            )
                         }
                     } else {
                         val content = savedContent ?: run {
@@ -1197,10 +1260,15 @@ class MainActivity : AppCompatActivity() {
                             return@showHandwritingDialog
                         }
                         if (card.handwriting == null) {
-                            card.handwriting = HandwritingContent(content.path, content.options)
+                            card.handwriting = HandwritingContent(
+                                path = content.path,
+                                options = content.options,
+                                recognizedText = content.recognizedText
+                            )
                         } else {
                             card.handwriting?.path = content.path
                             card.handwriting?.options = content.options
+                            card.handwriting?.recognizedText = content.recognizedText
                             card.handwriting?.back?.let { backSide ->
                                 backSide.options = synchronizeBackPaper(content.options, backSide.options)
                             }
@@ -1265,7 +1333,11 @@ class MainActivity : AppCompatActivity() {
                 if (card.imageHandwriting?.path != content.path) {
                     card.imageHandwriting?.path?.let { deleteHandwritingFile(it) }
                 }
-                card.imageHandwriting = HandwritingSide(content.path, content.options)
+                card.imageHandwriting = HandwritingSide(
+                    content.path,
+                    content.options,
+                    content.recognizedText
+                )
                 card.updatedAt = System.currentTimeMillis()
                 refreshFlow(flow, scrollToTop = false)
                 saveState()
@@ -2186,11 +2258,11 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            suspend fun saveHandwritingFromDialog(): Boolean {
                 val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
-                    return@setOnClickListener
+                    return false
                 }
                 val options = HandwritingOptions(
                     backgroundColor = selectedPaperColor.color,
@@ -2204,22 +2276,41 @@ class MainActivity : AppCompatActivity() {
                     eraserSizeDp = selectedEraserSize,
                     eraserType = selectedEraserType
                 )
-                val handledByExtras = extras.onSaveBitmap?.invoke(exportBitmap, options) == true
-                if (handledByExtras) {
+                return try {
+                    val handledByExtras = extras.onSaveBitmap?.invoke(exportBitmap, options) == true
+                    if (handledByExtras) {
+                        persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
+                        true
+                    } else {
+                        val ink = handwritingView.currentInk()
+                        val recognizedText = recognizeInkText(ink)
+                        val saved = withContext(Dispatchers.IO) {
+                            saveHandwritingContent(exportBitmap, options, existing, recognizedText)
+                        }
+                        if (saved == null) {
+                            snackbar(getString(R.string.snackbar_handwriting_save_failed))
+                            false
+                        } else {
+                            persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
+                            onSave(saved)
+                            true
+                        }
+                    }
+                } finally {
                     exportBitmap.recycle()
-                    persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
-                    dialog.dismiss()
-                    return@setOnClickListener
                 }
-                val saved = saveHandwritingContent(exportBitmap, options, existing)
-                exportBitmap.recycle()
-                if (saved == null) {
-                    snackbar(getString(R.string.snackbar_handwriting_save_failed))
-                    return@setOnClickListener
+            }
+            val positiveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            positiveButton?.setOnClickListener {
+                lifecycleScope.launch {
+                    positiveButton.isEnabled = false
+                    val success = saveHandwritingFromDialog()
+                    if (success) {
+                        dialog.dismiss()
+                    } else {
+                        positiveButton.isEnabled = true
+                    }
                 }
-                persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
-                onSave(saved)
-                dialog.dismiss()
             }
             onDelete?.let { deleteCallback ->
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
@@ -2446,7 +2537,8 @@ class MainActivity : AppCompatActivity() {
     private fun saveHandwritingContent(
         bitmap: Bitmap,
         options: HandwritingOptions,
-        existing: HandwritingSide?
+        existing: HandwritingSide?,
+        recognizedText: String?
     ): HandwritingSide? {
         val reuseExisting = existing?.takeIf { it.options.format == options.format }
         val filename = reuseExisting?.path ?: "handwriting_${System.currentTimeMillis()}.${options.format.extension}"
@@ -2459,7 +2551,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 bitmap.compress(options.format.compressFormat, quality, out)
             }
-            HandwritingSide(filename, options)
+            HandwritingSide(
+                filename,
+                options,
+                normalizeRecognizedText(recognizedText)
+            )
         }.getOrElse {
             if (reuseExisting == null) {
                 runCatching { deleteFile(filename) }
@@ -2490,6 +2586,50 @@ class MainActivity : AppCompatActivity() {
     private fun deleteHandwritingFiles(content: HandwritingContent) {
         deleteHandwritingFile(content.path)
         content.back?.path?.let { deleteHandwritingFile(it) }
+    }
+
+    private suspend fun recognizeInkText(ink: Ink?): String? {
+        if (ink == null) return null
+        val recognizer = ensureDigitalInkRecognizer() ?: return null
+        return try {
+            val result = withContext(Dispatchers.IO) {
+                recognizer.recognize(ink).await()
+            }
+            normalizeRecognizedText(result.candidates.firstOrNull()?.text)
+        } catch (e: Exception) {
+            Log.w(TAG, "Handwriting recognition failed", e)
+            null
+        }
+    }
+
+    private suspend fun ensureDigitalInkRecognizer(): DigitalInkRecognizer? {
+        digitalInkRecognizer?.let { return it }
+        val modelId = DigitalInkRecognitionModelIdentifier.fromLanguageTag(DIGITAL_INK_LANGUAGE_TAG)
+        if (modelId == null) {
+            Log.w(TAG, "Unsupported Digital Ink language: $DIGITAL_INK_LANGUAGE_TAG")
+            return null
+        }
+        val model = DigitalInkRecognitionModel.builder(modelId).build()
+        return try {
+            withContext(Dispatchers.IO) {
+                remoteModelManager.download(model, DownloadConditions.Builder().build()).await()
+            }
+            val recognizer = DigitalInkRecognition.getClient(
+                DigitalInkRecognizerOptions.builder(model).build()
+            )
+            digitalInkModel = model
+            digitalInkRecognizer = recognizer
+            recognizer
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to initialize Digital Ink recognizer", e)
+            null
+        }
+    }
+
+    private fun releaseDigitalInkRecognizer() {
+        digitalInkRecognizer?.close()
+        digitalInkRecognizer = null
+        digitalInkModel = null
     }
 
     private fun disposeCardResources(card: CardItem) {
@@ -2629,7 +2769,8 @@ class MainActivity : AppCompatActivity() {
             return HandwritingContent(
                 path = front.path,
                 options = front.options,
-                back = back
+                back = back,
+                recognizedText = front.recognizedText
             )
         }
 
@@ -2683,6 +2824,7 @@ class MainActivity : AppCompatActivity() {
             ?: baseOptions.eraserSizeDp
         val eraserTypeName = optionsObj?.optString("eraserType")
         val eraserType = HandwritingEraserType.fromName(eraserTypeName) ?: baseOptions.eraserType
+        val recognizedText = normalizeRecognizedText(obj.optString("recognizedText").takeIf { it.isNotBlank() })
         return HandwritingSide(
             path = path,
             options = HandwritingOptions(
@@ -2696,7 +2838,8 @@ class MainActivity : AppCompatActivity() {
                 penType = penType,
                 eraserSizeDp = eraserSize,
                 eraserType = eraserType
-            )
+            ),
+            recognizedText = recognizedText
         )
     }
 
@@ -2844,6 +2987,7 @@ class MainActivity : AppCompatActivity() {
     private fun handwritingSideToJson(side: HandwritingSide): JSONObject = JSONObject().apply {
         put("path", side.path)
         put("options", handwritingOptionsToJson(side.options))
+        side.recognizedText?.let { put("recognizedText", it) }
     }
 
     private fun cardImageToJson(image: CardImage): JSONObject = JSONObject().apply {
@@ -2858,6 +3002,7 @@ class MainActivity : AppCompatActivity() {
         val root = JSONObject().apply {
             put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
             put("options", optionsObj)
+            content.recognizedText?.let { put("recognizedText", it) }
         }
         content.back?.let { back ->
             val backBytes = readHandwritingBytes(back.path)
@@ -2866,6 +3011,7 @@ class MainActivity : AppCompatActivity() {
                 val backObj = JSONObject().apply {
                     put("data", Base64.encodeToString(backBytes, Base64.NO_WRAP))
                     put("options", backOptions)
+                    back.recognizedText?.let { put("recognizedText", it) }
                 }
                 root.put("back", backObj)
             }
@@ -2878,6 +3024,7 @@ class MainActivity : AppCompatActivity() {
         return JSONObject().apply {
             put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
             put("options", handwritingOptionsToJson(side.options))
+            side.recognizedText?.let { put("recognizedText", it) }
         }
     }
 
@@ -2998,7 +3145,7 @@ class MainActivity : AppCompatActivity() {
         if (handwritingObj == null) return null
         val front = decodeHandwritingSideFromExport(handwritingObj, createdFiles) ?: return null
         val back = handwritingObj.optJSONObject("back")?.let { decodeHandwritingSideFromExport(it, createdFiles) }
-        return HandwritingContent(front.path, front.options, back)
+        return HandwritingContent(front.path, front.options, back, front.recognizedText)
     }
 
     private fun decodeHandwritingSideFromExport(
@@ -3008,11 +3155,12 @@ class MainActivity : AppCompatActivity() {
         val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
         val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return null
         val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
+        val recognizedText = normalizeRecognizedText(sideObj.optString("recognizedText").takeIf { it.isNotBlank() })
         val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Handwriting(filename)
-            HandwritingSide(filename, options)
+            HandwritingSide(filename, options, recognizedText)
         }.getOrElse {
             deleteFile(filename)
             null
@@ -3279,10 +3427,12 @@ class MainActivity : AppCompatActivity() {
                     val handwritingObj = JSONObject().apply {
                         put("path", content.path)
                         put("options", handwritingOptionsToJson(content.options))
+                        content.recognizedText?.let { put("recognizedText", it) }
                         content.back?.let { backSide ->
                             put("back", JSONObject().apply {
                                 put("path", backSide.path)
                                 put("options", handwritingOptionsToJson(backSide.options))
+                                backSide.recognizedText?.let { put("recognizedText", it) }
                             })
                         }
                     }
@@ -3379,6 +3529,7 @@ class MainActivity : AppCompatActivity() {
         textToSpeechReady = false
         textToSpeechInitializing = false
         pendingTextToSpeechRequests.clear()
+        releaseDigitalInkRecognizer()
         super.onDestroy()
     }
 
@@ -3658,6 +3809,8 @@ class MainActivity : AppCompatActivity() {
 
 }
 
+private const val DIGITAL_INK_LANGUAGE_TAG = "en-US"
+private val WHITESPACE_REGEX = Regex("\\s+")
 private const val PREFS_NAME = "timescape_state"
 private const val KEY_CARDS = "cards"
 private const val KEY_IMAGES = "images"

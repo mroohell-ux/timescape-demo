@@ -631,7 +631,7 @@ class CardsAdapter(
         if (index < 0 || index >= snapshot.size) return
         val handwriting = snapshot[index].handwriting ?: return
         val sides = listOfNotNull(
-            HandwritingSide(handwriting.path, handwriting.options),
+            HandwritingSide(handwriting.path, handwriting.options, handwriting.recognizedText),
             handwriting.back
         )
         for (side in sides) {
@@ -1031,10 +1031,10 @@ private fun CardItem.deepCopy(): CardItem = copy(
         content.copy(
             options = content.options.copy(),
             back = content.back?.let { back ->
-                HandwritingSide(back.path, back.options.copy())
+                HandwritingSide(back.path, back.options.copy(), back.recognizedText)
             }
         )
     },
-    imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
+    imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy(), it.recognizedText) },
     relativeTimeText = relativeTimeText
 )
