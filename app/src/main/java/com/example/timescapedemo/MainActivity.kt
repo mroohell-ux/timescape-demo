@@ -3491,7 +3491,9 @@ class MainActivity : AppCompatActivity() {
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    owningFlow()?.let { ensureMainCard(it) }
+                    layoutManager.settleScrollIfNeeded {
+                        owningFlow()?.let { ensureMainCard(it) }
+                    }
                 }
             }
         }

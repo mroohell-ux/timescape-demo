@@ -55,6 +55,7 @@ class RightRailFlowLayoutManager(
     // scroll state
     private var scrollYPx = 0f
     private var pendingRestore: PendingRestore? = null
+    private var settleAnimator: ValueAnimator? = null
 
     var selectionListener: ((Int?) -> Unit)? = null
         set(value) {
@@ -171,6 +172,8 @@ class RightRailFlowLayoutManager(
         val lastCentered = yTop() + (itemCount - 1).coerceAtLeast(0) * itemPitchPx - screenCenter()
         return max(minScroll(), lastCentered)
     }
+
+    private val overScrollLimitPx = max(48f, itemPitchPx * 0.85f)
 
     override fun onLayoutChildren(recycler: RecyclerView.Recycler, state: RecyclerView.State) {
         detachAndScrapAttachedViews(recycler)
@@ -368,14 +371,52 @@ class RightRailFlowLayoutManager(
         if (dy != 0 && selectedIndex != null && focusProgress > 0f) {
             clearFocus(immediate = true)
         }
+        if (dy != 0) cancelSettleAnimation()
 
         val old = scrollYPx
-        val newY = (old + dy).coerceIn(minScroll(), maxScroll())
+        val newY = applyOverScrollResistance(old + dy)
         val consumed = (newY - old).toInt()
         scrollYPx = newY
 
         layoutAll(recycler)
         return consumed
+    }
+
+    fun settleScrollIfNeeded(onSettled: (() -> Unit)? = null) {
+        if (itemCount == 0 || height == 0) {
+            onSettled?.invoke()
+            return
+        }
+        val min = minScroll()
+        val max = maxScroll()
+        val target = scrollYPx.coerceIn(min, max)
+        if (abs(target - scrollYPx) < 0.5f) {
+            scrollYPx = target
+            onSettled?.invoke()
+            return
+        }
+        cancelSettleAnimation()
+        settleAnimator = ValueAnimator.ofFloat(scrollYPx, target).apply {
+            duration = 260
+            interpolator = interp
+            addUpdateListener {
+                scrollYPx = it.animatedValue as Float
+                requestLayout()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (settleAnimator === animation) {
+                        settleAnimator = null
+                        onSettled?.invoke()
+                    }
+                }
+
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    if (settleAnimator === animation) settleAnimator = null
+                }
+            })
+            start()
+        }
     }
 
     fun restoreState(index: Int, focus: Boolean) {
@@ -392,6 +433,7 @@ class RightRailFlowLayoutManager(
         if (itemCount == 0 || width == 0 || height == 0) return false
         val clamped = index.coerceIn(0, max(0, itemCount - 1))
         val desired = yTop() + clamped * itemPitchPx - screenCenter()
+        cancelSettleAnimation()
         scrollYPx = desired.coerceIn(minScroll(), maxScroll())
         focusAnimator?.cancel()
         if (focus) {
@@ -410,6 +452,34 @@ class RightRailFlowLayoutManager(
 
     private fun notifySelectionChanged() {
         selectionListener?.invoke(currentSelectionIndex())
+    }
+
+    private fun applyOverScrollResistance(candidate: Float): Float {
+        if (itemCount == 0 || height == 0) return candidate
+        val minBound = minScroll()
+        val maxBound = maxScroll()
+        val minLimit = minBound - overScrollLimitPx
+        val maxLimit = maxBound + overScrollLimitPx
+        var value = candidate.coerceIn(minLimit, maxLimit)
+        if (value < minBound) {
+            val over = minBound - value
+            value = minBound - dampen(over)
+        } else if (value > maxBound) {
+            val over = value - maxBound
+            value = maxBound + dampen(over)
+        }
+        return value
+    }
+
+    private fun dampen(overScroll: Float): Float {
+        if (overScrollLimitPx <= 0f) return 0f
+        val clamped = overScroll.coerceIn(0f, overScrollLimitPx)
+        return clamped / 3f
+    }
+
+    private fun cancelSettleAnimation() {
+        settleAnimator?.cancel()
+        settleAnimator = null
     }
 
     override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {
