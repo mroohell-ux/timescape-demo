@@ -8,13 +8,11 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
  * Timescape-like vertical flow with variable-height cards:
@@ -461,9 +459,9 @@ class RightRailFlowLayoutManager(
             val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
             val tertiaryPhase = (index + normalizedScroll) * 0.55f
 
-            val waveA = sin(basePhase)
-            val waveB = cos(secondaryPhase)
-            val waveC = sin(tertiaryPhase + waveB * 0.35f)
+            val waveA = FastTrig.sin(basePhase)
+            val waveB = FastTrig.cos(secondaryPhase)
+            val waveC = FastTrig.sin(tertiaryPhase + waveB * 0.35f)
 
             val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
             val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
@@ -474,6 +472,33 @@ class RightRailFlowLayoutManager(
             val rotation = (waveA * 2.6f + waveC * 1.1f) * amount
 
             return ScatterOffsets(shiftX, shiftY, rotation)
+        }
+    }
+    private object FastTrig {
+        private const val TABLE_SIZE = 2048
+        private val TWO_PI = (Math.PI * 2.0).toFloat()
+        private val HALF_PI = (Math.PI / 2.0).toFloat()
+        private val step = TWO_PI / TABLE_SIZE
+        private val table = FloatArray(TABLE_SIZE + 1).apply {
+            for (i in indices) {
+                this[i] = kotlin.math.sin(i * step)
+            }
+        }
+
+        fun sin(angle: Float): Float = lookup(angle)
+
+        fun cos(angle: Float): Float = lookup(angle + HALF_PI)
+
+        private fun lookup(angle: Float): Float {
+            if (angle.isNaN() || angle.isInfinite()) return 0f
+            var wrapped = angle % TWO_PI
+            if (wrapped < 0f) wrapped += TWO_PI
+            val position = wrapped / step
+            val index = position.toInt().coerceIn(0, TABLE_SIZE - 1)
+            val frac = position - index
+            val a = table[index]
+            val b = table[index + 1]
+            return a + (b - a) * frac
         }
     }
 }
