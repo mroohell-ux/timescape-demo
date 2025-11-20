@@ -47,9 +47,9 @@ import kotlin.math.roundToInt
 // is still unknown, it estimates the desired width as a fraction of the device width;
 // `DEFAULT_BG_WIDTH_FRACTION` represents that fallback fraction. To prevent impossible
 // values, `MIN_BG_WIDTH_FRACTION` defines the lowest fraction the config will accept.
-private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 280
-private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 80
-private const val DEFAULT_BG_WIDTH_FRACTION = 0.45f
+private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 80
+private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 30
+private const val DEFAULT_BG_WIDTH_FRACTION = 0.25f
 private const val MIN_BG_WIDTH_FRACTION = 0.1f
 
 data class BackgroundSizingConfig(
