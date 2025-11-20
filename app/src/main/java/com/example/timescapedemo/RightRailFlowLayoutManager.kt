@@ -52,6 +52,10 @@ class RightRailFlowLayoutManager(
     private var focusAnimator: ValueAnimator? = null
     private val interp = FastOutSlowInInterpolator()
 
+    init {
+        setItemPrefetchEnabled(true)
+    }
+
     // scroll state
     private var scrollYPx = 0f
     private var pendingRestore: PendingRestore? = null
@@ -91,8 +95,6 @@ class RightRailFlowLayoutManager(
     override fun isAutoMeasureEnabled() = true
     override fun generateDefaultLayoutParams() =
         RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
-
-    override fun isItemPrefetchEnabled(): Boolean = true
 
     // ---- Public helpers ----
     fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
