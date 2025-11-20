@@ -68,6 +68,7 @@ class RightRailFlowLayoutManager(
     private val widthQuantizer = IntQuantizer()
     private val heightQuantizer = IntQuantizer(stepPx = 12)
     private val scatterCalculator = ScatterCalculator()
+    private val layoutOverscan = 2
 
     private data class CurvePlacement(
         val extraX: Float,
@@ -90,6 +91,8 @@ class RightRailFlowLayoutManager(
     override fun isAutoMeasureEnabled() = true
     override fun generateDefaultLayoutParams() =
         RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
+
+    override fun isItemPrefetchEnabled(): Boolean = true
 
     // ---- Public helpers ----
     fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
@@ -277,21 +280,27 @@ class RightRailFlowLayoutManager(
         var lastGainBand: GainBand? = null
     )
 
+    private fun layoutWindow(scroll: Float): IntRange {
+        val yT = yTop(); val yB = yBottom()
+        val firstIdx = max(
+            0,
+            floor(((scroll + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
+        )
+        val lastIdx = min(
+            itemCount - 1,
+            ceil(((scroll + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
+        )
+        return firstIdx..lastIdx
+    }
+
     private fun layoutAll(recycler: RecyclerView.Recycler) {
         val cy = screenCenter()
         val baseX = railX()
         val yT = yTop(); val yB = yBottom()
 
-        // Visible window of indices
-        val layoutOverscan = 2
-        val firstIdx = max(
-            0,
-            floor(((scrollYPx + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
-        )
-        val lastIdx = min(
-            itemCount - 1,
-            ceil(((scrollYPx + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
-        )
+        val layoutWindow = layoutWindow(scrollYPx)
+        val firstIdx = layoutWindow.first
+        val lastIdx = layoutWindow.last
 
         for (i in childCount - 1 downTo 0) {
             val child = getChildAt(i) ?: continue
@@ -363,6 +372,47 @@ class RightRailFlowLayoutManager(
             child.rotation = curve.rotationDeg + scatter.rotationDeg
             val z = if (isSelected) 6000f else (1000f - dist / 10f)
             child.translationZ = z; child.elevation = z
+        }
+    }
+
+    override fun collectAdjacentPrefetchPositions(
+        dx: Int,
+        dy: Int,
+        state: RecyclerView.State,
+        layoutPrefetchRegistry: RecyclerView.LayoutManager.LayoutPrefetchRegistry
+    ) {
+        if (!isItemPrefetchEnabled || itemCount == 0 || height == 0 || dy == 0 || state.isPreLayout) return
+
+        val direction = when {
+            dy > 0 -> 1
+            dy < 0 -> -1
+            else -> 0
+        }
+        if (direction == 0) return
+
+        val currentWindow = layoutWindow(scrollYPx)
+        val targetWindow = layoutWindow(applyOverScrollResistance(scrollYPx + dy))
+
+        if (direction > 0) {
+            val start = (currentWindow.last + 1).coerceAtLeast(0)
+            val end = min(targetWindow.last, itemCount - 1)
+            if (start <= end) {
+                for (i in start..end) {
+                    val centerY = yTop() + i * itemPitchPx - scrollYPx
+                    val distance = max(0f, centerY - yBottom()).toInt()
+                    layoutPrefetchRegistry.addPosition(i, distance)
+                }
+            }
+        } else {
+            val start = targetWindow.first.coerceAtLeast(0)
+            val end = (currentWindow.first - 1).coerceAtMost(itemCount - 1)
+            if (start <= end) {
+                for (i in end downTo start) {
+                    val centerY = yTop() + i * itemPitchPx - scrollYPx
+                    val distance = max(0f, yTop() - centerY).toInt()
+                    layoutPrefetchRegistry.addPosition(i, distance)
+                }
+            }
         }
     }
 
