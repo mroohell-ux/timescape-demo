@@ -65,14 +65,22 @@ class ShuffledFlowActivity : AppCompatActivity() {
     }
 
     private fun handleCardTap(index: Int) {
-        if (index !in 0 until adapter.itemCount) return
-        val delta = layoutManager.offsetTo(index)
+        adapter.getItemAt(index) ?: return
         if (layoutManager.isFocused(index)) {
+            if (adapter.canFlipCardAt(index)) {
+                val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                if (vh != null && adapter.toggleCardFace(vh) != null) {
+                    return
+                }
+            }
             layoutManager.clearFocus()
-        } else if (delta == 0) {
-            layoutManager.focus(index)
         } else {
-            recycler.smoothScrollBy(0, delta)
+            val delta = layoutManager.offsetTo(index)
+            if (delta == 0) {
+                layoutManager.focus(index)
+            } else {
+                recycler.smoothScrollBy(0, delta)
+            }
         }
     }
 
