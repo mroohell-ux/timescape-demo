@@ -97,13 +97,13 @@ class GlobalSearchActivity : AppCompatActivity() {
             }
         })
         searchMenuItem?.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
-            override fun onMenuItemActionExpand(item: MenuItem?): Boolean {
+            override fun onMenuItemActionExpand(item: MenuItem): Boolean {
                 view.setQuery(currentQuery, false)
                 view.post { view.requestFocus() }
                 return true
             }
 
-            override fun onMenuItemActionCollapse(item: MenuItem?): Boolean {
+            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 view.clearFocus()
                 return true
             }
