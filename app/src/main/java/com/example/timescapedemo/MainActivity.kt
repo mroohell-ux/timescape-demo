@@ -814,6 +814,12 @@ class MainActivity : AppCompatActivity() {
                 lastCardMovePagerSwitchTime = 0L
                 return true
             }
+            DragEvent.ACTION_DROP -> {
+                val moveData = event.localState as? CardMoveDragData ?: return false
+                val targetFlowId = currentFlow()?.id ?: return false
+                moveCardToFlow(moveData.cardId, moveData.sourceFlowId, targetFlowId)
+                return true
+            }
             DragEvent.ACTION_DRAG_LOCATION -> {
                 maybeSwitchFlowForCardDrag(event.x)
                 return true
