@@ -1028,7 +1028,7 @@ class CardsAdapter(
 
 private const val HANDWRITING_PREFETCH_DISTANCE = 2
 
-private fun CardItem.deepCopy(): CardItem = copy(
+fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
         is BgImage.Res -> background.copy()
         is BgImage.UriRef -> background.copy()

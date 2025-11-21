@@ -14,6 +14,10 @@
     <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
     <string name="menu_unshuffle_cards">Restore order</string>
+    <string name="drawer_shuffle_all_cards">Shuffle everything</string>
+    <string name="shuffle_all_cards_title">Shuffled flow</string>
+    <string name="snackbar_no_cards_available">Add cards before shuffling everything.</string>
+    <string name="card_counter_format">%1$d/%2$d</string>
     <string name="search_cards_hint">Search cards</string>
     <string name="snackbar_not_enough_cards_to_shuffle">Add at least two cards to shuffle.</string>
     <string name="drawer_card_backgrounds">Card backgrounds</string>

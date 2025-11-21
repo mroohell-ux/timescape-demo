@@ -111,6 +111,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportCurrentFlowButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
+    private lateinit var drawerShuffleAllCardsButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
@@ -323,6 +324,7 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportCurrentFlowButton = header.findViewById(R.id.buttonDrawerExportCurrentFlow)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
+        drawerShuffleAllCardsButton = header.findViewById(R.id.buttonDrawerShuffleAllCards)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -388,6 +390,10 @@ class MainActivity : AppCompatActivity() {
         }
         drawerImportNotesButton.setOnClickListener {
             importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerShuffleAllCardsButton.setOnClickListener {
+            launchShuffledFlow()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
 
@@ -973,6 +979,16 @@ class MainActivity : AppCompatActivity() {
         saveState()
     }
 
+    private fun launchShuffledFlow() {
+        val allCards = flows.flatMap { flow -> flow.cards.map { it.deepCopy() } }
+        if (allCards.isEmpty()) {
+            snackbar(getString(R.string.snackbar_no_cards_available))
+            return
+        }
+        ShuffledFlowCache.store(allCards.shuffled())
+        startActivity(Intent(this, ShuffledFlowActivity::class.java))
+    }
+
     private fun centerSelectedChip(position: Int) {
         if (position !in 0 until flowChipGroup.childCount) return
         val chip = flowChipGroup.getChildAt(position) ?: return
@@ -1145,20 +1161,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createLayoutManager(): RightRailFlowLayoutManager {
-        val metrics = resources.displayMetrics
-        val density = metrics.density
-        val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
-        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
-        val baseSide = availableWidth
-        val focusSide = availableWidth
-        val pitch = (availableWidth * 0.26f).roundToInt()
-        return RightRailFlowLayoutManager(
-            baseSidePx = baseSide,
-            focusSidePx = focusSide,
-            itemPitchPx = pitch,
-            rightInsetPx = (8 * density).roundToInt()
-        )
+        return FlowLayoutManagerFactory.create(this)
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
