@@ -153,7 +153,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:valueFrom="14"
+            android:valueFrom="8"
             android:valueTo="26"
             android:stepSize="1"/>
 
