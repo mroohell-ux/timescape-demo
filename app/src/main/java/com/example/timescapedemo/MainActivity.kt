@@ -65,7 +65,6 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
-import com.google.android.material.textfield.TextInputEditText
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
@@ -113,7 +112,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportCurrentFlowButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerShuffleAllCardsButton: MaterialButton
-    private lateinit var drawerGlobalSearchInput: TextInputEditText
     private lateinit var drawerGlobalSearchButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
@@ -328,7 +326,6 @@ class MainActivity : AppCompatActivity() {
         drawerExportCurrentFlowButton = header.findViewById(R.id.buttonDrawerExportCurrentFlow)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerShuffleAllCardsButton = header.findViewById(R.id.buttonDrawerShuffleAllCards)
-        drawerGlobalSearchInput = header.findViewById(R.id.inputGlobalSearch)
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
@@ -402,12 +399,6 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
         }
         drawerGlobalSearchButton.setOnClickListener { launchGlobalSearchFromDrawer() }
-        drawerGlobalSearchInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
-                launchGlobalSearchFromDrawer()
-                true
-            } else false
-        }
 
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
@@ -1002,23 +993,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchGlobalSearchFromDrawer() {
-        val rawQuery = drawerGlobalSearchInput.text?.toString().orEmpty()
-        val normalizedQuery = rawQuery.trim()
         val allCards = flows.flatMap { flow -> flow.cards.map { it.deepCopy() } }
         when {
             allCards.isEmpty() -> snackbar(getString(R.string.snackbar_no_cards_to_search))
-            normalizedQuery.isEmpty() -> snackbar(getString(R.string.snackbar_enter_search_query))
             else -> {
-                val results = CardSearch.filter(allCards, normalizedQuery)
-                if (results.isEmpty()) {
-                    snackbar(getString(R.string.snackbar_no_search_results))
-                } else {
-                    GlobalSearchCache.store(
-                        GlobalSearchPayload(query = normalizedQuery, cards = allCards)
-                    )
-                    drawerLayout.closeDrawer(GravityCompat.START)
-                    startActivity(Intent(this, GlobalSearchActivity::class.java))
-                }
+                GlobalSearchCache.store(
+                    GlobalSearchPayload(query = "", cards = allCards)
+                )
+                drawerLayout.closeDrawer(GravityCompat.START)
+                startActivity(Intent(this, GlobalSearchActivity::class.java))
             }
         }
     }
