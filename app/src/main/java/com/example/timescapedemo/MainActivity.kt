@@ -657,12 +657,12 @@ class MainActivity : AppCompatActivity() {
     private fun handleFlowChipTap(flowId: Long, index: Int) {
         val now = SystemClock.elapsedRealtime()
         val isDoubleTap = lastFlowChipTapId == flowId &&
-            now - lastFlowChipTapTime <= FLOW_DELETE_DOUBLE_TAP_WINDOW_MS
+            now - lastFlowChipTapTime <= FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS
         lastFlowChipTapId = flowId
         lastFlowChipTapTime = now
         if (isDoubleTap) {
-            val deleteIndex = flows.indexOfFirst { it.id == flowId }
-            if (deleteIndex >= 0) showDeleteFlowDialog(deleteIndex)
+            val targetIndex = flows.indexOfFirst { it.id == flowId }
+            if (targetIndex >= 0) showFlowActionsDialog(targetIndex)
         } else {
             flowPager.setCurrentItem(index, true)
         }
@@ -867,7 +867,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAddFlowDialog() {
-        val suggestedName = defaultFlowName(flows.size)
+        val suggestedName = defaultFlowName()
         val input = EditText(this).apply {
             setText(suggestedName)
             setSelection(text.length)
@@ -886,7 +886,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle(R.string.dialog_add_flow_title)
             .setView(container)
             .setPositiveButton(R.string.dialog_create) { _, _ ->
-                val name = input.text.toString().trim().ifBlank { defaultFlowName(flows.size) }
+                val name = input.text.toString().trim().ifBlank { defaultFlowName() }
                 addFlow(name)
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -904,6 +904,61 @@ class MainActivity : AppCompatActivity() {
         updateToolbarSubtitle()
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
+    }
+
+    private fun showFlowActionsDialog(index: Int) {
+        val flow = flows.getOrNull(index) ?: return
+        val options = arrayOf(
+            getString(R.string.dialog_flow_option_rename),
+            getString(R.string.dialog_delete)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_flow_actions_title, flow.name))
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showRenameFlowDialog(index)
+                    1 -> showDeleteFlowDialog(index)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showRenameFlowDialog(index: Int) {
+        val flow = flows.getOrNull(index) ?: return
+        val input = EditText(this).apply {
+            setText(flow.name)
+            setSelection(text.length)
+            hint = getString(R.string.dialog_flow_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+        val container = FrameLayout(this).apply {
+            val padding = (24 * resources.displayMetrics.density).roundToInt()
+            setPadding(padding, padding / 2, padding, padding / 2)
+            addView(input, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_rename_flow_title)
+            .setView(container)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val name = input.text.toString().trim().ifBlank { flow.name }
+                renameFlow(index, name)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun renameFlow(index: Int, name: String) {
+        val flow = flows.getOrNull(index) ?: return
+        if (flow.name == name) return
+        flow.name = name
+        renderFlowChips(selectedFlowIndex)
+        updateToolbarSubtitle()
+        saveState()
+        snackbar(getString(R.string.snackbar_renamed_flow, name))
     }
 
     private fun showDeleteFlowDialog(index: Int) {
@@ -2913,7 +2968,7 @@ class MainActivity : AppCompatActivity() {
             payload.flows.forEachIndexed { index, importedFlow ->
                 val flowId = nextFlowId++
                 val flowName = importedFlow.name.takeIf { it.isNotBlank() }
-                    ?: defaultFlowName(baseIndex + index)
+                    ?: defaultFlowName()
                 val newCards = importedFlow.cards.map { importedCard ->
                     val cardId = nextCardId++
                     CardItem(
@@ -3119,7 +3174,7 @@ class MainActivity : AppCompatActivity() {
                     val nameRaw = obj.optString("name")
                     val flow = CardFlow(
                         id = flowId,
-                        name = if (nameRaw.isNullOrBlank()) defaultFlowName(flows.size) else nameRaw
+                        name = if (nameRaw.isNullOrBlank()) defaultFlowName() else nameRaw
                     )
                     highestFlowId = max(highestFlowId, flowId)
                     val cardsArray = obj.optJSONArray("cards")
@@ -3181,14 +3236,14 @@ class MainActivity : AppCompatActivity() {
                     legacyCards.clear()
                 }
             }
-            val flow = CardFlow(id = 0L, name = defaultFlowName(0))
+            val flow = CardFlow(id = 0L, name = defaultFlowName())
             flow.cards.addAll(legacyCards)
             flows += flow
             highestFlowId = max(highestFlowId, flow.id)
         }
 
         if (flows.isEmpty()) {
-            flows += CardFlow(id = 0L, name = defaultFlowName(0))
+            flows += CardFlow(id = 0L, name = defaultFlowName())
             highestFlowId = max(highestFlowId, 0L)
         }
 
@@ -3382,8 +3437,10 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun defaultFlowName(index: Int): String =
-        getString(R.string.default_flow_name, index + 1)
+    private fun defaultFlowName(): String {
+        val baseName = SimpleDateFormat("M/d", Locale.getDefault()).format(Date())
+        return getString(R.string.default_flow_name, baseName)
+    }
 
     private inner class FlowPagerAdapter : RecyclerView.Adapter<FlowPagerAdapter.FlowVH>() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
@@ -3687,7 +3744,7 @@ private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
-private const val FLOW_DELETE_DOUBLE_TAP_WINDOW_MS = 350L
+private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
 private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
