@@ -185,6 +185,11 @@ class MainActivity : AppCompatActivity() {
         val onSaveBitmap: ((Bitmap, HandwritingOptions) -> Boolean)? = null
     )
 
+    private data class CardMoveDragData(
+        val sourceFlowId: Long,
+        val cardId: Long
+    )
+
     private var toolbarBasePaddingTop: Int = 0
     private var toolbarBasePaddingBottom: Int = 0
     private var toolbarBaseHeight: Int = 0
@@ -675,10 +680,21 @@ class MainActivity : AppCompatActivity() {
         val dragListener = View.OnDragListener { view, event ->
             val targetChip = view as? Chip ?: return@OnDragListener false
             val targetId = targetChip.tag as? Long ?: return@OnDragListener false
-            val sourceId = event.localState as? Long ?: return@OnDragListener false
-            val isSelf = sourceId == targetId
+            val label = event.clipDescription?.label?.toString()
+            val isFlowMerge = label == FLOW_MERGE_DRAG_LABEL
+            val isCardMove = label == CARD_MOVE_DRAG_LABEL
+            if (!isFlowMerge && !isCardMove) return@OnDragListener false
+            val mergeSourceId = if (isFlowMerge) event.localState as? Long else null
+            val moveData = if (isCardMove) event.localState as? CardMoveDragData else null
+            if (isFlowMerge && mergeSourceId == null) return@OnDragListener false
+            if (isCardMove && moveData == null) return@OnDragListener false
+            val isSelf = when {
+                isFlowMerge -> mergeSourceId == targetId
+                isCardMove -> moveData?.sourceFlowId == targetId
+                else -> false
+            }
             when (event.action) {
-                DragEvent.ACTION_DRAG_STARTED -> event.clipDescription?.label == FLOW_MERGE_DRAG_LABEL
+                DragEvent.ACTION_DRAG_STARTED -> !isSelf
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     if (!isSelf) targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
                     true
@@ -690,7 +706,11 @@ class MainActivity : AppCompatActivity() {
                 DragEvent.ACTION_DROP -> {
                     targetChip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     if (!isSelf) {
-                        confirmMergeFlows(sourceId, targetId)
+                        if (isFlowMerge) {
+                            mergeSourceId?.let { confirmMergeFlows(it, targetId) }
+                        } else if (isCardMove) {
+                            moveData?.let { moveCardToFlow(it.cardId, it.sourceFlowId, targetId) }
+                        }
                     }
                     true
                 }
@@ -753,6 +773,32 @@ class MainActivity : AppCompatActivity() {
         return started
     }
 
+    private fun startCardMoveDrag(cardView: View, flow: CardFlow, card: CardItem): Boolean {
+        if (flows.size <= 1) {
+            snackbar(getString(R.string.snackbar_need_another_flow_to_move_card))
+            return false
+        }
+        val dragData = ClipData.newPlainText(CARD_MOVE_DRAG_LABEL, card.id.toString())
+        val payload = CardMoveDragData(flow.id, card.id)
+        val shadow = View.DragShadowBuilder(cardView)
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            cardView.startDragAndDrop(dragData, shadow, payload, View.DRAG_FLAG_OPAQUE)
+        } else {
+            @Suppress("DEPRECATION")
+            cardView.startDrag(dragData, shadow, payload, 0)
+        }
+        if (started) {
+            cardView.animate().alpha(0.65f).scaleX(0.98f).scaleY(0.98f).setDuration(120).start()
+        }
+        cardView.setOnDragListener { view, event ->
+            if (event.action == DragEvent.ACTION_DRAG_ENDED) {
+                view.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(120).start()
+            }
+            false
+        }
+        return started
+    }
+
     private fun confirmMergeFlows(sourceId: Long, targetId: Long) {
         val sourceIndex = flows.indexOfFirst { it.id == sourceId }
         val targetIndex = flows.indexOfFirst { it.id == targetId }
@@ -793,6 +839,35 @@ class MainActivity : AppCompatActivity() {
         updateShuffleMenuState()
         saveState()
         snackbar(getString(R.string.snackbar_merged_flows, sourceFlow.name, targetFlow.name))
+    }
+
+    private fun moveCardToFlow(cardId: Long, sourceFlowId: Long, targetFlowId: Long) {
+        if (sourceFlowId == targetFlowId) return
+        val sourceFlow = flows.firstOrNull { it.id == sourceFlowId } ?: return
+        val targetFlow = flows.firstOrNull { it.id == targetFlowId } ?: return
+        val sourceIndex = sourceFlow.cards.indexOfFirst { it.id == cardId }
+        if (sourceIndex < 0) return
+        val card = sourceFlow.cards.removeAt(sourceIndex)
+        card.updatedAt = System.currentTimeMillis()
+        card.relativeTimeText = null
+        flowShuffleStates.remove(sourceFlowId)
+        flowShuffleStates.remove(targetFlowId)
+
+        val clampedSourceIndex = sourceFlow.lastViewedCardIndex
+            .coerceIn(0, max(0, sourceFlow.cards.lastIndex))
+        sourceFlow.lastViewedCardIndex = clampedSourceIndex
+        sourceFlow.lastViewedCardId = sourceFlow.cards.getOrNull(clampedSourceIndex)?.id
+        sourceFlow.lastViewedCardFocused = sourceFlow.lastViewedCardFocused && sourceFlow.cards.isNotEmpty()
+
+        targetFlow.cards.add(0, card)
+        targetFlow.lastViewedCardIndex = 0
+        targetFlow.lastViewedCardId = card.id
+        targetFlow.lastViewedCardFocused = false
+
+        refreshFlow(sourceFlow, scrollToTop = false)
+        refreshFlow(targetFlow, scrollToTop = true)
+        saveState()
+        snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
     }
 
     private fun toggleShuffleCards() {
@@ -3457,6 +3532,7 @@ class MainActivity : AppCompatActivity() {
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) },
+                onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                 onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
             adapter.setBodyTextSize(cardFontSizeSp)
@@ -3531,6 +3607,14 @@ class MainActivity : AppCompatActivity() {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
                 val face = adapter.currentFaceFor(index)
                 editCard(flow, index, face)
+            }
+
+            fun onCardLongPressed(index: Int, cardView: View): Boolean {
+                if (bindingAdapterPosition == RecyclerView.NO_POSITION) return false
+                if (!layoutManager.isFocused(index)) return false
+                val flow = flows.getOrNull(bindingAdapterPosition) ?: return false
+                val card = adapter.getItemAt(index) ?: return false
+                return startCardMoveDrag(cardView, flow, card)
             }
         }
     }
@@ -3744,6 +3828,7 @@ private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
+private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f

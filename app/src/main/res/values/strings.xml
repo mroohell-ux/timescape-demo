@@ -50,6 +50,8 @@
     <string name="snackbar_no_photo_selected">No photo selected</string>
     <string name="snackbar_merged_flows">Merged "%1$s" into "%2$s"</string>
     <string name="snackbar_need_another_flow_to_merge">Add another flow before merging.</string>
+    <string name="snackbar_need_another_flow_to_move_card">Add another flow to move cards.</string>
+    <string name="snackbar_moved_card_to_flow">Moved card to "%1$s"</string>
     <string name="snackbar_handwriting_required">Draw something before saving.</string>
     <string name="snackbar_handwriting_save_failed">Couldnt save that handwriting.</string>
     <string name="snackbar_add_flow_first">Add a flow before creating cards.</string>

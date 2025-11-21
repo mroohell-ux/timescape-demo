@@ -101,6 +101,7 @@ class CardsAdapter(
     private val tint: TintStyle,
     private val onItemClick: (index: Int) -> Unit,
     private val onItemDoubleClick: (index: Int) -> Unit,
+    private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
@@ -199,6 +200,13 @@ class CardsAdapter(
                 val idx = vh.bindingAdapterPosition
                 if (idx != RecyclerView.NO_POSITION) onItemDoubleClick(idx)
                 return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                val idx = vh.bindingAdapterPosition
+                if (idx != RecyclerView.NO_POSITION) {
+                    onItemLongPress(idx, v)
+                }
             }
         })
         v.isClickable = true
