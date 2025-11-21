@@ -33,7 +33,7 @@
     <string name="dialog_flow_option_rename">Rename</string>
     <string name="dialog_rename_flow_title">Rename flow</string>
     <string name="dialog_create">Create</string>
-    <string name="default_flow_name">Flow %1$d</string>
+    <string name="default_flow_name">%1$s</string>
     <string name="snackbar_added_flow">Added flow "%1$s"</string>
     <string name="snackbar_renamed_flow">Renamed flow to "%1$s"</string>
     <string name="snackbar_deleted_flow">Deleted flow "%1$s"</string>

@@ -3437,8 +3437,11 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun defaultFlowName(index: Int): String =
-        getString(R.string.default_flow_name, index + 1)
+    private fun defaultFlowName(index: Int): String {
+        val baseName = SimpleDateFormat("M/d", Locale.getDefault()).format(Date())
+        val numberedName = if (index == 0) baseName else "$baseName (${index + 1})"
+        return getString(R.string.default_flow_name, numberedName)
+    }
 
     private inner class FlowPagerAdapter : RecyclerView.Adapter<FlowPagerAdapter.FlowVH>() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
