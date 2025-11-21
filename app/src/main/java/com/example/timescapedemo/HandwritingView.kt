@@ -16,6 +16,7 @@ import android.graphics.ComposePathEffect
 import android.graphics.DiscretePathEffect
 import android.graphics.Matrix
 import android.graphics.PathDashPathEffect
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -24,6 +25,7 @@ import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
 import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
+import com.google.mlkit.vision.digitalink.Ink
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
@@ -35,7 +37,14 @@ class HandwritingView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
+    private data class StrokePoint(val x: Float, val y: Float, val t: Long)
+
+    private data class StateSnapshot(
+        val bitmap: Bitmap,
+        val hasDrawing: Boolean,
+        val hasBase: Boolean,
+        val strokes: List<List<StrokePoint>>
+    )
 
     private val density = resources.displayMetrics.density
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -72,6 +81,9 @@ class HandwritingView @JvmOverloads constructor(
     }
     private val path = Path()
     private val history = ArrayDeque<StateSnapshot>()
+    private var inkStrokes: MutableList<List<StrokePoint>> = mutableListOf()
+    private var currentStrokePoints: MutableList<StrokePoint>? = null
+    private var pendingInkStrokes: List<List<StrokePoint>>? = null
 
     private var extraBitmap: Bitmap? = null
     private var extraCanvas: Canvas? = null
@@ -150,15 +162,20 @@ class HandwritingView @JvmOverloads constructor(
             }
             hasBaseImage = pendingHasBase
             hasContent = pendingHasContent || pendingHasBase
+            inkStrokes = pendingInkStrokes?.let { copyStrokes(it).toMutableList() } ?: mutableListOf()
+            currentStrokePoints = null
             pushCurrentState(hasContent, hasBaseImage)
             pendingBitmap = null
         } else {
             hasBaseImage = false
             hasContent = false
+            inkStrokes.clear()
+            currentStrokePoints = null
             pushCurrentState(false, false)
         }
         pendingHasContent = false
         pendingHasBase = false
+        pendingInkStrokes = null
         invalidate()
         notifyContentChanged()
     }
@@ -181,7 +198,7 @@ class HandwritingView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_MOVE -> touchMove(x, y)
             MotionEvent.ACTION_UP -> {
-                touchUp()
+                touchUp(x, y)
                 disallowParentIntercept(false)
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -204,6 +221,8 @@ class HandwritingView @JvmOverloads constructor(
         extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
         hasContent = false
         hasBaseImage = false
+        inkStrokes.clear()
+        currentStrokePoints = null
         if (hadAnyContent) {
             pushCurrentState(false, false)
         } else {
@@ -217,6 +236,7 @@ class HandwritingView @JvmOverloads constructor(
         pendingBitmap = null
         pendingHasContent = false
         pendingHasBase = false
+        pendingInkStrokes = null
         invalidate()
         notifyContentChanged()
     }
@@ -235,6 +255,8 @@ class HandwritingView @JvmOverloads constructor(
         extraCanvas?.drawBitmap(previous.bitmap, 0f, 0f, null)
         hasBaseImage = previous.hasBase
         hasContent = previous.hasDrawing
+        inkStrokes = copyStrokes(previous.strokes).toMutableList()
+        currentStrokePoints = null
         invalidate()
         notifyContentChanged()
         return true
@@ -249,6 +271,7 @@ class HandwritingView @JvmOverloads constructor(
         pendingBitmap = null
         pendingHasContent = false
         pendingHasBase = false
+        pendingInkStrokes = null
         if (bitmap == null) {
             clear()
             return
@@ -261,6 +284,8 @@ class HandwritingView @JvmOverloads constructor(
             drawBitmapOntoCanvas(copy, recycleAfter = true)
             hasBaseImage = true
             hasContent = true
+            inkStrokes.clear()
+            currentStrokePoints = null
             replaceHistoryWithCurrent(true, true)
             invalidate()
             notifyContentChanged()
@@ -268,6 +293,7 @@ class HandwritingView @JvmOverloads constructor(
             pendingBitmap = copy
             pendingHasContent = true
             pendingHasBase = true
+            pendingInkStrokes = emptyList<List<StrokePoint>>()
         }
     }
 
@@ -284,6 +310,25 @@ class HandwritingView @JvmOverloads constructor(
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
         return result
+    }
+
+    fun currentInk(): Ink? {
+        finalizeCurrentStroke()
+        if (inkStrokes.isEmpty()) return null
+        val targetWidth = (exportWidth.takeIf { it > 0 } ?: width).coerceAtLeast(1)
+        val targetHeight = (exportHeight.takeIf { it > 0 } ?: height).coerceAtLeast(1)
+        val inkBuilder = Ink.builder()
+        inkStrokes.forEach { stroke ->
+            if (stroke.isEmpty()) return@forEach
+            val strokeBuilder = Ink.Stroke.builder()
+            stroke.forEach { point ->
+                val x = point.x * targetWidth
+                val y = point.y * targetHeight
+                strokeBuilder.addPoint(Ink.Point.create(x, y, point.t))
+            }
+            inkBuilder.addStroke(strokeBuilder.build())
+        }
+        return inkBuilder.build()
     }
 
     fun setCanvasBackgroundColor(@ColorInt color: Int) {
@@ -365,6 +410,7 @@ class HandwritingView @JvmOverloads constructor(
         pendingBitmap = snapshot
         pendingHasContent = hasContent
         pendingHasBase = hasBaseImage
+        pendingInkStrokes = copyStrokes(inkStrokes)
         exportWidth = widthPx
         exportHeight = heightPx
         targetAspectRatio = heightPx.toFloat() / widthPx.toFloat()
@@ -379,11 +425,14 @@ class HandwritingView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         recycleHistory()
         history.clear()
+        inkStrokes.clear()
+        currentStrokePoints = null
         extraBitmap?.recycle()
         extraBitmap = null
         extraCanvas = null
         pendingBitmap?.recycle()
         pendingBitmap = null
+        pendingInkStrokes = null
     }
 
     private fun touchStart(x: Float, y: Float) {
@@ -391,6 +440,7 @@ class HandwritingView @JvmOverloads constructor(
         path.moveTo(x, y)
         currentX = x
         currentY = y
+        beginStroke(x, y)
     }
 
     private fun touchMove(x: Float, y: Float) {
@@ -400,16 +450,19 @@ class HandwritingView @JvmOverloads constructor(
             path.quadTo(currentX, currentY, (x + currentX) / 2, (y + currentY) / 2)
             currentX = x
             currentY = y
+            appendStrokePoint(currentX, currentY)
         }
     }
 
-    private fun touchUp() {
-        path.lineTo(currentX, currentY)
+    private fun touchUp(x: Float, y: Float) {
+        path.lineTo(x, y)
+        appendStrokePoint(x, y)
         commitCurrentPath()
     }
 
     private fun touchCancel() {
         path.reset()
+        currentStrokePoints = null
     }
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
@@ -417,11 +470,40 @@ class HandwritingView @JvmOverloads constructor(
         val canvas = extraCanvas ?: return
         canvas.drawPath(path, currentCommitPaint())
         path.reset()
+        finalizeCurrentStroke()
         hasContent = true
         if (addToHistory) {
             pushCurrentState(true, hasBaseImage)
         }
         notifyContentChanged()
+    }
+
+    private fun beginStroke(x: Float, y: Float) {
+        if (drawingTool != PEN) {
+            currentStrokePoints = null
+            return
+        }
+        currentStrokePoints = mutableListOf(createStrokePoint(x, y))
+    }
+
+    private fun appendStrokePoint(x: Float, y: Float) {
+        if (drawingTool != PEN) return
+        val builder = currentStrokePoints ?: return
+        builder.add(createStrokePoint(x, y))
+    }
+
+    private fun finalizeCurrentStroke() {
+        val builder = currentStrokePoints ?: return
+        if (builder.isNotEmpty()) {
+            inkStrokes.add(builder.map { it.copy() })
+        }
+        currentStrokePoints = null
+    }
+
+    private fun createStrokePoint(x: Float, y: Float): StrokePoint {
+        val normalizedX = if (width > 0) (x / width.toFloat()).coerceIn(0f, 1f) else 0f
+        val normalizedY = if (height > 0) (y / height.toFloat()).coerceIn(0f, 1f) else 0f
+        return StrokePoint(normalizedX, normalizedY, SystemClock.elapsedRealtime())
     }
 
     private fun drawBitmapOntoCanvas(bitmap: Bitmap, recycleAfter: Boolean = false) {
@@ -591,9 +673,12 @@ class HandwritingView @JvmOverloads constructor(
     private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {
         val source = extraBitmap ?: return
         val snapshot = source.copy(Config.ARGB_8888, false)
-        history.addLast(StateSnapshot(snapshot, hasDrawing, hasBase))
+        history.addLast(StateSnapshot(snapshot, hasDrawing, hasBase, copyStrokes(inkStrokes)))
         trimHistory()
     }
+
+    private fun copyStrokes(source: List<List<StrokePoint>>): List<List<StrokePoint>> =
+        source.map { stroke -> stroke.map { it.copy() } }
 
     private fun replaceHistoryWithCurrent(hasDrawing: Boolean, hasBase: Boolean) {
         recycleHistory()

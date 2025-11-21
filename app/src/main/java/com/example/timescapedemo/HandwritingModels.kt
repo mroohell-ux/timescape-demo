@@ -91,19 +91,21 @@ enum class HandwritingFace { FRONT, BACK }
 
 data class HandwritingSide(
     var path: String,
-    var options: HandwritingOptions
+    var options: HandwritingOptions,
+    var recognizedText: String? = null
 )
 
 data class HandwritingContent(
     var path: String,
     var options: HandwritingOptions,
-    var back: HandwritingSide? = null
+    var back: HandwritingSide? = null,
+    var recognizedText: String? = null
 ) {
     fun hasBack(): Boolean = back != null
 
     fun side(face: HandwritingFace): HandwritingSide = if (face == HandwritingFace.BACK) {
-        back ?: HandwritingSide(path, options)
+        back ?: HandwritingSide(path, options, recognizedText)
     } else {
-        HandwritingSide(path, options)
+        HandwritingSide(path, options, recognizedText)
     }
 }
