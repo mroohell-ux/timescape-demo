@@ -657,12 +657,12 @@ class MainActivity : AppCompatActivity() {
     private fun handleFlowChipTap(flowId: Long, index: Int) {
         val now = SystemClock.elapsedRealtime()
         val isDoubleTap = lastFlowChipTapId == flowId &&
-            now - lastFlowChipTapTime <= FLOW_DELETE_DOUBLE_TAP_WINDOW_MS
+            now - lastFlowChipTapTime <= FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS
         lastFlowChipTapId = flowId
         lastFlowChipTapTime = now
         if (isDoubleTap) {
-            val deleteIndex = flows.indexOfFirst { it.id == flowId }
-            if (deleteIndex >= 0) showDeleteFlowDialog(deleteIndex)
+            val targetIndex = flows.indexOfFirst { it.id == flowId }
+            if (targetIndex >= 0) showFlowActionsDialog(targetIndex)
         } else {
             flowPager.setCurrentItem(index, true)
         }
@@ -904,6 +904,61 @@ class MainActivity : AppCompatActivity() {
         updateToolbarSubtitle()
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
+    }
+
+    private fun showFlowActionsDialog(index: Int) {
+        val flow = flows.getOrNull(index) ?: return
+        val options = arrayOf(
+            getString(R.string.dialog_flow_option_rename),
+            getString(R.string.dialog_delete)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_flow_actions_title, flow.name))
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showRenameFlowDialog(index)
+                    1 -> showDeleteFlowDialog(index)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showRenameFlowDialog(index: Int) {
+        val flow = flows.getOrNull(index) ?: return
+        val input = EditText(this).apply {
+            setText(flow.name)
+            setSelection(text.length)
+            hint = getString(R.string.dialog_flow_name_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+        val container = FrameLayout(this).apply {
+            val padding = (24 * resources.displayMetrics.density).roundToInt()
+            setPadding(padding, padding / 2, padding, padding / 2)
+            addView(input, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_rename_flow_title)
+            .setView(container)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val name = input.text.toString().trim().ifBlank { flow.name }
+                renameFlow(index, name)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun renameFlow(index: Int, name: String) {
+        val flow = flows.getOrNull(index) ?: return
+        if (flow.name == name) return
+        flow.name = name
+        renderFlowChips(selectedFlowIndex)
+        updateToolbarSubtitle()
+        saveState()
+        snackbar(getString(R.string.snackbar_renamed_flow, name))
     }
 
     private fun showDeleteFlowDialog(index: Int) {
@@ -3687,7 +3742,7 @@ private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
-private const val FLOW_DELETE_DOUBLE_TAP_WINDOW_MS = 350L
+private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
 private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
