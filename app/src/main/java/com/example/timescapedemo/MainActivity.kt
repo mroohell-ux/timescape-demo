@@ -190,6 +190,9 @@ class MainActivity : AppCompatActivity() {
         val cardId: Long
     )
 
+    private var isCardMovePagerDragActive: Boolean = false
+    private var lastCardMovePagerSwitchTime: Long = 0L
+
     private var toolbarBasePaddingTop: Int = 0
     private var toolbarBasePaddingBottom: Int = 0
     private var toolbarBaseHeight: Int = 0
@@ -493,6 +496,9 @@ class MainActivity : AppCompatActivity() {
                 updateShuffleMenuState()
             }
         })
+        flowPager.setOnDragListener { _, event ->
+            handleCardMovePagerDrag(event)
+        }
     }
 
     private fun setupToolbarActions() {
@@ -797,6 +803,44 @@ class MainActivity : AppCompatActivity() {
             false
         }
         return started
+    }
+
+    private fun handleCardMovePagerDrag(event: DragEvent): Boolean {
+        val isCardMove = event.clipDescription?.label?.toString() == CARD_MOVE_DRAG_LABEL
+        if (!isCardMove) return false
+        when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                isCardMovePagerDragActive = true
+                lastCardMovePagerSwitchTime = 0L
+                return true
+            }
+            DragEvent.ACTION_DRAG_LOCATION -> {
+                maybeSwitchFlowForCardDrag(event.x)
+                return true
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                isCardMovePagerDragActive = false
+                return true
+            }
+            else -> return true
+        }
+    }
+
+    private fun maybeSwitchFlowForCardDrag(positionX: Float) {
+        if (!isCardMovePagerDragActive) return
+        if (flows.size <= 1) return
+        val width = flowPager.width.takeIf { it > 0 } ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
+        val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
+        val currentIndex = flowPager.currentItem
+        val targetIndex = when {
+            positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
+            positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
+            else -> null
+        } ?: return
+        flowPager.setCurrentItem(targetIndex, true)
+        lastCardMovePagerSwitchTime = now
     }
 
     private fun confirmMergeFlows(sourceId: Long, targetId: Long) {
@@ -3829,6 +3873,8 @@ private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
+private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
+private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
