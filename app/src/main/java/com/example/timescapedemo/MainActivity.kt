@@ -867,7 +867,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAddFlowDialog() {
-        val suggestedName = defaultFlowName(flows.size)
+        val suggestedName = defaultFlowName()
         val input = EditText(this).apply {
             setText(suggestedName)
             setSelection(text.length)
@@ -886,7 +886,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle(R.string.dialog_add_flow_title)
             .setView(container)
             .setPositiveButton(R.string.dialog_create) { _, _ ->
-                val name = input.text.toString().trim().ifBlank { defaultFlowName(flows.size) }
+                val name = input.text.toString().trim().ifBlank { defaultFlowName() }
                 addFlow(name)
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -2968,7 +2968,7 @@ class MainActivity : AppCompatActivity() {
             payload.flows.forEachIndexed { index, importedFlow ->
                 val flowId = nextFlowId++
                 val flowName = importedFlow.name.takeIf { it.isNotBlank() }
-                    ?: defaultFlowName(baseIndex + index)
+                    ?: defaultFlowName()
                 val newCards = importedFlow.cards.map { importedCard ->
                     val cardId = nextCardId++
                     CardItem(
@@ -3174,7 +3174,7 @@ class MainActivity : AppCompatActivity() {
                     val nameRaw = obj.optString("name")
                     val flow = CardFlow(
                         id = flowId,
-                        name = if (nameRaw.isNullOrBlank()) defaultFlowName(flows.size) else nameRaw
+                        name = if (nameRaw.isNullOrBlank()) defaultFlowName() else nameRaw
                     )
                     highestFlowId = max(highestFlowId, flowId)
                     val cardsArray = obj.optJSONArray("cards")
@@ -3236,14 +3236,14 @@ class MainActivity : AppCompatActivity() {
                     legacyCards.clear()
                 }
             }
-            val flow = CardFlow(id = 0L, name = defaultFlowName(0))
+            val flow = CardFlow(id = 0L, name = defaultFlowName())
             flow.cards.addAll(legacyCards)
             flows += flow
             highestFlowId = max(highestFlowId, flow.id)
         }
 
         if (flows.isEmpty()) {
-            flows += CardFlow(id = 0L, name = defaultFlowName(0))
+            flows += CardFlow(id = 0L, name = defaultFlowName())
             highestFlowId = max(highestFlowId, 0L)
         }
 
@@ -3437,10 +3437,9 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun defaultFlowName(index: Int): String {
+    private fun defaultFlowName(): String {
         val baseName = SimpleDateFormat("M/d", Locale.getDefault()).format(Date())
-        val numberedName = if (index == 0) baseName else "$baseName (${index + 1})"
-        return getString(R.string.default_flow_name, numberedName)
+        return getString(R.string.default_flow_name, baseName)
     }
 
     private inner class FlowPagerAdapter : RecyclerView.Adapter<FlowPagerAdapter.FlowVH>() {
