@@ -145,15 +145,20 @@ class MainActivity : AppCompatActivity() {
             putString(STATE_IMAGE_CARD_REQUEST_TYPE, when (this@ImageCardRequest) {
                 is ImageCardRequest.Create -> STATE_IMAGE_CARD_REQUEST_TYPE_CREATE
                 is ImageCardRequest.Replace -> STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE
+                is ImageCardRequest.AddBack -> STATE_IMAGE_CARD_REQUEST_TYPE_ADD_BACK
             })
             putLong(STATE_IMAGE_CARD_REQUEST_FLOW_ID, flowId)
             if (this@ImageCardRequest is ImageCardRequest.Replace) {
+                putLong(STATE_IMAGE_CARD_REQUEST_CARD_ID, cardId)
+            }
+            if (this@ImageCardRequest is ImageCardRequest.AddBack) {
                 putLong(STATE_IMAGE_CARD_REQUEST_CARD_ID, cardId)
             }
         }
 
         data class Create(override val flowId: Long) : ImageCardRequest
         data class Replace(override val flowId: Long, val cardId: Long) : ImageCardRequest
+        data class AddBack(override val flowId: Long, val cardId: Long) : ImageCardRequest
 
         companion object {
             fun fromBundle(bundle: Bundle?): ImageCardRequest? {
@@ -165,6 +170,10 @@ class MainActivity : AppCompatActivity() {
                     STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE -> {
                         val cardId = bundle.getLong(STATE_IMAGE_CARD_REQUEST_CARD_ID, Long.MIN_VALUE)
                         if (cardId == Long.MIN_VALUE) null else Replace(flowId, cardId)
+                    }
+                    STATE_IMAGE_CARD_REQUEST_TYPE_ADD_BACK -> {
+                        val cardId = bundle.getLong(STATE_IMAGE_CARD_REQUEST_CARD_ID, Long.MIN_VALUE)
+                        if (cardId == Long.MIN_VALUE) null else AddBack(flowId, cardId)
                     }
                     else -> null
                 }
@@ -1467,7 +1476,10 @@ class MainActivity : AppCompatActivity() {
         actions += getString(R.string.image_card_option_edit_back) to {
             editImageCardBack(flow, card)
         }
-        if (card.imageHandwriting != null) {
+        actions += getString(R.string.image_card_option_add_back_photo) to {
+            startImageCardPicker(ImageCardRequest.AddBack(flow.id, card.id))
+        }
+        if (card.imageHandwriting != null || card.backImage != null) {
             actions += getString(R.string.image_card_option_remove_back) to {
                 removeImageCardBack(flow, card)
             }
@@ -1535,6 +1547,8 @@ class MainActivity : AppCompatActivity() {
     private fun removeImageCardBack(flow: CardFlow, card: CardItem) {
         card.imageHandwriting?.path?.let { deleteHandwritingFile(it) }
         card.imageHandwriting = null
+        deleteOwnedImage(card.backImage)
+        card.backImage = null
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
         saveState()
@@ -2447,6 +2461,7 @@ class MainActivity : AppCompatActivity() {
         when (request) {
             is ImageCardRequest.Create -> addImageCardToFlow(request.flowId, uri)
             is ImageCardRequest.Replace -> replaceImageOnCard(request.flowId, request.cardId, uri)
+            is ImageCardRequest.AddBack -> addBackImageToCard(request.flowId, request.cardId, uri)
         }
     }
 
@@ -2474,6 +2489,17 @@ class MainActivity : AppCompatActivity() {
         refreshFlow(flow, scrollToTop = false)
         saveState()
         snackbar(getString(R.string.snackbar_image_card_updated))
+    }
+
+    private fun addBackImageToCard(flowId: Long, cardId: Long, uri: Uri) {
+        val flow = flows.firstOrNull { it.id == flowId } ?: return
+        val card = flow.cards.firstOrNull { it.id == cardId } ?: return
+        deleteOwnedImage(card.backImage)
+        card.backImage = buildCardImage(uri)
+        card.updatedAt = System.currentTimeMillis()
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+        snackbar(getString(R.string.image_card_back_added))
     }
 
     private fun buildCardImage(uri: Uri, owned: Boolean = false): CardImage {
@@ -2676,6 +2702,7 @@ class MainActivity : AppCompatActivity() {
         card.handwriting?.let { deleteHandwritingFiles(it) }
         card.imageHandwriting?.path?.let { deleteHandwritingFile(it) }
         deleteOwnedImage(card.image)
+        deleteOwnedImage(card.backImage)
     }
 
     private fun cardCanvasBounds(): Pair<Int, Int> {
@@ -2995,6 +3022,9 @@ class MainActivity : AppCompatActivity() {
                 card.image?.let { image ->
                     imageToExportJson(image)?.let { cardObj.put("image", it) }
                 }
+                card.backImage?.let { image ->
+                    imageToExportJson(image)?.let { cardObj.put("backImage", it) }
+                }
                 card.imageHandwriting?.let { back ->
                     handwritingSideToExportJson(back)?.let { cardObj.put("imageHandwriting", it) }
                 }
@@ -3109,6 +3139,7 @@ class MainActivity : AppCompatActivity() {
                         snippet = importedCard.snippet,
                         updatedAt = importedCard.updatedAt,
                         image = importedCard.image,
+                        backImage = importedCard.backImage,
                         handwriting = importedCard.handwriting,
                         imageHandwriting = importedCard.imageHandwriting
                     )
@@ -3159,9 +3190,10 @@ class MainActivity : AppCompatActivity() {
                     val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
                     val handwriting = decodeHandwritingFromExport(cardObj.optJSONObject("handwriting"), createdFiles)
                     val image = decodeImageFromExport(cardObj.optJSONObject("image"), createdFiles)
+                    val backImage = decodeImageFromExport(cardObj.optJSONObject("backImage"), createdFiles)
                     val imageHandwriting = cardObj.optJSONObject("imageHandwriting")
                         ?.let { decodeHandwritingSideFromExport(it, createdFiles) }
-                    cards += ImportedCard(title, snippet, updatedAt, handwriting, image, imageHandwriting)
+                    cards += ImportedCard(title, snippet, updatedAt, handwriting, image, backImage, imageHandwriting)
                 }
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
@@ -3323,6 +3355,7 @@ class MainActivity : AppCompatActivity() {
                                 snippet = cardObj.optString("snippet"),
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
+                                backImage = parseCardImage(cardObj.optJSONObject("backImage")),
                                 handwriting = handwriting,
                                 imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
                                     parseHandwritingSide(it, baseHandwritingOptions)
@@ -3479,6 +3512,9 @@ class MainActivity : AppCompatActivity() {
                 }
                 card.image?.let { image ->
                     obj.put("image", cardImageToJson(image))
+                }
+                card.backImage?.let { image ->
+                    obj.put("backImage", cardImageToJson(image))
                 }
                 card.imageHandwriting?.let { back ->
                     obj.put("imageHandwriting", handwritingSideToJson(back))
@@ -3663,6 +3699,11 @@ class MainActivity : AppCompatActivity() {
             fun onCardDoubleTapped(index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
                 val face = adapter.currentFaceFor(index)
+                val card = adapter.getItemAt(index)
+                if (card?.image != null && face == HandwritingFace.FRONT) {
+                    startImageCardPicker(ImageCardRequest.AddBack(flow.id, card.id))
+                    return
+                }
                 editCard(flow, index, face)
             }
 
@@ -3851,6 +3892,7 @@ class MainActivity : AppCompatActivity() {
         val updatedAt: Long,
         val handwriting: HandwritingContent?,
         val image: CardImage?,
+        val backImage: CardImage?,
         val imageHandwriting: HandwritingSide?
     )
 
@@ -3884,6 +3926,7 @@ private const val STATE_IMAGE_CARD_REQUEST_FLOW_ID = "state/image_card/flow_id"
 private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
+private const val STATE_IMAGE_CARD_REQUEST_TYPE_ADD_BACK = "add_back"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f

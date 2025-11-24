@@ -47,6 +47,7 @@
     <string name="snackbar_added_handwriting">Added handwriting card</string>
     <string name="snackbar_added_image_card">Added image card</string>
     <string name="snackbar_image_card_updated">Updated image card</string>
+    <string name="image_card_back_added">Added back photo</string>
     <string name="snackbar_no_photo_selected">No photo selected</string>
     <string name="snackbar_merged_flows">Merged "%1$s" into "%2$s"</string>
     <string name="snackbar_need_another_flow_to_merge">Add another flow before merging.</string>
@@ -143,6 +144,7 @@
     <string name="image_card_option_replace">Replace photo</string>
     <string name="image_card_option_annotate">Draw on image</string>
     <string name="image_card_option_edit_back">Edit back</string>
+    <string name="image_card_option_add_back_photo">Add or replace back photo</string>
     <string name="image_card_option_remove_back">Remove back</string>
     <string name="image_card_option_delete">Delete card</string>
     <string name="image_card_handwriting_saved">Saved back handwriting</string>
