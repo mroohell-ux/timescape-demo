@@ -204,7 +204,7 @@ class HandwritingView @JvmOverloads constructor(
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
         if (drawingTool == TEXT) {
-            handleTextTouch(event.actionMasked, x, y)
+            handleTextTouch(event, x, y)
         } else {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -475,7 +475,8 @@ class HandwritingView @JvmOverloads constructor(
         path.reset()
     }
 
-    private fun handleTextTouch(action: Int, x: Float, y: Float) {
+    private fun handleTextTouch(event: MotionEvent, x: Float, y: Float) {
+        val action = event.actionMasked
         val isInsideText = currentTextBounds()?.contains(x, y) == true
         when (action) {
             MotionEvent.ACTION_DOWN -> {
@@ -493,12 +494,19 @@ class HandwritingView @JvmOverloads constructor(
                 textDragOffset.set(x - textPosition.x, y - textPosition.y)
                 disallowParentIntercept(true)
             }
-            MotionEvent.ACTION_MOVE -> if (isDraggingText) updateTextPosition(x - textDragOffset.x, y - textDragOffset.y)
+            MotionEvent.ACTION_MOVE -> {
+                if (!isDraggingText) {
+                    textDragOffset.set(x - textPosition.x, y - textPosition.y)
+                    isDraggingText = true
+                }
+                updateTextPosition(x - textDragOffset.x, y - textDragOffset.y)
+                disallowParentIntercept(true)
+            }
             MotionEvent.ACTION_UP -> {
                 if (isDraggingText) {
                     updateTextPosition(x - textDragOffset.x, y - textDragOffset.y)
-                    disallowParentIntercept(false)
                 }
+                disallowParentIntercept(false)
                 isDraggingText = false
             }
             MotionEvent.ACTION_CANCEL -> {
