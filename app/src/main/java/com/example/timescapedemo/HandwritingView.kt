@@ -476,7 +476,6 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun handleTextTouch(action: Int, x: Float, y: Float) {
-        if (textContent.isBlank()) return
         val isInsideText = currentTextBounds()?.contains(x, y) == true
         when (action) {
             MotionEvent.ACTION_DOWN -> {
@@ -527,6 +526,7 @@ class HandwritingView @JvmOverloads constructor(
     private fun updateTextPosition(x: Float, y: Float) {
         textPosition.set(x, y)
         clampTextPosition()
+        invalidate()
     }
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
