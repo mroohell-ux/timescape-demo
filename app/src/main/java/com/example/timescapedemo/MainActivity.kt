@@ -2255,6 +2255,10 @@ class MainActivity : AppCompatActivity() {
         textStampButton.isEnabled = textContentInput.text?.isNotBlank() == true
         textStampButton.setOnClickListener {
             if (handwritingView.placeTextStamp()) {
+                val preserveText = handwritingView.consumePreserveTextAfterStamp()
+                if (!preserveText) {
+                    textContentInput.setText("")
+                }
                 updateHistoryButtons()
             }
         }
