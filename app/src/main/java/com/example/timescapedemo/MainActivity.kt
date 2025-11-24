@@ -3076,6 +3076,13 @@ class MainActivity : AppCompatActivity() {
     private fun readImageBytes(uri: Uri): ByteArray? =
         runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
 
+    private fun decodeBase64Payload(raw: String): ByteArray? {
+        val normalized = raw.filterNot(Char::isWhitespace)
+        return runCatching { Base64.decode(normalized, Base64.DEFAULT) }.getOrElse {
+            runCatching { Base64.decode(normalized, Base64.NO_WRAP) }.getOrNull()
+        }
+    }
+
     private fun importNotes(uri: Uri) {
         lifecycleScope.launch {
             val payload = withContext(Dispatchers.IO) {
@@ -3186,7 +3193,7 @@ class MainActivity : AppCompatActivity() {
         createdFiles: MutableList<CreatedFile>
     ): HandwritingSide? {
         val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return null
+        val bytes = decodeBase64Payload(data) ?: return null
         val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
         val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
@@ -3205,7 +3212,7 @@ class MainActivity : AppCompatActivity() {
     ): CardImage? {
         if (imageObj == null) return null
         val data = imageObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return null
+        val bytes = decodeBase64Payload(data) ?: return null
         val mimeType = imageObj.optString("mimeType").takeIf { it.isNotBlank() } ?: "image/jpeg"
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?: when (mimeType.lowercase(Locale.ROOT)) {
