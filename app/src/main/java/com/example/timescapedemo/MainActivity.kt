@@ -1755,6 +1755,7 @@ class MainActivity : AppCompatActivity() {
         val textColorGroup = paletteView.findViewById<ChipGroup>(R.id.groupTextColors)
         val textSizeValue = paletteView.findViewById<TextView>(R.id.textTextSizeValue)
         val textSizeSlider = paletteView.findViewById<Slider>(R.id.sliderTextSize)
+        val textStampButton = paletteView.findViewById<MaterialButton>(R.id.buttonStampText)
         val eraserSizeValue = paletteView.findViewById<TextView>(R.id.textEraserSizeValue)
         val eraserSizeSlider = paletteView.findViewById<Slider>(R.id.sliderEraserSize)
         val eraserTypeGroup = paletteView.findViewById<ChipGroup>(R.id.groupEraserTypes)
@@ -2249,6 +2250,13 @@ class MainActivity : AppCompatActivity() {
 
         textContentInput.doAfterTextChanged { editable ->
             handwritingView.setTextContent(editable?.toString().orEmpty())
+            textStampButton.isEnabled = !editable.isNullOrBlank()
+        }
+        textStampButton.isEnabled = textContentInput.text?.isNotBlank() == true
+        textStampButton.setOnClickListener {
+            if (handwritingView.placeTextStamp()) {
+                updateHistoryButtons()
+            }
         }
 
         var visiblePalette: HandwritingPaletteSection? = null

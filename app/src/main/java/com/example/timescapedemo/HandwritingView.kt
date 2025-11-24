@@ -474,7 +474,6 @@ class HandwritingView @JvmOverloads constructor(
             MotionEvent.ACTION_UP -> {
                 if (isPlacingText) {
                     updateTextPosition(x, y)
-                    commitTextStamp()
                 }
                 isPlacingText = false
                 disallowParentIntercept(false)
@@ -486,15 +485,19 @@ class HandwritingView @JvmOverloads constructor(
         }
     }
 
-    private fun commitTextStamp(addToHistory: Boolean = true) {
-        if (textContent.isBlank()) return
-        val canvas = extraCanvas ?: return
+    fun placeTextStamp(addToHistory: Boolean = true): Boolean = commitTextStamp(addToHistory)
+
+    private fun commitTextStamp(addToHistory: Boolean = true): Boolean {
+        if (textContent.isBlank()) return false
+        val canvas = extraCanvas ?: return false
         drawTextLines(canvas, textPaint, textPosition.x, textPosition.y)
         hasContent = true
         if (addToHistory) {
             pushCurrentState(true, hasBaseImage)
         }
         notifyContentChanged()
+        invalidate()
+        return true
     }
 
     private fun updateTextPosition(x: Float, y: Float) {

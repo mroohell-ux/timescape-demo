@@ -166,4 +166,5 @@
     <string name="handwriting_text_color_label">Text color</string>
     <string name="handwriting_text_size_label">Text size</string>
     <string name="handwriting_text_size_value">%1$.0f sp</string>
+    <string name="handwriting_text_place_label">Place text on canvas</string>
 </resources>
