@@ -476,7 +476,8 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun handleTextTouch(action: Int, x: Float, y: Float) {
-        val isInsideText = textContent.isNotBlank() && currentTextBounds()?.contains(x, y) == true
+        if (textContent.isBlank()) return
+        val isInsideText = currentTextBounds()?.contains(x, y) == true
         when (action) {
             MotionEvent.ACTION_DOWN -> {
                 if (isInsideText) {
@@ -485,15 +486,13 @@ class HandwritingView @JvmOverloads constructor(
                         preserveTextAfterStamp = true
                     }
                     lastTextTapTime = now
-                    isDraggingText = true
-                    textDragOffset.set(x - textPosition.x, y - textPosition.y)
-                    disallowParentIntercept(true)
                 } else {
-                    isDraggingText = false
                     lastTextTapTime = 0L
                     preserveTextAfterStamp = false
-                    disallowParentIntercept(false)
                 }
+                isDraggingText = true
+                textDragOffset.set(x - textPosition.x, y - textPosition.y)
+                disallowParentIntercept(true)
             }
             MotionEvent.ACTION_MOVE -> if (isDraggingText) updateTextPosition(x - textDragOffset.x, y - textDragOffset.y)
             MotionEvent.ACTION_UP -> {
