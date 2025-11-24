@@ -93,6 +93,82 @@
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/containerTextOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/handwriting_text_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/inputTextContentLayout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:boxStrokeColor="?attr/colorPrimary"
+                app:hintEnabled="false">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inputTextContent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="top|start"
+                    android:hint="@string/handwriting_text_hint"
+                    android:imeOptions="actionDone"
+                    android:inputType="textCapSentences|textMultiLine"
+                    android:minLines="2"
+                    android:paddingVertical="10dp"
+                    android:textAppearance="@style/TextAppearance.MaterialComponents.Body1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/handwriting_text_color_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/groupTextColors"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:chipSpacingHorizontal="8dp"
+                app:chipSpacingVertical="8dp"
+                app:selectionRequired="true"
+                app:singleLine="false"
+                app:singleSelection="true" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/handwriting_text_size_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+            <TextView
+                android:id="@+id/textTextSizeValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/sliderTextSize"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                app:labelBehavior="gone"
+                app:trackColorActive="?attr/colorPrimary"
+                app:trackColorInactive="@android:color/darker_gray" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/containerCanvasOptions"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
