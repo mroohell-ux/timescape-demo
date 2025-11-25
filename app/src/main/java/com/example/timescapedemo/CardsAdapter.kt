@@ -35,6 +35,10 @@ import androidx.core.view.isVisible
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -75,6 +79,7 @@ data class CardItem(
     var snippet: String,
     var bg: BgImage? = null,
     var image: CardImage? = null,
+    var video: CardVideo? = null,
     var updatedAt: Long = System.currentTimeMillis(),
     var handwriting: HandwritingContent? = null,
     var imageHandwriting: HandwritingSide? = null,
@@ -85,6 +90,16 @@ data class CardImage(
     var uri: Uri,
     var mimeType: String? = null,
     var ownedByApp: Boolean = false
+)
+
+data class CardVideo(
+    var uri: Uri,
+    var mimeType: String? = null,
+    var ownedByApp: Boolean = false,
+    var width: Int? = null,
+    var height: Int? = null,
+    var durationUs: Long? = null,
+    var previewFrameMicros: Long? = null
 )
 
 /** Non-“glass” tint options that keep the card transparent. */
@@ -116,10 +131,15 @@ class CardsAdapter(
         val textScrim: View = v.findViewById(R.id.textScrim)
         val imageCardContainer: View = v.findViewById(R.id.imageCardContainer)
         val imageCard: ImageView = v.findViewById(R.id.imageCard)
+        val videoCardContainer: View = v.findViewById(R.id.videoCardContainer)
+        val videoThumbnail: ImageView = v.findViewById(R.id.videoThumbnail)
+        val videoPlayer: PlayerView = v.findViewById(R.id.videoPlayer)
         val cardContent: View = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         lateinit var gestureDetector: GestureDetectorCompat
+        var player: ExoPlayer? = null
+        var boundVideoUri: Uri? = null
     }
 
     private val blockedUris = mutableSetOf<Uri>()
@@ -127,7 +147,9 @@ class CardsAdapter(
     private var backgroundSizingConfig: BackgroundSizingConfig = backgroundSizing.normalized()
     private val tintProcessor = TintProcessor(tint)
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
-    private enum class CardMode { TEXT, IMAGE, HANDWRITING }
+    private var focusedIndex: Int? = null
+    private var attachedRecyclerView: RecyclerView? = null
+    private enum class CardMode { TEXT, IMAGE, VIDEO, HANDWRITING }
     private val blurEffect: RenderEffect? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
@@ -137,6 +159,17 @@ class CardsAdapter(
 
     init {
         setHasStableIds(true)
+    }
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        attachedRecyclerView = recyclerView
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        attachedRecyclerView = null
+        focusedIndex = null
     }
 
     override fun submitList(list: List<CardItem>?) {
@@ -167,6 +200,7 @@ class CardsAdapter(
             buildList {
                 (card.bg as? BgImage.UriRef)?.uri?.let { add(it) }
                 card.image?.uri?.let { add(it) }
+                card.video?.uri?.let { add(it) }
             }
         }.toSet()
         blockedUris.retainAll(activeUris)
@@ -184,6 +218,14 @@ class CardsAdapter(
         if (normalized == backgroundSizingConfig) return
         backgroundSizingConfig = normalized
         notifyDataSetChanged()
+    }
+
+    fun updateFocusedIndex(index: Int?) {
+        if (index == focusedIndex) return
+        val old = focusedIndex
+        focusedIndex = index
+        old?.let { updatePlaybackForIndex(it, shouldPlay = false) }
+        index?.let { updatePlaybackForIndex(it, shouldPlay = true) }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -232,6 +274,7 @@ class CardsAdapter(
         ).toString().also { item.relativeTimeText = it }
         val handwritingContent = item.handwriting
         val imageContent = item.image
+        val videoContent = item.video
         val fallbackText = when {
             handwritingContent != null -> {
                 if (item.snippet.isNotBlank()) item.snippet
@@ -240,6 +283,10 @@ class CardsAdapter(
             imageContent != null -> {
                 if (item.snippet.isNotBlank()) item.snippet
                 else holder.itemView.context.getString(R.string.image_card_missing)
+            }
+            videoContent != null -> {
+                if (item.snippet.isNotBlank()) item.snippet
+                else holder.itemView.context.getString(R.string.video_card_missing)
             }
             else -> item.snippet
         }
@@ -253,19 +300,25 @@ class CardsAdapter(
         } else if (imageContent != null) {
             bindImageCard(holder, item, face, fallbackText, position)
             clearTitle(holder)
+        } else if (videoContent != null) {
+            bindVideoCard(holder, item, fallbackText, position)
+            clearTitle(holder)
         } else {
             HandwritingBitmapLoader.clear(holder.handwriting)
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
+            VideoThumbnailLoader.clear(holder.videoThumbnail)
+            releasePlayer(holder)
             setCardMode(holder, CardMode.TEXT, fallbackText)
             bindTitle(holder, item)
+            resetCardRatio(holder)
         }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
         holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
 
         // ---- Bind background image (drawable or Uri) ----
-        val shouldDisplayBackground = handwritingContent == null && imageContent == null
+        val shouldDisplayBackground = handwritingContent == null && imageContent == null && videoContent == null
         BackgroundImageLoader.clear(holder.bg)
         val hasBackground = if (shouldDisplayBackground) {
             when (val b = item.bg) {
@@ -339,6 +392,8 @@ class CardsAdapter(
         BackgroundImageLoader.clear(holder.bg)
         BackgroundImageLoader.clear(holder.imageCard)
         holder.imageCard.setImageDrawable(null)
+        VideoThumbnailLoader.clear(holder.videoThumbnail)
+        releasePlayer(holder)
         holder.imageCard.contentDescription = null
         holder.handwriting.contentDescription = null
         holder.itemView.setTag(R.id.tag_card_id, null)
@@ -357,6 +412,7 @@ class CardsAdapter(
     ) {
         val handwritingContent = content
         val density = holder.itemView.resources.displayMetrics.density
+        releasePlayer(holder)
         if (face == HandwritingFace.BACK && handwritingContent.back == null) {
             HandwritingBitmapLoader.clear(holder.handwriting)
             val (targetWidth, targetHeight) = estimateTargetSize(holder, handwritingContent.options)
@@ -372,6 +428,7 @@ class CardsAdapter(
                 R.string.handwriting_card_content_desc
             )
             setCardMode(holder, CardMode.HANDWRITING, fallbackText)
+            resetCardRatio(holder)
             onReady?.invoke()
             prefetchNeighbors(holder, position, handwritingContent.options)
             return
@@ -381,6 +438,7 @@ class CardsAdapter(
         holder.handwritingContainer.setBackgroundColor(side.options.backgroundColor)
         HandwritingBitmapLoader.clear(holder.handwriting)
         setCardMode(holder, CardMode.HANDWRITING, fallbackText)
+        resetCardRatio(holder)
         HandwritingBitmapLoader.load(
             context = holder.itemView.context,
             path = side.path,
@@ -435,7 +493,9 @@ class CardsAdapter(
         HandwritingBitmapLoader.clear(holder.handwriting)
         holder.handwriting.contentDescription = null
         BackgroundImageLoader.clear(holder.imageCard)
+        releasePlayer(holder)
         setCardMode(holder, CardMode.IMAGE, fallbackText)
+        resetCardRatio(holder)
         val snippet = item.snippet.takeIf { it.isNotBlank() }
         holder.imageCard.contentDescription = snippet
             ?: holder.itemView.context.getString(R.string.image_card_content_desc)
@@ -478,6 +538,66 @@ class CardsAdapter(
         }
     }
 
+    private fun bindVideoCard(
+        holder: VH,
+        item: CardItem,
+        fallbackText: CharSequence,
+        position: Int
+    ) {
+        HandwritingBitmapLoader.clear(holder.handwriting)
+        holder.handwriting.contentDescription = null
+        BackgroundImageLoader.clear(holder.imageCard)
+        VideoThumbnailLoader.clear(holder.videoThumbnail)
+        releasePlayer(holder)
+        setCardMode(holder, CardMode.VIDEO, fallbackText)
+        val video = item.video
+        val uri = video?.uri
+        holder.videoThumbnail.contentDescription = item.snippet.takeIf { it.isNotBlank() }
+            ?: holder.itemView.context.getString(R.string.video_card_content_desc)
+        holder.boundVideoUri = uri
+        if (uri == null) {
+            holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
+            releasePlayer(holder)
+            resetCardRatio(holder)
+            return
+        }
+        if (blockedUris.contains(uri)) {
+            holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
+            releasePlayer(holder)
+            resetCardRatio(holder)
+            return
+        }
+        applyVideoAspect(holder, video)
+        val (targetWidth, targetHeight) = estimateImageTargetSize(holder)
+        VideoThumbnailLoader.load(
+            context = holder.itemView.context,
+            imageView = holder.videoThumbnail,
+            video = video,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight
+        ) { result ->
+            val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+            if (!isSameCard) return@load
+            when (result) {
+                is VideoThumbnailLoader.Result.Success -> {
+                    blockedUris.remove(uri)
+                    holder.videoThumbnail.setImageBitmap(result.bitmap)
+                }
+                is VideoThumbnailLoader.Result.PermissionDenied -> {
+                    blockedUris.add(uri)
+                    holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
+                }
+                is VideoThumbnailLoader.Result.NotFound -> {
+                    holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
+                }
+                is VideoThumbnailLoader.Result.Error -> {
+                    holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
+                }
+            }
+        }
+        updatePlaybackForHolder(holder, position == focusedIndex, video)
+    }
+
     private fun bindImageBack(
         holder: VH,
         item: CardItem,
@@ -490,6 +610,7 @@ class CardsAdapter(
         holder.handwritingContainer.setBackgroundColor(side.options.backgroundColor)
         HandwritingBitmapLoader.clear(holder.handwriting)
         setCardMode(holder, CardMode.HANDWRITING, fallbackText)
+        resetCardRatio(holder)
         HandwritingBitmapLoader.load(
             context = holder.itemView.context,
             path = side.path,
@@ -747,6 +868,9 @@ class CardsAdapter(
                 holder.handwriting.isVisible = false
                 holder.imageCardContainer.isVisible = false
                 holder.imageCard.isVisible = false
+                holder.videoCardContainer.isVisible = false
+                holder.videoThumbnail.isVisible = false
+                holder.videoPlayer.isVisible = false
                 holder.bg.isVisible = true
             }
             CardMode.IMAGE -> {
@@ -760,6 +884,25 @@ class CardsAdapter(
                 holder.handwriting.isVisible = false
                 holder.imageCardContainer.isVisible = true
                 holder.imageCard.isVisible = true
+                holder.videoCardContainer.isVisible = false
+                holder.videoThumbnail.isVisible = false
+                holder.videoPlayer.isVisible = false
+                holder.bg.isVisible = false
+            }
+            CardMode.VIDEO -> {
+                holder.cardContent.isVisible = false
+                holder.textScrim.isVisible = false
+                holder.time.isVisible = false
+                holder.snippet.isVisible = false
+                holder.titleContainer.isVisible = false
+                holder.titleSpeakButton.isVisible = false
+                holder.handwritingContainer.isVisible = false
+                holder.handwriting.isVisible = false
+                holder.imageCardContainer.isVisible = false
+                holder.imageCard.isVisible = false
+                holder.videoCardContainer.isVisible = true
+                holder.videoThumbnail.isVisible = true
+                holder.videoPlayer.isVisible = false
                 holder.bg.isVisible = false
             }
             CardMode.HANDWRITING -> {
@@ -773,9 +916,68 @@ class CardsAdapter(
                 holder.handwriting.isVisible = true
                 holder.imageCardContainer.isVisible = false
                 holder.imageCard.isVisible = false
+                holder.videoCardContainer.isVisible = false
+                holder.videoThumbnail.isVisible = false
+                holder.videoPlayer.isVisible = false
                 holder.bg.isVisible = false
             }
         }
+    }
+
+    private fun applyVideoAspect(holder: VH, video: CardVideo?) {
+        val card = holder.itemView as? AspectRatioCardView ?: return
+        val w = video?.width
+        val h = video?.height
+        if (w != null && h != null && w > 0 && h > 0) {
+            card.setRatio(w, h)
+        } else {
+            card.clearRatio()
+        }
+    }
+
+    private fun resetCardRatio(holder: VH) {
+        val card = holder.itemView as? AspectRatioCardView ?: return
+        card.clearRatio()
+    }
+
+    private fun updatePlaybackForIndex(index: Int, shouldPlay: Boolean) {
+        val recycler = attachedRecyclerView ?: return
+        val holder = recycler.findViewHolderForAdapterPosition(index) as? VH ?: return
+        val video = getItem(index).video
+        updatePlaybackForHolder(holder, shouldPlay, video)
+    }
+
+    private fun updatePlaybackForHolder(holder: VH, shouldPlay: Boolean, video: CardVideo?) {
+        if (!shouldPlay || video == null) {
+            holder.videoPlayer.isVisible = false
+            holder.videoThumbnail.isVisible = true
+            holder.player?.playWhenReady = false
+            holder.player?.pause()
+            return
+        }
+        val uri = video.uri
+        val player = holder.player ?: ExoPlayer.Builder(holder.itemView.context).build().also { newPlayer ->
+            newPlayer.repeatMode = Player.REPEAT_MODE_ALL
+            newPlayer.volume = 0f
+            holder.player = newPlayer
+        }
+        if (holder.boundVideoUri != uri) {
+            player.setMediaItem(MediaItem.fromUri(uri))
+            player.prepare()
+            holder.boundVideoUri = uri
+        }
+        holder.videoPlayer.player = player
+        holder.videoThumbnail.isVisible = false
+        holder.videoPlayer.isVisible = true
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        player.playWhenReady = true
+    }
+
+    private fun releasePlayer(holder: VH) {
+        holder.videoPlayer.player = null
+        holder.player?.release()
+        holder.player = null
+        holder.boundVideoUri = null
     }
 
     private fun bindTitle(holder: VH, item: CardItem) {
@@ -1035,6 +1237,7 @@ private fun CardItem.deepCopy(): CardItem = copy(
         null -> null
     },
     image = image?.copy(),
+    video = video?.copy(),
     handwriting = handwriting?.let { content ->
         content.copy(
             options = content.options.copy(),

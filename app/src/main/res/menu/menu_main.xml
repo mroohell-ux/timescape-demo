@@ -35,6 +35,12 @@
         app:showAsAction="always"/>
 
     <item
+        android:id="@+id/action_add_video_card"
+        android:title="@string/menu_add_video_card"
+        android:icon="@android:drawable/ic_media_play"
+        app:showAsAction="always"/>
+
+    <item
         android:id="@+id/action_add_handwriting"
         android:title="@string/menu_add_handwriting"
         android:icon="@drawable/ic_handwriting"

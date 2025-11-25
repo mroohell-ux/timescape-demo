@@ -8,6 +8,7 @@ import android.content.res.ColorStateList
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,7 @@ import android.os.SystemClock
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.content.ActivityNotFoundException
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -173,6 +175,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var pendingImageCardRequest: ImageCardRequest? = null
+    private sealed interface VideoCardRequest {
+        val flowId: Long
+
+        fun toBundle(): Bundle = Bundle().apply {
+            putString(STATE_VIDEO_CARD_REQUEST_TYPE, when (this@VideoCardRequest) {
+                is VideoCardRequest.Create -> STATE_VIDEO_CARD_REQUEST_TYPE_CREATE
+                is VideoCardRequest.Replace -> STATE_VIDEO_CARD_REQUEST_TYPE_REPLACE
+            })
+            putLong(STATE_VIDEO_CARD_REQUEST_FLOW_ID, flowId)
+            if (this@VideoCardRequest is VideoCardRequest.Replace) {
+                putLong(STATE_VIDEO_CARD_REQUEST_CARD_ID, cardId)
+            }
+        }
+
+        data class Create(override val flowId: Long) : VideoCardRequest
+        data class Replace(override val flowId: Long, val cardId: Long) : VideoCardRequest
+
+        companion object {
+            fun fromBundle(bundle: Bundle?): VideoCardRequest? {
+                if (bundle == null) return null
+                val flowId = bundle.getLong(STATE_VIDEO_CARD_REQUEST_FLOW_ID, Long.MIN_VALUE)
+                if (flowId == Long.MIN_VALUE) return null
+                return when (bundle.getString(STATE_VIDEO_CARD_REQUEST_TYPE)) {
+                    STATE_VIDEO_CARD_REQUEST_TYPE_CREATE -> Create(flowId)
+                    STATE_VIDEO_CARD_REQUEST_TYPE_REPLACE -> {
+                        val cardId = bundle.getLong(STATE_VIDEO_CARD_REQUEST_CARD_ID, Long.MIN_VALUE)
+                        if (cardId == Long.MIN_VALUE) null else Replace(flowId, cardId)
+                    }
+                    else -> null
+                }
+            }
+        }
+    }
+
+    private var pendingVideoCardRequest: VideoCardRequest? = null
     private var pendingExportFlowId: Long? = null
 
     private data class HandwritingDialogExtras(
@@ -242,6 +279,16 @@ class MainActivity : AppCompatActivity() {
             handleImageCardResult(uri)
         }
 
+    private val pickVideoCard =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            handleVideoCardResult(uri)
+        }
+
+    private val openVideoCard =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            handleVideoCardResult(uri)
+        }
+
     private val pickAppBackground =
         registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri != null) {
@@ -293,6 +340,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         pendingImageCardRequest = ImageCardRequest.fromBundle(
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
+        )
+        pendingVideoCardRequest = VideoCardRequest.fromBundle(
+            savedInstanceState?.getBundle(STATE_PENDING_VIDEO_CARD_REQUEST)
         )
         pendingExportFlowId = savedInstanceState?.getLong(STATE_PENDING_EXPORT_FLOW_ID, Long.MIN_VALUE)
             ?.takeIf { it != Long.MIN_VALUE }
@@ -512,6 +562,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_export_flow -> { launchExportCurrentFlow(); true }
                 R.id.action_add_card -> { showAddCardDialog(); true }
                 R.id.action_add_image_card -> { showAddImageCardDialog(); true }
+                R.id.action_add_video_card -> { showAddVideoCardDialog(); true }
                 R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
                 else -> false
@@ -1308,6 +1359,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         startImageCardPicker(ImageCardRequest.Create(flow.id))
+    }
+
+    private fun showAddVideoCardDialog() {
+        val flow = currentFlow()
+        if (flow == null) {
+            snackbar(getString(R.string.snackbar_add_flow_first))
+            return
+        }
+        startVideoCardPicker(VideoCardRequest.Create(flow.id))
     }
 
     private fun showAddHandwritingDialog() {
@@ -2435,6 +2495,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startVideoCardPicker(request: VideoCardRequest) {
+        pendingVideoCardRequest = request
+        if (isPhotoPickerAvailable()) {
+            pickVideoCard.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+        } else {
+            openVideoCard.launch(arrayOf("video/*"))
+        }
+    }
+
     private fun handleImageCardResult(uri: Uri?) {
         val request = pendingImageCardRequest
         pendingImageCardRequest = null
@@ -2447,6 +2516,25 @@ class MainActivity : AppCompatActivity() {
         when (request) {
             is ImageCardRequest.Create -> addImageCardToFlow(request.flowId, uri)
             is ImageCardRequest.Replace -> replaceImageOnCard(request.flowId, request.cardId, uri)
+        }
+    }
+
+    private fun handleVideoCardResult(uri: Uri?) {
+        val request = pendingVideoCardRequest
+        pendingVideoCardRequest = null
+        if (request == null) return
+        if (uri == null) {
+            snackbar(getString(R.string.snackbar_no_video_selected))
+            return
+        }
+        if (!isVideoUri(uri)) {
+            snackbar(getString(R.string.snackbar_not_video_file))
+            return
+        }
+        persistReadPermission(uri)
+        when (request) {
+            is VideoCardRequest.Create -> addVideoCardToFlow(request.flowId, uri)
+            is VideoCardRequest.Replace -> replaceVideoOnCard(request.flowId, request.cardId, uri)
         }
     }
 
@@ -2465,6 +2553,21 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_added_image_card))
     }
 
+    private fun addVideoCardToFlow(flowId: Long, uri: Uri) {
+        val flow = flows.firstOrNull { it.id == flowId } ?: return
+        val card = CardItem(
+            id = nextCardId++,
+            title = "",
+            snippet = "",
+            video = buildCardVideo(uri),
+            updatedAt = System.currentTimeMillis()
+        )
+        flow.cards += card
+        refreshFlow(flow, scrollToTop = true)
+        saveState()
+        snackbar(getString(R.string.snackbar_added_video_card))
+    }
+
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
         val card = flow.cards.firstOrNull { it.id == cardId } ?: return
@@ -2476,15 +2579,83 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
+    private fun replaceVideoOnCard(flowId: Long, cardId: Long, uri: Uri) {
+        val flow = flows.firstOrNull { it.id == flowId } ?: return
+        val card = flow.cards.firstOrNull { it.id == cardId } ?: return
+        deleteOwnedVideo(card.video)
+        card.video = buildCardVideo(uri)
+        card.updatedAt = System.currentTimeMillis()
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+    }
+
     private fun buildCardImage(uri: Uri, owned: Boolean = false): CardImage {
         val mimeType = contentResolver.getType(uri)
         return CardImage(uri, mimeType, owned)
+    }
+
+    private fun buildCardVideo(uri: Uri, owned: Boolean = false): CardVideo {
+        val mimeType = contentResolver.getType(uri)
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(this, uri)
+            val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull()
+            val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull()
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            val durationUs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()?.times(1000)
+            val previewFrame = durationUs?.takeIf { it > 0 }?.let { Random.nextLong(it.coerceAtLeast(1L)) }
+            val width = if (rotation % 180 != 0) rawHeight else rawWidth
+            val height = if (rotation % 180 != 0) rawWidth else rawHeight
+            CardVideo(uri, mimeType, owned, width, height, durationUs, previewFrame)
+        } catch (_: Exception) {
+            CardVideo(uri, mimeType, owned)
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
     }
 
     private fun deleteOwnedImage(image: CardImage?) {
         if (image?.ownedByApp != true) return
         val path = image.uri.path ?: return
         runCatching { File(path).delete() }
+    }
+
+    private fun deleteOwnedVideo(video: CardVideo?) {
+        if (video?.ownedByApp != true) return
+        val path = video.uri.path ?: return
+        runCatching { File(path).delete() }
+    }
+
+    private fun playVideoFullScreen(video: CardVideo) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(video.uri, video.mimeType ?: "video/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            snackbar(getString(R.string.snackbar_no_video_player))
+        }
+    }
+
+    private fun isVideoUri(uri: Uri): Boolean {
+        val mimeType = contentResolver.getType(uri)
+        if (mimeType?.startsWith("video/") == true) return true
+
+        val extension = MimeTypeMap.getFileExtensionFromUrl(uri.toString())
+            ?.lowercase(Locale.getDefault())
+        val guessedType = extension?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
+        if (guessedType?.startsWith("video/") == true) return true
+
+        return when (extension) {
+            "mp4", "m4v", "mkv", "webm", "mov", "avi", "3gp", "3gpp", "3g2", "mpeg", "mpg",
+            "mpe", "ts", "m2ts", "mts", "wmv", "flv", "f4v", "hevc", "h265", "h264" -> true
+            else -> false
+        }
     }
 
     private fun launchAppBackgroundPicker() {
@@ -2837,6 +3008,18 @@ class MainActivity : AppCompatActivity() {
         return CardImage(Uri.parse(uriString), mimeType, owned)
     }
 
+    private fun parseCardVideo(obj: JSONObject?): CardVideo? {
+        if (obj == null) return null
+        val uriString = obj.optString("uri").takeIf { it.isNotBlank() } ?: return null
+        val mimeType = obj.optString("mimeType").takeIf { it.isNotBlank() }
+        val owned = obj.optBoolean("owned", false)
+        val width = obj.optInt("width", -1).takeIf { it > 0 }
+        val height = obj.optInt("height", -1).takeIf { it > 0 }
+        val durationUs = obj.optLong("durationUs", -1L).takeIf { it > 0 }
+        val previewFrame = obj.optLong("previewFrameMicros", -1L).takeIf { it > 0 }
+        return CardVideo(Uri.parse(uriString), mimeType, owned, width, height, durationUs, previewFrame)
+    }
+
     private fun parseHandwritingSide(
         obj: JSONObject,
         baseOptions: HandwritingOptions
@@ -2995,6 +3178,9 @@ class MainActivity : AppCompatActivity() {
                 card.image?.let { image ->
                     imageToExportJson(image)?.let { cardObj.put("image", it) }
                 }
+                card.video?.let { video ->
+                    cardObj.put("video", videoToExportJson(video))
+                }
                 card.imageHandwriting?.let { back ->
                     handwritingSideToExportJson(back)?.let { cardObj.put("imageHandwriting", it) }
                 }
@@ -3030,6 +3216,16 @@ class MainActivity : AppCompatActivity() {
         put("uri", image.uri.toString())
         image.mimeType?.let { put("mimeType", it) }
         put("owned", image.ownedByApp)
+    }
+
+    private fun cardVideoToJson(video: CardVideo): JSONObject = JSONObject().apply {
+        put("uri", video.uri.toString())
+        video.mimeType?.let { put("mimeType", it) }
+        put("owned", video.ownedByApp)
+        video.width?.let { put("width", it) }
+        video.height?.let { put("height", it) }
+        video.durationUs?.let { put("durationUs", it) }
+        video.previewFrameMicros?.let { put("previewFrameMicros", it) }
     }
 
     private fun handwritingToJson(content: HandwritingContent): JSONObject? {
@@ -3068,6 +3264,15 @@ class MainActivity : AppCompatActivity() {
             put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
             put("mimeType", mimeType)
         }
+    }
+
+    private fun videoToExportJson(video: CardVideo): JSONObject = JSONObject().apply {
+        put("uri", video.uri.toString())
+        video.mimeType?.let { put("mimeType", it) }
+        video.width?.let { put("width", it) }
+        video.height?.let { put("height", it) }
+        video.durationUs?.let { put("durationUs", it) }
+        video.previewFrameMicros?.let { put("previewFrameMicros", it) }
     }
 
     private fun readHandwritingBytes(path: String): ByteArray? =
@@ -3109,6 +3314,7 @@ class MainActivity : AppCompatActivity() {
                         snippet = importedCard.snippet,
                         updatedAt = importedCard.updatedAt,
                         image = importedCard.image,
+                        video = importedCard.video,
                         handwriting = importedCard.handwriting,
                         imageHandwriting = importedCard.imageHandwriting
                     )
@@ -3159,9 +3365,10 @@ class MainActivity : AppCompatActivity() {
                     val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
                     val handwriting = decodeHandwritingFromExport(cardObj.optJSONObject("handwriting"), createdFiles)
                     val image = decodeImageFromExport(cardObj.optJSONObject("image"), createdFiles)
+                    val video = parseCardVideo(cardObj.optJSONObject("video"))
                     val imageHandwriting = cardObj.optJSONObject("imageHandwriting")
                         ?.let { decodeHandwritingSideFromExport(it, createdFiles) }
-                    cards += ImportedCard(title, snippet, updatedAt, handwriting, image, imageHandwriting)
+                    cards += ImportedCard(title, snippet, updatedAt, handwriting, image, video, imageHandwriting)
                 }
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
@@ -3323,6 +3530,7 @@ class MainActivity : AppCompatActivity() {
                                 snippet = cardObj.optString("snippet"),
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
+                                video = parseCardVideo(cardObj.optJSONObject("video")),
                                 handwriting = handwriting,
                                 imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
                                     parseHandwritingSide(it, baseHandwritingOptions)
@@ -3480,6 +3688,9 @@ class MainActivity : AppCompatActivity() {
                 card.image?.let { image ->
                     obj.put("image", cardImageToJson(image))
                 }
+                card.video?.let { video ->
+                    obj.put("video", cardVideoToJson(video))
+                }
                 card.imageHandwriting?.let { back ->
                     obj.put("imageHandwriting", handwritingSideToJson(back))
                 }
@@ -3550,6 +3761,9 @@ class MainActivity : AppCompatActivity() {
         pendingExportFlowId?.let { outState.putLong(STATE_PENDING_EXPORT_FLOW_ID, it) }
         pendingImageCardRequest?.toBundle()?.let { bundle ->
             outState.putBundle(STATE_PENDING_IMAGE_CARD_REQUEST, bundle)
+        }
+        pendingVideoCardRequest?.toBundle()?.let { bundle ->
+            outState.putBundle(STATE_PENDING_VIDEO_CARD_REQUEST, bundle)
         }
         super.onSaveInstanceState(outState)
     }
@@ -3662,6 +3876,11 @@ class MainActivity : AppCompatActivity() {
 
             fun onCardDoubleTapped(index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val card = adapter.getItemAt(index) ?: return
+                if (card.video != null) {
+                    playVideoFullScreen(card.video)
+                    return
+                }
                 val face = adapter.currentFaceFor(index)
                 editCard(flow, index, face)
             }
@@ -3685,7 +3904,10 @@ class MainActivity : AppCompatActivity() {
     ) {
         private var activeQuery: String = ""
         private var indicatorTotal: Int = 0
-        private val selectionCallback: (Int?) -> Unit = { index -> updateCardCounter(index) }
+        private val selectionCallback: (Int?) -> Unit = { index ->
+            adapter.updateFocusedIndex(index)
+            updateCardCounter(index)
+        }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
@@ -3804,6 +4026,7 @@ class MainActivity : AppCompatActivity() {
             val selection = layoutManager.currentSelectionIndex()?.coerceIn(0, adapter.itemCount - 1)
             val target = selection ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
             layoutManager.focus(target)
+            adapter.updateFocusedIndex(layoutManager.currentSelectionIndex())
             captureState(flow)
         }
 
@@ -3851,6 +4074,7 @@ class MainActivity : AppCompatActivity() {
         val updatedAt: Long,
         val handwriting: HandwritingContent?,
         val image: CardImage?,
+        val video: CardVideo?,
         val imageHandwriting: HandwritingSide?
     )
 
@@ -3879,11 +4103,17 @@ private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palet
 private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
 private const val STATE_PENDING_EXPORT_FLOW_ID = "state/pending_export_flow_id"
 private const val STATE_PENDING_IMAGE_CARD_REQUEST = "state/pending_image_card_request"
+private const val STATE_PENDING_VIDEO_CARD_REQUEST = "state/pending_video_card_request"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE = "state/image_card/type"
 private const val STATE_IMAGE_CARD_REQUEST_FLOW_ID = "state/image_card/flow_id"
 private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
+private const val STATE_VIDEO_CARD_REQUEST_TYPE = "state/video_card/type"
+private const val STATE_VIDEO_CARD_REQUEST_FLOW_ID = "state/video_card/flow_id"
+private const val STATE_VIDEO_CARD_REQUEST_CARD_ID = "state/video_card/card_id"
+private const val STATE_VIDEO_CARD_REQUEST_TYPE_CREATE = "create"
+private const val STATE_VIDEO_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f

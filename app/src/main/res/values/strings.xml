@@ -8,6 +8,7 @@
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
     <string name="menu_add_image_card">Add image</string>
+    <string name="menu_add_video_card">Add video</string>
     <string name="menu_add_handwriting">Add handwriting</string>
     <string name="menu_add_flow">Add flow</string>
     <string name="menu_export_flow">Export flow</string>
@@ -46,8 +47,11 @@
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_added_handwriting">Added handwriting card</string>
     <string name="snackbar_added_image_card">Added image card</string>
+    <string name="snackbar_added_video_card">Added video card</string>
     <string name="snackbar_image_card_updated">Updated image card</string>
     <string name="snackbar_no_photo_selected">No photo selected</string>
+    <string name="snackbar_no_video_selected">No video selected</string>
+    <string name="snackbar_not_video_file">Please pick a video file.</string>
     <string name="snackbar_merged_flows">Merged "%1$s" into "%2$s"</string>
     <string name="snackbar_need_another_flow_to_merge">Add another flow before merging.</string>
     <string name="snackbar_need_another_flow_to_move_card">Add another flow to move cards.</string>
@@ -76,6 +80,7 @@
     <string name="snackbar_tts_missing_data">Download speech data to enable title playback.</string>
     <string name="snackbar_tts_missing_data_action">Download</string>
     <string name="snackbar_tts_install_error">No speech engine is installed on this device.</string>
+    <string name="snackbar_no_video_player">Couldnt find an app to play that video.</string>
     <plurals name="count_notes">
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>
@@ -139,6 +144,8 @@
     <string name="handwriting_card_missing">Handwriting preview unavailable</string>
     <string name="image_card_content_desc">Image card</string>
     <string name="image_card_missing">Image preview unavailable</string>
+    <string name="video_card_content_desc">Video card</string>
+    <string name="video_card_missing">Video preview unavailable</string>
     <string name="dialog_edit_image_card_title">Image card</string>
     <string name="image_card_option_replace">Replace photo</string>
     <string name="image_card_option_annotate">Draw on image</string>
