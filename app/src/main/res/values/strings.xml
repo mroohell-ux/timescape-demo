@@ -168,4 +168,6 @@
     <string name="handwriting_eraser_type_label">Eraser style</string>
     <string name="handwriting_eraser_type_round">Round</string>
     <string name="handwriting_eraser_type_block">Block</string>
+    <string name="video_mute_button_content_desc">Mute video</string>
+    <string name="video_unmute_button_content_desc">Unmute video</string>
 </resources>

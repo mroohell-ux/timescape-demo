@@ -134,6 +134,7 @@ class CardsAdapter(
         val videoCardContainer: View = v.findViewById(R.id.videoCardContainer)
         val videoThumbnail: ImageView = v.findViewById(R.id.videoThumbnail)
         val videoPlayer: PlayerView = v.findViewById(R.id.videoPlayer)
+        val videoMuteToggle: ImageButton = v.findViewById(R.id.videoMuteToggle)
         val cardContent: View = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
@@ -147,6 +148,7 @@ class CardsAdapter(
     private var backgroundSizingConfig: BackgroundSizingConfig = backgroundSizing.normalized()
     private val tintProcessor = TintProcessor(tint)
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
+    private val videoMuteStates = mutableMapOf<Long, Boolean>()
     private var focusedIndex: Int? = null
     private var attachedRecyclerView: RecyclerView? = null
     private enum class CardMode { TEXT, IMAGE, VIDEO, HANDWRITING }
@@ -555,6 +557,19 @@ class CardsAdapter(
         holder.videoThumbnail.contentDescription = item.snippet.takeIf { it.isNotBlank() }
             ?: holder.itemView.context.getString(R.string.video_card_content_desc)
         holder.boundVideoUri = null
+        videoMuteStates.putIfAbsent(item.id, true)
+        val initialMuted = isMuted(item.id)
+        updateMuteButtonState(holder, initialMuted)
+        holder.videoMuteToggle.isEnabled = uri != null
+        holder.videoMuteToggle.alpha = if (uri != null) 1f else 0.4f
+        holder.videoMuteToggle.setOnClickListener {
+            val hasVideo = item.video?.uri != null
+            if (!hasVideo) return@setOnClickListener
+            val newMuted = !isMuted(item.id)
+            videoMuteStates[item.id] = newMuted
+            updateMuteButtonState(holder, newMuted)
+            holder.player?.volume = if (newMuted) 0f else 1f
+        }
         if (uri == null) {
             holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
             releasePlayer(holder)
@@ -595,7 +610,7 @@ class CardsAdapter(
                 }
             }
         }
-        updatePlaybackForHolder(holder, position == focusedIndex, video)
+        updatePlaybackForHolder(holder, position == focusedIndex, item)
     }
 
     private fun bindImageBack(
@@ -871,6 +886,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = false
                 holder.videoThumbnail.isVisible = false
                 holder.videoPlayer.isVisible = false
+                holder.videoMuteToggle.isVisible = false
                 holder.bg.isVisible = true
             }
             CardMode.IMAGE -> {
@@ -887,6 +903,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = false
                 holder.videoThumbnail.isVisible = false
                 holder.videoPlayer.isVisible = false
+                holder.videoMuteToggle.isVisible = false
                 holder.bg.isVisible = false
             }
             CardMode.VIDEO -> {
@@ -903,6 +920,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = true
                 holder.videoThumbnail.isVisible = true
                 holder.videoPlayer.isVisible = false
+                holder.videoMuteToggle.isVisible = true
                 holder.bg.isVisible = false
             }
             CardMode.HANDWRITING -> {
@@ -919,6 +937,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = false
                 holder.videoThumbnail.isVisible = false
                 holder.videoPlayer.isVisible = false
+                holder.videoMuteToggle.isVisible = false
                 holder.bg.isVisible = false
             }
         }
@@ -940,17 +959,30 @@ class CardsAdapter(
         card.clearRatio()
     }
 
+    private fun isMuted(itemId: Long): Boolean = videoMuteStates[itemId] ?: true
+
+    private fun updateMuteButtonState(holder: VH, muted: Boolean) {
+        holder.videoMuteToggle.setImageResource(if (muted) R.drawable.ic_volume_off else R.drawable.ic_volume_on)
+        holder.videoMuteToggle.contentDescription = holder.itemView.context.getString(
+            if (muted) R.string.video_unmute_button_content_desc else R.string.video_mute_button_content_desc
+        )
+    }
+
     private fun updatePlaybackForIndex(index: Int, shouldPlay: Boolean) {
         val recycler = attachedRecyclerView ?: return
         val holder = recycler.findViewHolderForAdapterPosition(index) as? VH ?: return
-        val video = getItem(index).video
-        updatePlaybackForHolder(holder, shouldPlay, video)
+        val item = getItem(index)
+        updatePlaybackForHolder(holder, shouldPlay, item)
     }
 
-    private fun updatePlaybackForHolder(holder: VH, shouldPlay: Boolean, video: CardVideo?) {
+    private fun updatePlaybackForHolder(holder: VH, shouldPlay: Boolean, item: CardItem?) {
+        val video = item?.video
+        val muted = item?.let { isMuted(it.id) } ?: true
+        updateMuteButtonState(holder, muted)
         if (!shouldPlay || video == null) {
             holder.videoPlayer.isVisible = false
             holder.videoThumbnail.isVisible = true
+            holder.player?.volume = if (muted) 0f else 1f
             holder.player?.playWhenReady = false
             holder.player?.pause()
             return
@@ -958,7 +990,7 @@ class CardsAdapter(
         val uri = video.uri
         val player = holder.player ?: ExoPlayer.Builder(holder.itemView.context).build().also { newPlayer ->
             newPlayer.repeatMode = Player.REPEAT_MODE_ALL
-            newPlayer.volume = 0f
+            newPlayer.volume = if (muted) 0f else 1f
             holder.player = newPlayer
         }
         if (holder.boundVideoUri != uri || player.mediaItemCount == 0) {
@@ -966,6 +998,7 @@ class CardsAdapter(
             player.prepare()
             holder.boundVideoUri = uri
         }
+        player.volume = if (muted) 0f else 1f
         holder.videoPlayer.player = player
         holder.videoThumbnail.isVisible = false
         holder.videoPlayer.isVisible = true
