@@ -3877,8 +3877,9 @@ class MainActivity : AppCompatActivity() {
             fun onCardDoubleTapped(index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
                 val card = adapter.getItemAt(index) ?: return
-                if (card.video != null) {
-                    playVideoFullScreen(card.video)
+                val video = card.video
+                if (video != null) {
+                    playVideoFullScreen(video)
                     return
                 }
                 val face = adapter.currentFaceFor(index)
