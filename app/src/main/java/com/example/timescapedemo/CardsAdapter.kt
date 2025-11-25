@@ -554,7 +554,7 @@ class CardsAdapter(
         val uri = video?.uri
         holder.videoThumbnail.contentDescription = item.snippet.takeIf { it.isNotBlank() }
             ?: holder.itemView.context.getString(R.string.video_card_content_desc)
-        holder.boundVideoUri = uri
+        holder.boundVideoUri = null
         if (uri == null) {
             holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
             releasePlayer(holder)
@@ -961,7 +961,7 @@ class CardsAdapter(
             newPlayer.volume = 0f
             holder.player = newPlayer
         }
-        if (holder.boundVideoUri != uri) {
+        if (holder.boundVideoUri != uri || player.mediaItemCount == 0) {
             player.setMediaItem(MediaItem.fromUri(uri))
             player.prepare()
             holder.boundVideoUri = uri

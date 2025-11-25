@@ -2607,7 +2607,7 @@ class MainActivity : AppCompatActivity() {
                 ?.toIntOrNull() ?: 0
             val durationUs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull()?.times(1000)
-            val previewFrame = durationUs?.takeIf { it > 0 }?.let { Random.nextLong(it.coerceAtLeast(1L)) }
+            val previewFrame = choosePreviewFrameUs(durationUs)
             val width = if (rotation % 180 != 0) rawHeight else rawWidth
             val height = if (rotation % 180 != 0) rawWidth else rawHeight
             CardVideo(uri, mimeType, owned, width, height, durationUs, previewFrame)
@@ -2615,6 +2615,18 @@ class MainActivity : AppCompatActivity() {
             CardVideo(uri, mimeType, owned)
         } finally {
             try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    private fun choosePreviewFrameUs(durationUs: Long?): Long? {
+        val total = durationUs ?: return null
+        if (total <= 0) return null
+        val start = (total * 0.1).toLong().coerceAtLeast(1L)
+        val endExclusive = (total * 0.9).toLong().coerceAtLeast(start + 1)
+        return if (endExclusive > start) {
+            Random.nextLong(start, endExclusive)
+        } else {
+            total / 2
         }
     }
 

@@ -13,6 +13,7 @@ import java.io.IOException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 object VideoThumbnailLoader {
     sealed class Result {
@@ -103,8 +104,11 @@ object VideoThumbnailLoader {
             }
             val durationUs = video.durationUs ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull()?.times(1000)
-            val frameUs = video.previewFrameMicros ?: durationUs?.let { (1..it).random() } ?: 0L
-            val raw = retriever.getFrameAtTime(frameUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+            val frameUs = video.previewFrameMicros ?: durationUs?.let { choosePreviewFrameUs(it) } ?: 0L
+            val raw = retriever.getFrameAtTime(frameUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime(frameUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                ?: retriever.getFrameAtTime(-1)
+                ?: return null
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                 ?.toIntOrNull()?.let { (it % 360 + 360) % 360 } ?: 0
             val oriented = if (rotation != 0) {
@@ -159,5 +163,15 @@ object VideoThumbnailLoader {
         val minimum = 8L * 1024L * 1024L
         val desired = target.coerceAtLeast(minimum)
         return desired.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    private fun choosePreviewFrameUs(durationUs: Long): Long {
+        val start = (durationUs * 0.1).toLong().coerceAtLeast(1L)
+        val endExclusive = (durationUs * 0.9).toLong().coerceAtLeast(start + 1)
+        return if (endExclusive > start) {
+            Random.nextLong(start, endExclusive)
+        } else {
+            durationUs / 2
+        }
     }
 }
