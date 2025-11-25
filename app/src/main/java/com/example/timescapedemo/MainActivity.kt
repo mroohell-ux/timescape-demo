@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.content.ClipData
 import android.content.ClipDescription
+import android.app.Dialog
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
@@ -16,7 +17,6 @@ import android.os.SystemClock
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
-import android.content.ActivityNotFoundException
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -28,6 +28,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.PopupWindow
 import android.widget.TextView
@@ -70,6 +71,10 @@ import com.google.android.material.slider.Slider
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import java.io.FileNotFoundException
 import java.io.File
 import java.io.InputStream
@@ -2642,16 +2647,47 @@ class MainActivity : AppCompatActivity() {
         runCatching { File(path).delete() }
     }
 
+    private var fullScreenPlayer: ExoPlayer? = null
+    private var fullScreenDialog: Dialog? = null
+
     private fun playVideoFullScreen(video: CardVideo) {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(video.uri, video.mimeType ?: "video/*")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        releaseFullScreenPlayer()
+
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val contentView = layoutInflater.inflate(R.layout.dialog_fullscreen_video, null)
+        val playerView = contentView.findViewById<PlayerView>(R.id.fullscreenPlayerView)
+        val closeButton = contentView.findViewById<ImageButton>(R.id.fullscreenCloseButton)
+
+        val player = ExoPlayer.Builder(this)
+            .build()
+            .also { exoPlayer ->
+                exoPlayer.repeatMode = Player.REPEAT_MODE_OFF
+                exoPlayer.setMediaItem(MediaItem.fromUri(video.uri))
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
+
+        fullScreenPlayer = player
+        fullScreenDialog = dialog
+
+        playerView.player = player
+
+        closeButton.setOnClickListener { dialog.dismiss() }
+        dialog.setOnDismissListener {
+            playerView.player = null
+            releaseFullScreenPlayer()
         }
-        try {
-            startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
-            snackbar(getString(R.string.snackbar_no_video_player))
-        }
+
+        dialog.setContentView(contentView)
+        dialog.show()
+    }
+
+    private fun releaseFullScreenPlayer() {
+        fullScreenDialog?.setOnDismissListener(null)
+        fullScreenDialog?.dismiss()
+        fullScreenDialog = null
+        fullScreenPlayer?.release()
+        fullScreenPlayer = null
     }
 
     private fun isVideoUri(uri: Uri): Boolean {
@@ -3782,6 +3818,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        releaseFullScreenPlayer()
         saveState()
     }
 

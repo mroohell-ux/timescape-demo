@@ -81,6 +81,7 @@
     <string name="snackbar_tts_missing_data_action">Download</string>
     <string name="snackbar_tts_install_error">No speech engine is installed on this device.</string>
     <string name="snackbar_no_video_player">Couldnt find an app to play that video.</string>
+    <string name="close">Close</string>
     <plurals name="count_notes">
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>
