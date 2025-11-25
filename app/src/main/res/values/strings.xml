@@ -147,6 +147,7 @@
     <string name="image_card_missing">Image preview unavailable</string>
     <string name="video_card_content_desc">Video card</string>
     <string name="video_card_missing">Video preview unavailable</string>
+    <string name="video_delete_button_content_desc">Delete video card</string>
     <string name="dialog_edit_image_card_title">Image card</string>
     <string name="image_card_option_replace">Replace photo</string>
     <string name="image_card_option_annotate">Draw on image</string>

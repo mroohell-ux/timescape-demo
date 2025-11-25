@@ -75,6 +75,19 @@
                 app:use_controller="false" />
 
             <ImageButton
+                android:id="@+id/videoDeleteButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|start"
+                android:layout_margin="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/video_delete_button_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_delete"
+                android:tint="#FFFFFFFF" />
+
+            <ImageButton
                 android:id="@+id/videoMuteToggle"
                 android:layout_width="40dp"
                 android:layout_height="40dp"

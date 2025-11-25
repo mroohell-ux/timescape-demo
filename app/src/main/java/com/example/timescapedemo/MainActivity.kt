@@ -3852,6 +3852,7 @@ class MainActivity : AppCompatActivity() {
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
                 onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) },
+                onVideoDeleteClick = { cardId -> holder.onVideoDeleted(cardId) },
                 onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                 onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
@@ -3941,6 +3942,19 @@ class MainActivity : AppCompatActivity() {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return false
                 val card = adapter.getItemAt(index) ?: return false
                 return startCardMoveDrag(cardView, flow, card)
+            }
+
+            fun onVideoDeleted(cardId: Long) {
+                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val index = flow.cards.indexOfFirst { it.id == cardId }
+                if (index < 0) return
+                val card = flow.cards[index]
+                if (card.video == null) return
+                disposeCardResources(card)
+                flow.cards.removeAt(index)
+                refreshFlow(flow, scrollToTop = true)
+                saveState()
+                snackbar(getString(R.string.snackbar_deleted_card))
             }
         }
     }

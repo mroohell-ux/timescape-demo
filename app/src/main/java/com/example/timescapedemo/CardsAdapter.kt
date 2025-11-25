@@ -116,6 +116,7 @@ class CardsAdapter(
     private val tint: TintStyle,
     private val onItemClick: (index: Int) -> Unit,
     private val onItemDoubleClick: (index: Int) -> Unit,
+    private val onVideoDeleteClick: (cardId: Long) -> Unit,
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
@@ -134,6 +135,7 @@ class CardsAdapter(
         val videoCardContainer: View = v.findViewById(R.id.videoCardContainer)
         val videoThumbnail: ImageView = v.findViewById(R.id.videoThumbnail)
         val videoPlayer: PlayerView = v.findViewById(R.id.videoPlayer)
+        val videoDeleteButton: ImageButton = v.findViewById(R.id.videoDeleteButton)
         val videoMuteToggle: ImageButton = v.findViewById(R.id.videoMuteToggle)
         val cardContent: View = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
@@ -570,6 +572,13 @@ class CardsAdapter(
             updateMuteButtonState(holder, newMuted)
             holder.player?.volume = if (newMuted) 0f else 1f
         }
+        holder.videoDeleteButton.isEnabled = uri != null
+        holder.videoDeleteButton.alpha = if (uri != null) 1f else 0.4f
+        holder.videoDeleteButton.setOnClickListener {
+            val hasVideo = item.video?.uri != null
+            if (!hasVideo) return@setOnClickListener
+            onVideoDeleteClick(item.id)
+        }
         if (uri == null) {
             holder.videoThumbnail.setImageResource(PLACEHOLDER_RES_ID)
             releasePlayer(holder)
@@ -886,6 +895,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = false
                 holder.videoThumbnail.isVisible = false
                 holder.videoPlayer.isVisible = false
+                holder.videoDeleteButton.isVisible = false
                 holder.videoMuteToggle.isVisible = false
                 holder.bg.isVisible = true
             }
@@ -903,6 +913,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = false
                 holder.videoThumbnail.isVisible = false
                 holder.videoPlayer.isVisible = false
+                holder.videoDeleteButton.isVisible = false
                 holder.videoMuteToggle.isVisible = false
                 holder.bg.isVisible = false
             }
@@ -920,6 +931,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = true
                 holder.videoThumbnail.isVisible = true
                 holder.videoPlayer.isVisible = false
+                holder.videoDeleteButton.isVisible = true
                 holder.videoMuteToggle.isVisible = true
                 holder.bg.isVisible = false
             }
@@ -937,6 +949,7 @@ class CardsAdapter(
                 holder.videoCardContainer.isVisible = false
                 holder.videoThumbnail.isVisible = false
                 holder.videoPlayer.isVisible = false
+                holder.videoDeleteButton.isVisible = false
                 holder.videoMuteToggle.isVisible = false
                 holder.bg.isVisible = false
             }
