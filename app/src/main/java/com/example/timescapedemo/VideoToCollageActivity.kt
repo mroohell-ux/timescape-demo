@@ -177,29 +177,36 @@ class VideoToCollageActivity : AppCompatActivity() {
         val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             ?.toLongOrNull()
             ?: 0L
-        val frameTimes = sampleFrameTimes(durationMs)
-        val frames = mutableListOf<Bitmap>()
-        var targetHeight = 0
-        for ((index, timeMs) in frameTimes.withIndex()) {
-            val frame = retriever.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
-            if (frame != null) {
-                if (targetHeight == 0) targetHeight = min(frame.height, MAX_FRAME_HEIGHT)
-                val resized = scaleToHeight(frame, targetHeight)
-                if (resized !== frame) frame.recycle()
-                frames += resized
-            }
-            onProgress(index + 1, frameTimes.size,
-                getString(R.string.video_to_collage_extracting_progress, index + 1, frameTimes.size))
-        }
-        retriever.release()
-        cachedCopy?.delete()
-        if (frames.isEmpty()) throw IllegalStateException("No frames available")
+        val firstFrame =
+            retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST)
+                ?: throw IllegalStateException("No first frame available")
+        val targetHeight = min(firstFrame.height, MAX_FRAME_HEIGHT)
+        val scaledFirst = scaleToHeight(firstFrame, targetHeight)
+        if (scaledFirst !== firstFrame) firstFrame.recycle()
 
-        onProgress(frameTimes.size, frameTimes.size, getString(R.string.video_to_collage_detecting_subtitles))
-        val subtitleBand = detectSubtitleBand(frames.first())
-            ?: defaultSubtitleBand(frames.first())
-        val collage = composeCollage(frames, subtitleBand)
-        CollageResult(collage)
+        onProgress(0, 0, getString(R.string.video_to_collage_detecting_subtitles))
+        val subtitleBand = detectSubtitleBand(scaledFirst)
+            ?: defaultSubtitleBand(scaledFirst)
+        try {
+            val frames = collectSubtitleFrames(
+                retriever,
+                scaledFirst,
+                subtitleBand,
+                durationMs,
+                targetHeight,
+                onProgress
+            )
+            if (frames.isEmpty()) throw IllegalStateException("No frames available")
+            if (frames.first() !== scaledFirst) {
+                scaledFirst.recycle()
+            }
+
+            val collage = composeCollage(frames, subtitleBand)
+            CollageResult(collage)
+        } finally {
+            retriever.release()
+            cachedCopy?.delete()
+        }
     }
 
     private suspend fun detectSubtitleBand(frame: Bitmap): Rect? = withContext(Dispatchers.Default) {
@@ -222,12 +229,75 @@ class VideoToCollageActivity : AppCompatActivity() {
         return Rect(0, top, frame.width, frame.height)
     }
 
-    private fun sampleFrameTimes(durationMs: Long): List<Long> {
-        val targetFrames = 5
-        if (durationMs <= 0) return List(targetFrames) { it * 300L }
-        if (durationMs < targetFrames) return listOf(0L, durationMs / 2)
-        val step = durationMs / (targetFrames - 1)
-        return (0 until targetFrames).map { index ->
+    private suspend fun collectSubtitleFrames(
+        retriever: MediaMetadataRetriever,
+        firstFrame: Bitmap,
+        subtitleBand: Rect,
+        durationMs: Long,
+        targetHeight: Int,
+        onProgress: suspend (Int, Int, String) -> Unit
+    ): List<Bitmap> = withContext(Dispatchers.Default) {
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val times = subtitleSampleTimes(durationMs)
+        val frames = mutableListOf<Bitmap>()
+        var lastSubtitle = ""
+
+        for ((index, timeMs) in times.withIndex()) {
+            val rawFrame = if (timeMs == 0L) firstFrame else retriever.getFrameAtTime(
+                timeMs * 1000,
+                MediaMetadataRetriever.OPTION_CLOSEST
+            )
+
+            if (rawFrame != null) {
+                val frame = if (timeMs == 0L) rawFrame else scaleToHeight(rawFrame, targetHeight)
+                if (timeMs != 0L && frame !== rawFrame) {
+                    rawFrame.recycle()
+                }
+                val subtitleText = extractSubtitleText(recognizer, frame, subtitleBand)
+                val hasNewSubtitle = subtitleText.isNotBlank() && subtitleText != lastSubtitle
+                if (hasNewSubtitle) {
+                    frames += frame
+                    lastSubtitle = subtitleText
+                } else if (timeMs != 0L) {
+                    if (frame !== rawFrame) rawFrame.recycle()
+                    frame.recycle()
+                }
+            }
+
+            onProgress(
+                index + 1,
+                times.size,
+                getString(R.string.video_to_collage_extracting_progress, index + 1, times.size)
+            )
+        }
+
+        if (frames.isEmpty()) frames += firstFrame
+        frames
+    }
+
+    private suspend fun extractSubtitleText(
+        recognizer: com.google.mlkit.vision.text.TextRecognizer,
+        frame: Bitmap,
+        subtitleBand: Rect
+    ): String {
+        val clampedTop = subtitleBand.top.coerceAtLeast(0).coerceAtMost(frame.height - 1)
+        val bandHeight = subtitleBand.height().coerceAtLeast(1)
+        val height = min(bandHeight, frame.height - clampedTop)
+        val crop = Bitmap.createBitmap(frame, 0, clampedTop, frame.width, height)
+        return try {
+            val image = InputImage.fromBitmap(crop, 0)
+            val text = recognizer.process(image).await()
+            text.textBlocks.flatMap { it.lines }.joinToString("\n") { it.text.trim() }.trim()
+        } finally {
+            crop.recycle()
+        }
+    }
+
+    private fun subtitleSampleTimes(durationMs: Long): List<Long> {
+        if (durationMs <= 0) return listOf(0L, 300L, 600L, 900L, 1200L)
+        val step = DEFAULT_SUBTITLE_SAMPLE_MS
+        val count = ((durationMs + step - 1) / step).toInt().coerceAtLeast(1)
+        return (0 until count).map { index ->
             val candidate = index * step
             candidate.coerceAtMost(durationMs - 1)
         }.distinct()
@@ -452,6 +522,7 @@ class VideoToCollageActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RESULT_MIME_TYPE = "result_mime_type"
         private const val MAX_FRAME_HEIGHT = 720
+        private const val DEFAULT_SUBTITLE_SAMPLE_MS = 300L
         private const val DEFAULT_COLLAGE_MIME = "image/png"
         private const val TAG = "VideoToCollage"
     }
