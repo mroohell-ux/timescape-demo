@@ -31,6 +31,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.text.Normalizer
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
@@ -240,7 +241,7 @@ class VideoToCollageActivity : AppCompatActivity() {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val times = subtitleSampleTimes(durationMs)
         val frames = mutableListOf<Bitmap>()
-        var lastSubtitle = ""
+        var lastNormalizedSubtitle = ""
 
         for ((index, timeMs) in times.withIndex()) {
             val rawFrame = if (timeMs == 0L) firstFrame else retriever.getFrameAtTime(
@@ -254,10 +255,11 @@ class VideoToCollageActivity : AppCompatActivity() {
                     rawFrame.recycle()
                 }
                 val subtitleText = extractSubtitleText(recognizer, frame, subtitleBand)
-                val hasNewSubtitle = subtitleText.isNotBlank() && subtitleText != lastSubtitle
+                val normalized = normalizeSubtitle(subtitleText)
+                val hasNewSubtitle = normalized.isNotEmpty() && normalized != lastNormalizedSubtitle
                 if (hasNewSubtitle) {
                     frames += frame
-                    lastSubtitle = subtitleText
+                    lastNormalizedSubtitle = normalized
                 } else if (timeMs != 0L) {
                     if (frame !== rawFrame) rawFrame.recycle()
                     frame.recycle()
@@ -308,6 +310,16 @@ class VideoToCollageActivity : AppCompatActivity() {
         val ratio = targetHeight.toFloat() / frame.height.toFloat()
         val width = (frame.width * ratio).roundToInt().coerceAtLeast(1)
         return Bitmap.createScaledBitmap(frame, width, targetHeight, true)
+    }
+
+    private fun normalizeSubtitle(text: String): String {
+        val normalized = Normalizer.normalize(text, Normalizer.Form.NFKD)
+            .replace("\\p{Mn}".toRegex(), "")
+            .lowercase()
+        val withoutPunctuation = normalized.replace("[\\p{Punct}]".toRegex(), " ")
+        return withoutPunctuation
+            .replace("\\s+".toRegex(), " ")
+            .trim()
     }
 
     private fun composeCollage(frames: List<Bitmap>, subtitleBand: Rect): Bitmap {
