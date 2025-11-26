@@ -248,17 +248,18 @@ class VideoToCollageActivity : AppCompatActivity() {
             val height = min(croppedBandHeight, frame.height - clampedTop)
             Bitmap.createBitmap(frame, 0, clampedTop, frame.width, height)
         }
-        val collageHeight = first.height
-        val collageWidth = first.width + bandFrames.sumOf { it.width }
+        val collageWidth = maxOf(first.width, bandFrames.maxOfOrNull { it.width } ?: 0)
+        val collageHeight = first.height + bandFrames.sumOf { it.height }
         val output = Bitmap.createBitmap(collageWidth, collageHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
-        var offsetX = 0
-        canvas.drawBitmap(first, offsetX.toFloat(), 0f, null)
-        offsetX += first.width
+        var offsetY = 0
+        val firstOffsetX = ((collageWidth - first.width) / 2).coerceAtLeast(0)
+        canvas.drawBitmap(first, firstOffsetX.toFloat(), offsetY.toFloat(), null)
+        offsetY += first.height
         bandFrames.forEach { band ->
-            val y = (collageHeight - band.height).coerceAtLeast(0)
-            canvas.drawBitmap(band, offsetX.toFloat(), y.toFloat(), null)
-            offsetX += band.width
+            val x = ((collageWidth - band.width) / 2).coerceAtLeast(0)
+            canvas.drawBitmap(band, x.toFloat(), offsetY.toFloat(), null)
+            offsetY += band.height
         }
         return output
     }
