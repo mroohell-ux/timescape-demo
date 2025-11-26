@@ -158,26 +158,16 @@ class VideoToCollageActivity : AppCompatActivity() {
         onProgress: suspend (Int, Int, String) -> Unit
     ): CollageResult = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
+        var cachedCopy: File? = null
         try {
-            val afd = contentResolver.openAssetFileDescriptor(uri, "r")
-            if (afd != null) {
-                afd.use {
-                    if (it.declaredLength >= 0 && it.startOffset >= 0) {
-                        retriever.setDataSource(it.fileDescriptor, it.startOffset, it.declaredLength)
-                    } else {
-                        retriever.setDataSource(it.fileDescriptor)
-                    }
-                }
-            } else {
-                val descriptor = contentResolver.openFileDescriptor(uri, "r")
-                if (descriptor != null) {
-                    descriptor.use { retriever.setDataSource(it.fileDescriptor) }
-                } else {
-                    retriever.setDataSource(this@VideoToCollageActivity, uri)
-                }
+            val configured = setRetrieverDataSource(retriever, uri)
+            if (!configured) {
+                cachedCopy = cacheVideoLocally(uri)
+                retriever.setDataSource(cachedCopy.absolutePath)
             }
         } catch (t: Throwable) {
             retriever.release()
+            cachedCopy?.delete()
             throw t
         }
 
@@ -199,6 +189,7 @@ class VideoToCollageActivity : AppCompatActivity() {
                 getString(R.string.video_to_collage_extracting_progress, index + 1, frameTimes.size))
         }
         retriever.release()
+        cachedCopy?.delete()
         if (frames.isEmpty()) throw IllegalStateException("No frames available")
 
         onProgress(frameTimes.size, frameTimes.size, getString(R.string.video_to_collage_detecting_subtitles))
@@ -267,6 +258,53 @@ class VideoToCollageActivity : AppCompatActivity() {
             offsetX += band.width
         }
         return output
+    }
+
+    private fun setRetrieverDataSource(retriever: MediaMetadataRetriever, uri: Uri): Boolean {
+        val afd = contentResolver.openAssetFileDescriptor(uri, "r")
+        if (afd != null) {
+            afd.use {
+                try {
+                    if (it.declaredLength >= 0 && it.startOffset >= 0) {
+                        retriever.setDataSource(it.fileDescriptor, it.startOffset, it.declaredLength)
+                    } else {
+                        retriever.setDataSource(it.fileDescriptor)
+                    }
+                    return true
+                } catch (_: Throwable) {
+                    // Fall back to other strategies below.
+                }
+            }
+        }
+
+        val descriptor = contentResolver.openFileDescriptor(uri, "r")
+        if (descriptor != null) {
+            descriptor.use {
+                return try {
+                    retriever.setDataSource(it.fileDescriptor)
+                    true
+                } catch (_: Throwable) {
+                    false
+                }
+            }
+        }
+
+        return try {
+            retriever.setDataSource(this, uri)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun cacheVideoLocally(uri: Uri): File {
+        val cacheFile = File(cacheDir, "picked_video_${System.currentTimeMillis()}.tmp")
+        contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(cacheFile).use { output ->
+                input.copyTo(output)
+            }
+        } ?: throw IOException("Unable to open input stream for URI: $uri")
+        return cacheFile
     }
 
     private fun displayCollage(result: CollageResult) {
