@@ -259,8 +259,11 @@ class VideoToCollageActivity : AppCompatActivity() {
                 var captured = false
                 val subtitleText = extractSubtitleText(recognizer, frame, subtitleBand)
                 val normalized = normalizeSubtitle(subtitleText)
-                if (normalized.isNotEmpty()) {
-                    if (normalized == candidateSubtitle) {
+                if (normalized.isEmpty()) {
+                    candidateSubtitle = ""
+                    candidateCount = 0
+                } else {
+                    if (isSameSubtitle(normalized, candidateSubtitle)) {
                         candidateCount++
                     } else {
                         candidateSubtitle = normalized
@@ -318,7 +321,7 @@ class VideoToCollageActivity : AppCompatActivity() {
     }
 
     private fun subtitleSampleTimes(durationMs: Long): List<Long> {
-        if (durationMs <= 0) return listOf(0L, 300L, 600L, 900L, 1200L)
+        if (durationMs <= 0) return listOf(0L, 200L, 400L, 600L, 800L)
         val step = DEFAULT_SUBTITLE_SAMPLE_MS
         val count = ((durationMs + step - 1) / step).toInt().coerceAtLeast(1)
         return (0 until count).map { index ->
@@ -570,9 +573,9 @@ class VideoToCollageActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RESULT_MIME_TYPE = "result_mime_type"
         private const val MAX_FRAME_HEIGHT = 720
-        private const val DEFAULT_SUBTITLE_SAMPLE_MS = 300L
+        private const val DEFAULT_SUBTITLE_SAMPLE_MS = 200L
         private const val SUBTITLE_STABILITY_FRAMES = 2
-        private const val SUBTITLE_SIMILARITY_THRESHOLD = 0.7f
+        private const val SUBTITLE_SIMILARITY_THRESHOLD = 0.5f
         private const val DEFAULT_COLLAGE_MIME = "image/png"
         private const val TAG = "VideoToCollage"
     }
