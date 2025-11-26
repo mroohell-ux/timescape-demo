@@ -214,10 +214,20 @@ class VideoToCollageActivity : AppCompatActivity() {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val image = InputImage.fromBitmap(frame, 0)
         val visionText = recognizer.process(image).await()
-        val boxes = visionText.textBlocks.flatMap { block -> block.lines.mapNotNull { it.boundingBox } }
-        if (boxes.isEmpty()) return@withContext null
-        val focusCandidates = boxes.filter { it.centerY() > frame.height * 0.4f }
-        val region = if (focusCandidates.isNotEmpty()) focusCandidates else boxes
+        val lines = visionText.textBlocks.flatMap { block -> block.lines }
+        val candidates = lines.mapNotNull { line ->
+            val box = line.boundingBox ?: return@mapNotNull null
+            if (box.centerY() <= frame.height * 0.5f) return@mapNotNull null
+            val textLength = line.text.filterNot { it.isWhitespace() }.length
+            if (textLength == 0) return@mapNotNull null
+            val score = textLength * box.width()
+            Triple(box, score, line.text)
+        }
+        if (candidates.isEmpty()) return@withContext null
+
+        val maxScore = candidates.maxOf { it.second }.toFloat()
+        val longest = candidates.filter { it.second >= maxScore * 0.7f }.map { it.first }
+        val region = if (longest.isNotEmpty()) longest else candidates.map { it.first }
         val padding = (frame.height * 0.04f).roundToInt()
         val top = (region.minOf { it.top } - padding).coerceAtLeast(0)
         val bottom = (region.maxOf { it.bottom } + padding).coerceAtMost(frame.height)
