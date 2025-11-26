@@ -159,11 +159,16 @@ class VideoToCollageActivity : AppCompatActivity() {
     ): CollageResult = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
-            val descriptor = contentResolver.openFileDescriptor(uri, "r")
-            if (descriptor != null) {
-                descriptor.use { retriever.setDataSource(it.fileDescriptor) }
+            val afd = contentResolver.openAssetFileDescriptor(uri, "r")
+            if (afd != null) {
+                afd.use { retriever.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
             } else {
-                retriever.setDataSource(this@VideoToCollageActivity, uri)
+                val descriptor = contentResolver.openFileDescriptor(uri, "r")
+                if (descriptor != null) {
+                    descriptor.use { retriever.setDataSource(it.fileDescriptor) }
+                } else {
+                    retriever.setDataSource(this@VideoToCollageActivity, uri)
+                }
             }
         } catch (t: Throwable) {
             retriever.release()
