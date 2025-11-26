@@ -241,7 +241,9 @@ class VideoToCollageActivity : AppCompatActivity() {
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         val times = subtitleSampleTimes(durationMs)
         val frames = mutableListOf<Bitmap>()
-        var lastNormalizedSubtitle = ""
+        var lastAcceptedSubtitle = ""
+        var candidateSubtitle = ""
+        var candidateCount = 0
 
         for ((index, timeMs) in times.withIndex()) {
             val rawFrame = if (timeMs == 0L) firstFrame else retriever.getFrameAtTime(
@@ -254,13 +256,33 @@ class VideoToCollageActivity : AppCompatActivity() {
                 if (timeMs != 0L && frame !== rawFrame) {
                     rawFrame.recycle()
                 }
+                var captured = false
                 val subtitleText = extractSubtitleText(recognizer, frame, subtitleBand)
                 val normalized = normalizeSubtitle(subtitleText)
-                val hasNewSubtitle = normalized.isNotEmpty() && normalized != lastNormalizedSubtitle
-                if (hasNewSubtitle) {
-                    frames += frame
-                    lastNormalizedSubtitle = normalized
-                } else if (timeMs != 0L) {
+                if (normalized.isNotEmpty()) {
+                    if (normalized == candidateSubtitle) {
+                        candidateCount++
+                    } else {
+                        candidateSubtitle = normalized
+                        candidateCount = 1
+                    }
+
+                    val stableEnough = if (frames.isEmpty()) {
+                        candidateCount >= 1
+                    } else {
+                        candidateCount >= SUBTITLE_STABILITY_FRAMES
+                    }
+
+                    val isNewSubtitle = stableEnough && !isSameSubtitle(normalized, lastAcceptedSubtitle)
+
+                    if (isNewSubtitle) {
+                        frames += frame
+                        lastAcceptedSubtitle = normalized
+                        captured = true
+                    }
+                }
+
+                if (!captured && timeMs != 0L) {
                     if (frame !== rawFrame) rawFrame.recycle()
                     frame.recycle()
                 }
@@ -320,6 +342,20 @@ class VideoToCollageActivity : AppCompatActivity() {
         return withoutPunctuation
             .replace("\\s+".toRegex(), " ")
             .trim()
+    }
+
+    private fun isSameSubtitle(current: String, previous: String): Boolean {
+        if (previous.isEmpty()) return false
+        if (current == previous) return true
+
+        val currentTokens = current.split(" ").filter { it.isNotBlank() }.toSet()
+        val previousTokens = previous.split(" ").filter { it.isNotBlank() }.toSet()
+        if (currentTokens.isEmpty() || previousTokens.isEmpty()) return false
+
+        val intersection = currentTokens.intersect(previousTokens)
+        val union = currentTokens.union(previousTokens)
+        val jaccard = intersection.size.toFloat() / union.size.toFloat()
+        return jaccard >= SUBTITLE_SIMILARITY_THRESHOLD
     }
 
     private fun composeCollage(frames: List<Bitmap>, subtitleBand: Rect): Bitmap {
@@ -535,6 +571,8 @@ class VideoToCollageActivity : AppCompatActivity() {
         const val EXTRA_RESULT_MIME_TYPE = "result_mime_type"
         private const val MAX_FRAME_HEIGHT = 720
         private const val DEFAULT_SUBTITLE_SAMPLE_MS = 300L
+        private const val SUBTITLE_STABILITY_FRAMES = 2
+        private const val SUBTITLE_SIMILARITY_THRESHOLD = 0.7f
         private const val DEFAULT_COLLAGE_MIME = "image/png"
         private const val TAG = "VideoToCollage"
     }
