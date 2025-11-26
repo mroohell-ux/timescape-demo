@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.result.PickVisualMediaRequest
@@ -146,7 +147,9 @@ class VideoToCollageActivity : AppCompatActivity() {
             } catch (ce: CancellationException) {
                 throw ce
             } catch (t: Throwable) {
-                snackbar(getString(R.string.video_to_collage_error_loading_video))
+                val detail = t.message ?: t.javaClass.simpleName
+                Log.e(TAG, "Failed to generate collage from $uri: $detail", t)
+                snackbar(getString(R.string.video_to_collage_error_loading_video_with_reason, detail))
             } finally {
                 setProcessing(false)
             }
@@ -447,5 +450,6 @@ class VideoToCollageActivity : AppCompatActivity() {
         const val EXTRA_RESULT_MIME_TYPE = "result_mime_type"
         private const val MAX_FRAME_HEIGHT = 720
         private const val DEFAULT_COLLAGE_MIME = "image/png"
+        private const val TAG = "VideoToCollage"
     }
 }

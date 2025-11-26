@@ -180,5 +180,6 @@
     <string name="video_to_collage_saved_to_gallery">Saved collage to your gallery.</string>
     <string name="video_to_collage_save_failed">Couldnt save that collage.</string>
     <string name="video_to_collage_error_loading_video">Something went wrong while reading that video.</string>
+    <string name="video_to_collage_error_loading_video_with_reason">Something went wrong while reading that video: %1$s</string>
     <string name="video_to_collage_added_card">Added collage to the current flow.</string>
 </resources>
