@@ -46,8 +46,8 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
-    implementation(platform("com.google.mlkit:mlkit-bom:32.0.0"))
-    implementation("com.google.mlkit:text-recognition")
+    // Use an explicit ML Kit Text Recognition version to avoid repository resolution issues
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
