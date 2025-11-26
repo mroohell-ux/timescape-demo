@@ -340,15 +340,17 @@ class VideoToCollageActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateProgress(current: Int, total: Int, message: String) {
-        progressIndicator.isVisible = true
-        progressIndicator.isIndeterminate = total == 0
-        val percent = if (total > 0) {
-            ((current.toFloat() / total.toFloat()) * 100).roundToInt().coerceIn(0, 100)
-        } else 0
-        progressIndicator.setProgressCompat(percent, true)
-        progressText.isVisible = true
-        progressText.text = message
+    private suspend fun updateProgress(current: Int, total: Int, message: String) {
+        withContext(Dispatchers.Main) {
+            progressIndicator.isVisible = true
+            progressIndicator.isIndeterminate = total == 0
+            val percent = if (total > 0) {
+                ((current.toFloat() / total.toFloat()) * 100).roundToInt().coerceIn(0, 100)
+            } else 0
+            progressIndicator.setProgressCompat(percent, true)
+            progressText.isVisible = true
+            progressText.text = message
+        }
     }
 
     private fun saveToGallery() {
