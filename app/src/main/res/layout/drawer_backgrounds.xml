@@ -56,6 +56,31 @@
             android:background="@color/flow_bar_stroke"/>
 
         <TextView
+            android:id="@+id/labelVideoTools"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/drawer_video_tools"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerVideoToCollage"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/drawer_video_to_collage"
+            app:icon="@android:drawable/ic_menu_slideshow"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:background="@color/flow_bar_stroke"/>
+
+        <TextView
             android:id="@+id/labelCardBackgrounds"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

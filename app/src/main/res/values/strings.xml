@@ -27,6 +27,8 @@
     <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
     <string name="drawer_pick_app_background">Choose app background</string>
     <string name="drawer_reset_app_background">Use default background</string>
+    <string name="drawer_video_tools">Video</string>
+    <string name="drawer_video_to_collage">Video to Collage</string>
     <string name="dialog_add_flow_title">Add flow</string>
     <string name="dialog_flow_name_hint">Flow name</string>
     <string name="dialog_flow_actions_title">Edit "%1$s"</string>
@@ -160,4 +162,23 @@
     <string name="handwriting_eraser_type_label">Eraser style</string>
     <string name="handwriting_eraser_type_round">Round</string>
     <string name="handwriting_eraser_type_block">Block</string>
+    <string name="video_to_collage_title">Video to Collage</string>
+    <string name="video_to_collage_description">Pick a video, extract frames, and stitch them together so you can keep the subtitles from every moment in one place.</string>
+    <string name="video_to_collage_pick_video">Pick a video</string>
+    <string name="video_to_collage_selected_placeholder">No video selected yet</string>
+    <string name="video_to_collage_generate">Generate collage</string>
+    <string name="video_to_collage_result_content_desc">Generated collage preview</string>
+    <string name="video_to_collage_processing">Processing video…</string>
+    <string name="video_to_collage_extracting_progress">Extracting frame %1$d of %2$d</string>
+    <string name="video_to_collage_detecting_subtitles">Detecting subtitle band…</string>
+    <string name="video_to_collage_no_video">Pick a video before generating a collage.</string>
+    <string name="video_to_collage_no_video_selected">No video was selected.</string>
+    <string name="video_to_collage_result_missing">No collage available yet.</string>
+    <string name="video_to_collage_save">Save to gallery</string>
+    <string name="video_to_collage_share">Share collage</string>
+    <string name="video_to_collage_add_to_flow">Add to current flow</string>
+    <string name="video_to_collage_saved_to_gallery">Saved collage to your gallery.</string>
+    <string name="video_to_collage_save_failed">Couldnt save that collage.</string>
+    <string name="video_to_collage_error_loading_video">Something went wrong while reading that video.</string>
+    <string name="video_to_collage_added_card">Added collage to the current flow.</string>
 </resources>
