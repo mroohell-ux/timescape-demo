@@ -953,6 +953,39 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
     }
 
+    private fun moveCardWithinFlow(
+        flow: CardFlow,
+        cardId: Long,
+        targetCardId: Long?,
+        placeBeforeTarget: Boolean
+    ) {
+        if (flow.cards.size <= 1) return
+        val currentIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (currentIndex < 0) return
+        val targetIndex = targetCardId?.let { id -> flow.cards.indexOfFirst { it.id == id } }
+        if (targetIndex != null && targetIndex == currentIndex) return
+
+        val card = flow.cards.removeAt(currentIndex)
+        var desiredIndex = when {
+            targetIndex == null -> flow.cards.size
+            placeBeforeTarget -> targetIndex
+            else -> targetIndex + 1
+        }
+        if (targetIndex != null && currentIndex < targetIndex && desiredIndex > 0) {
+            desiredIndex -= 1
+        }
+        desiredIndex = desiredIndex.coerceIn(0, flow.cards.size)
+
+        flow.cards.add(desiredIndex, card)
+        flow.lastViewedCardIndex = desiredIndex
+        flow.lastViewedCardId = card.id
+        flow.lastViewedCardFocused = true
+        flowShuffleStates.remove(flow.id)
+
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+    }
+
     private fun toggleShuffleCards() {
         val flow = currentFlow()
         if (flow == null) {
@@ -3961,6 +3994,7 @@ class MainActivity : AppCompatActivity() {
         init {
             recycler.addOnScrollListener(scrollListener)
             layoutManager.selectionListener = selectionCallback
+            recycler.setOnDragListener { _, event -> handleCardReorderDrag(event) }
             cardCountView.isVisible = false
         }
 
@@ -4028,6 +4062,7 @@ class MainActivity : AppCompatActivity() {
             if (layoutManager.selectionListener === selectionCallback) {
                 layoutManager.selectionListener = null
             }
+            recycler.setOnDragListener(null)
         }
 
         private fun handleListCommitted(
@@ -4082,6 +4117,68 @@ class MainActivity : AppCompatActivity() {
             ).coerceIn(0, indicatorTotal - 1)
             cardCountView.text = "${safeIndex + 1}/$indicatorTotal"
             cardCountView.isVisible = true
+        }
+
+        private fun handleCardReorderDrag(event: DragEvent): Boolean {
+            val flow = owningFlow() ?: return false
+            val moveData = event.localState as? CardMoveDragData ?: return false
+            if (moveData.sourceFlowId != flow.id) return false
+            if (adapter.itemCount <= 1) return false
+            return when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_LOCATION -> {
+                    maybeAutoScrollDuringDrag(event.y)
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    reorderCard(flow, moveData, event.y)
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> true
+                else -> true
+            }
+        }
+
+        private fun reorderCard(flow: CardFlow, moveData: CardMoveDragData, y: Float) {
+            val anchor = findReorderAnchor(y) ?: return
+            moveCardWithinFlow(flow, moveData.cardId, anchor.first, anchor.second)
+        }
+
+        private fun findReorderAnchor(y: Float): Pair<Long?, Boolean>? {
+            val anchorView = recycler.findChildViewUnder(recycler.width / 2f, y)
+            val anchorPosition = anchorView?.let { recycler.getChildAdapterPosition(it) }
+                ?.takeIf { it != RecyclerView.NO_POSITION }
+            val anchorId = anchorPosition?.let { adapter.getItemAt(it)?.id }
+            if (anchorId != null && anchorView != null) {
+                val midpoint = (anchorView.top + anchorView.bottom) / 2f
+                val placeBefore = y < midpoint
+                return anchorId to placeBefore
+            }
+
+            if (recycler.childCount == 0) return null
+            val first = recycler.getChildAt(0)
+            val last = recycler.getChildAt(recycler.childCount - 1)
+            val firstPos = first?.let { recycler.getChildAdapterPosition(it) }?.takeIf { it != RecyclerView.NO_POSITION }
+            val lastPos = last?.let { recycler.getChildAdapterPosition(it) }?.takeIf { it != RecyclerView.NO_POSITION }
+            return when {
+                first != null && firstPos != null && y < first.top -> {
+                    adapter.getItemAt(firstPos)?.id?.let { it to true }
+                }
+                last != null && lastPos != null && y > last.bottom -> {
+                    adapter.getItemAt(lastPos)?.id?.let { it to false }
+                }
+                else -> null
+            }
+        }
+
+        private fun maybeAutoScrollDuringDrag(y: Float) {
+            val height = recycler.height.takeIf { it > 0 } ?: return
+            val edgeThreshold = height * 0.2f
+            val scrollStep = (24 * recycler.resources.displayMetrics.density).roundToInt()
+            when {
+                y < edgeThreshold -> recycler.smoothScrollBy(0, -scrollStep)
+                y > height - edgeThreshold -> recycler.smoothScrollBy(0, scrollStep)
+            }
         }
     }
 
