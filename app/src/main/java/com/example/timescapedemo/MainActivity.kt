@@ -4129,9 +4129,9 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 DragEvent.ACTION_DROP -> {
-                    val anchor = findReorderAnchor(event.y)
+                    val anchor = findReorderAnchor(event.y) ?: (null to false)
                     if (moveData.sourceFlowId == flow.id) {
-                        anchor?.let { moveCardWithinFlow(flow, moveData.cardId, it.first, it.second) }
+                        moveCardWithinFlow(flow, moveData.cardId, anchor.first, anchor.second)
                     } else {
                         moveCardIntoFlow(flow, moveData, anchor)
                     }
