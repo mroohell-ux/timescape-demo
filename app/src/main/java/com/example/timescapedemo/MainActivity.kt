@@ -4129,7 +4129,7 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 DragEvent.ACTION_DROP -> {
-                    val anchor = findReorderAnchor(event.y) ?: (null to false)
+                    val anchor = findReorderAnchor(event.x, event.y) ?: (null to false)
                     if (moveData.sourceFlowId == flow.id) {
                         moveCardWithinFlow(flow, moveData.cardId, anchor.first, anchor.second)
                     } else {
@@ -4184,8 +4184,8 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
         }
 
-        private fun findReorderAnchor(y: Float): Pair<Long?, Boolean>? {
-            val anchorView = recycler.findChildViewUnder(recycler.width / 2f, y)
+        private fun findReorderAnchor(x: Float, y: Float): Pair<Long?, Boolean>? {
+            val anchorView = recycler.findChildViewUnder(x, y)
             val anchorPosition = anchorView?.let { recycler.getChildAdapterPosition(it) }
                 ?.takeIf { it != RecyclerView.NO_POSITION }
             val anchorId = anchorPosition?.let { adapter.getItemAt(it)?.id }
@@ -4196,19 +4196,34 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (recycler.childCount == 0) return null
-            val first = recycler.getChildAt(0)
-            val last = recycler.getChildAt(recycler.childCount - 1)
-            val firstPos = first?.let { recycler.getChildAdapterPosition(it) }?.takeIf { it != RecyclerView.NO_POSITION }
-            val lastPos = last?.let { recycler.getChildAdapterPosition(it) }?.takeIf { it != RecyclerView.NO_POSITION }
-            return when {
-                first != null && firstPos != null && y < first.top -> {
-                    adapter.getItemAt(firstPos)?.id?.let { it to true }
+
+            var closestView: View? = null
+            var closestAdapterPosition: Int? = null
+            var closestDistance = Float.MAX_VALUE
+            for (i in 0 until recycler.childCount) {
+                val child = recycler.getChildAt(i)
+                val position = recycler.getChildAdapterPosition(child)
+                if (position == RecyclerView.NO_POSITION) continue
+                val distance = when {
+                    y < child.top -> child.top - y
+                    y > child.bottom -> y - child.bottom
+                    else -> 0f
                 }
-                last != null && lastPos != null && y > last.bottom -> {
-                    adapter.getItemAt(lastPos)?.id?.let { it to false }
+                if (distance < closestDistance) {
+                    closestDistance = distance
+                    closestView = child
+                    closestAdapterPosition = position
                 }
-                else -> null
             }
+
+            val closestId = closestAdapterPosition?.let { adapter.getItemAt(it)?.id }
+            if (closestId != null && closestView != null) {
+                val midpoint = (closestView.top + closestView.bottom) / 2f
+                val placeBefore = y < midpoint
+                return closestId to placeBefore
+            }
+
+            return null
         }
 
         private fun maybeAutoScrollDuringDrag(y: Float) {
