@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
@@ -114,6 +115,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
+    private lateinit var drawerPickFontButton: MaterialButton
+    private lateinit var drawerResetFontButton: MaterialButton
+    private lateinit var cardFontNameView: TextView
 
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private lateinit var flowAdapter: FlowPagerAdapter
@@ -131,6 +135,9 @@ class MainActivity : AppCompatActivity() {
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
+    private var cardTypeface: Typeface? = null
+    private var cardFontPath: String? = null
+    private var cardFontDisplayName: String? = null
     private var lastFlowChipTapId: Long = -1L
     private var lastFlowChipTapTime: Long = 0L
     private var textToSpeech: TextToSpeech? = null
@@ -189,6 +196,8 @@ class MainActivity : AppCompatActivity() {
         val sourceFlowId: Long,
         val cardId: Long
     )
+
+    private data class FontLoadSuccess(val path: String, val displayName: String?)
 
     private var isCardMovePagerDragActive: Boolean = false
     private var lastCardMovePagerSwitchTime: Long = 0L
@@ -256,6 +265,13 @@ class MainActivity : AppCompatActivity() {
             } else snackbar("No photos selected")
         }
 
+    private val pickFontLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                importCardFontFromUri(uri)
+            } else snackbar(getString(R.string.snackbar_font_no_selection))
+        }
+
     private val exportNotesLauncher =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             if (uri != null) {
@@ -290,6 +306,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
+        cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
+        cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
+        cardTypeface = cardFontPath?.let { loadCardTypeface(it) }
+        if (cardTypeface == null) {
+            cardFontPath = null
+            cardFontDisplayName = null
+        }
         setContentView(R.layout.activity_main)
         pendingImageCardRequest = ImageCardRequest.fromBundle(
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
@@ -331,6 +354,9 @@ class MainActivity : AppCompatActivity() {
         appBackgroundPreview = header.findViewById(R.id.imageAppBackgroundPreview)
         cardFontSizeSlider = header.findViewById(R.id.sliderCardFontSize)
         cardFontSizeValue = header.findViewById(R.id.textCardFontSizeValue)
+        drawerPickFontButton = header.findViewById(R.id.buttonDrawerPickFont)
+        drawerResetFontButton = header.findViewById(R.id.buttonDrawerResetFont)
+        cardFontNameView = header.findViewById(R.id.textCardFontName)
         val sliderMin = cardFontSizeSlider.valueFrom
         val sliderMax = cardFontSizeSlider.valueTo
         val initialSliderValue = cardFontSizeSp.coerceIn(sliderMin, sliderMax)
@@ -339,6 +365,7 @@ class MainActivity : AppCompatActivity() {
         cardFontSizeSlider.addOnChangeListener { _, value, fromUser ->
             updateCardFontSize(value, fromUser)
         }
+        updateCardFontLabel()
 
         toolbarBasePaddingTop = toolbar.paddingTop
         toolbarBasePaddingBottom = toolbar.paddingBottom
@@ -409,12 +436,18 @@ class MainActivity : AppCompatActivity() {
             setAppBackground(null)
             drawerLayout.closeDrawer(GravityCompat.START)
         }
+        drawerPickFontButton.setOnClickListener { launchFontPicker() }
+        drawerResetFontButton.setOnClickListener {
+            resetCardFont()
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
 
         loadState()
 
         imagesAdapter.submit(selectedImages)
         refreshAllFlows()
         applyCardFontSizeToAdapters()
+        applyCardTypefaceToAdapters()
 
         applyAppBackground()
 
@@ -3280,9 +3313,156 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateCardFontLabel() {
+        if (::cardFontNameView.isInitialized) {
+            val name = cardFontDisplayName?.takeIf { it.isNotBlank() }
+            cardFontNameView.text = if (name != null) {
+                getString(R.string.drawer_card_font_named, name)
+            } else {
+                getString(R.string.drawer_card_font_default)
+            }
+        }
+    }
+
     private fun applyCardFontSizeToAdapters() {
         flowControllers.forEach { (_, controller) ->
             controller.adapter.setBodyTextSize(cardFontSizeSp)
+        }
+    }
+
+    private fun applyCardTypefaceToAdapters() {
+        flowControllers.forEach { (_, controller) ->
+            controller.adapter.setBodyTypeface(cardTypeface)
+        }
+    }
+
+    private fun launchFontPicker() {
+        pickFontLauncher.launch(
+            arrayOf(
+                "font/ttf",
+                "font/otf",
+                "application/x-font-ttf",
+                "application/x-font-otf",
+                "application/octet-stream"
+            )
+        )
+    }
+
+    private fun importCardFontFromUri(uri: Uri) {
+        lifecycleScope.launch {
+            val displayName = queryDisplayName(uri) ?: uri.lastPathSegment
+            val mime = contentResolver.getType(uri)
+            val extension = guessFontExtension(mime, displayName)
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        copyFontStream(input, extension, displayName)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (result != null) {
+                applyCardFontFromPath(result.path, result.displayName, announce = true)
+            } else {
+                snackbar(getString(R.string.snackbar_font_failed))
+            }
+        }
+    }
+
+    private suspend fun copyFontStream(
+        input: InputStream,
+        extension: String,
+        displayName: String?
+    ): FontLoadSuccess? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val safeExtension = extension.ifBlank { "ttf" }.lowercase(Locale.ROOT)
+                val filename = "card_font_${'$'}{System.currentTimeMillis()}.$safeExtension"
+                openFileOutput(filename, MODE_PRIVATE).use { output ->
+                    input.copyTo(output)
+                }
+                FontLoadSuccess(File(filesDir, filename).absolutePath, displayName)
+            }.getOrNull()
+        }
+    }
+
+    private fun applyCardFontFromPath(path: String, displayName: String?, announce: Boolean) {
+        val typeface = loadCardTypeface(path)
+        if (typeface != null) {
+            applyCardTypeface(typeface, path, displayName, announce)
+        } else {
+            deleteInternalFontFile(path)
+            snackbar(getString(R.string.snackbar_font_failed))
+        }
+    }
+
+    private fun applyCardTypeface(
+        typeface: Typeface?,
+        path: String?,
+        displayName: String?,
+        announce: Boolean
+    ) {
+        val previousPath = cardFontPath
+        cardTypeface = typeface
+        cardFontPath = path
+        cardFontDisplayName = displayName?.takeIf { it.isNotBlank() }
+        updateCardFontLabel()
+        applyCardTypefaceToAdapters()
+        prefs.edit().apply {
+            if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
+            if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
+        }.apply()
+        if (previousPath != null && previousPath != cardFontPath) {
+            deleteInternalFontFile(previousPath)
+        }
+        if (announce) {
+            val message = if (cardTypeface != null) {
+                val label = cardFontDisplayName ?: getString(R.string.drawer_card_font)
+                getString(R.string.snackbar_font_updated, label)
+            } else {
+                getString(R.string.snackbar_font_reset)
+            }
+            snackbar(message)
+        }
+    }
+
+    private fun resetCardFont() {
+        applyCardTypeface(typeface = null, path = null, displayName = null, announce = true)
+    }
+
+    private fun loadCardTypeface(path: String): Typeface? {
+        if (path.isBlank()) return null
+        return runCatching { Typeface.createFromFile(path) }.getOrNull()
+    }
+
+    private fun guessFontExtension(mimeType: String?, fileName: String?): String {
+        val lowerMime = mimeType?.lowercase(Locale.ROOT)
+        return when {
+            lowerMime == "font/otf" || lowerMime == "application/x-font-otf" -> "otf"
+            lowerMime == "font/ttf" || lowerMime == "application/x-font-ttf" ||
+                lowerMime == "application/x-font-truetype" -> "ttf"
+            lowerMime == "font/woff" || lowerMime == "application/font-woff" -> "woff"
+            else -> fileName?.substringAfterLast('.', "")?.takeIf {
+                it.equals("ttf", true) || it.equals("otf", true) || it.equals("woff", true)
+            }?.lowercase(Locale.ROOT) ?: "ttf"
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
+    }
+
+    private fun deleteInternalFontFile(path: String) {
+        runCatching {
+            val file = File(path)
+            if (file.exists() && file.parentFile == filesDir) {
+                file.delete()
+            }
         }
     }
 
@@ -3541,6 +3721,8 @@ class MainActivity : AppCompatActivity() {
             val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
+            if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
+            if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
             remove(KEY_CARDS)
             apply()
         }
@@ -3593,6 +3775,7 @@ class MainActivity : AppCompatActivity() {
                 onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
             adapter.setBodyTextSize(cardFontSizeSp)
+            adapter.setBodyTypeface(cardTypeface)
             recycler.adapter = adapter
             holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
             return holder
@@ -3631,6 +3814,7 @@ class MainActivity : AppCompatActivity() {
                 val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView)
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
+                adapter.setBodyTypeface(cardTypeface)
                 controller.updateDisplayedCards(
                     flow = flow,
                     query = searchQueryNormalized,
@@ -3865,6 +4049,8 @@ private const val KEY_APP_BACKGROUND = "app_background"
 private const val KEY_NEXT_CARD_ID = "next_card_id"
 private const val KEY_NEXT_FLOW_ID = "next_flow_id"
 private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
+private const val KEY_CARD_FONT_PATH = "card_font_path"
+private const val KEY_CARD_FONT_NAME = "card_font_name"
 private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"

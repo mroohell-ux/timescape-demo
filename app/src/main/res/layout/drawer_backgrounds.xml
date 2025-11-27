@@ -126,6 +126,45 @@
             android:valueTo="26"
             android:stepSize="1"/>
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:background="@color/flow_bar_stroke"/>
+
+        <TextView
+            android:id="@+id/labelCardFont"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/drawer_card_font"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
+
+        <TextView
+            android:id="@+id/textCardFontName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerPickFont"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/drawer_pick_font_file"
+            app:iconGravity="textStart"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerResetFont"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_reset_font"
+            app:iconGravity="textStart"/>
+
         <TextView
             android:id="@+id/labelAppBackground"
             android:layout_width="match_parent"
