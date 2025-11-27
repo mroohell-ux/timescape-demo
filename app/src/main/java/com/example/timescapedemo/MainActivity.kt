@@ -1318,20 +1318,27 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_add_flow_first))
             return
         }
-        showCardEditor(initialTitle = "", initialSnippet = "", isNew = true, onSave = { title, snippet ->
+        showCardEditor(
+            initialTitle = "",
+            initialSnippet = "",
+            initialTextColor = Color.WHITE,
+            isNew = true,
+            onSave = { title, snippet, textColor ->
             val finalTitle = title.trim()
             val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
             val card = CardItem(
                 id = nextCardId++,
                 title = finalTitle,
                 snippet = finalSnippet,
+                textColor = textColor,
                 updatedAt = System.currentTimeMillis()
             )
             flow.cards += card
             refreshFlow(flow, scrollToTop = true)
             saveState()
             snackbar("Added card")
-        })
+            }
+        )
     }
 
     private fun showAddImageCardDialog() {
@@ -1434,21 +1441,27 @@ class MainActivity : AppCompatActivity() {
             )
             }
             else -> {
-            showCardEditor(initialTitle = card.title, initialSnippet = card.snippet, isNew = false, onSave = { newTitle, newSnippet ->
-                card.title = newTitle.trim()
-                val snippetValue = newSnippet.trim()
-                if (snippetValue.isNotEmpty()) card.snippet = snippetValue
-                card.updatedAt = System.currentTimeMillis()
-                refreshFlow(flow, scrollToTop = true)
-                saveState()
-                snackbar("Card updated")
-            }, onDelete = {
-                disposeCardResources(card)
-                flow.cards.remove(card)
-                refreshFlow(flow, scrollToTop = true)
-                saveState()
-                snackbar(getString(R.string.snackbar_deleted_card))
-            })
+            showCardEditor(
+                initialTitle = card.title,
+                initialSnippet = card.snippet,
+                initialTextColor = card.textColor,
+                isNew = false,
+                onSave = { newTitle, newSnippet, newColor ->
+                    card.title = newTitle.trim()
+                    val snippetValue = newSnippet.trim()
+                    if (snippetValue.isNotEmpty()) card.snippet = snippetValue
+                    card.textColor = newColor
+                    card.updatedAt = System.currentTimeMillis()
+                    refreshFlow(flow, scrollToTop = true)
+                    saveState()
+                    snackbar("Card updated")
+                }, onDelete = {
+                    disposeCardResources(card)
+                    flow.cards.remove(card)
+                    refreshFlow(flow, scrollToTop = true)
+                    saveState()
+                    snackbar(getString(R.string.snackbar_deleted_card))
+                })
             }
         }
     }
@@ -1728,21 +1741,80 @@ class MainActivity : AppCompatActivity() {
     private fun showCardEditor(
         initialTitle: String,
         initialSnippet: String,
+        initialTextColor: Int,
         isNew: Boolean,
-        onSave: (title: String, snippet: String) -> Unit,
+        onSave: (title: String, snippet: String, textColor: Int) -> Unit,
         onDelete: (() -> Unit)? = null
     ) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_card, null, false)
         val titleInput = dialogView.findViewById<EditText>(R.id.inputTitle)
         val snippetInput = dialogView.findViewById<EditText>(R.id.inputSnippet)
+        val textColorGroup = dialogView.findViewById<ChipGroup>(R.id.groupTextColors)
         titleInput.setText(initialTitle)
         snippetInput.setText(initialSnippet)
+
+        data class NamedColor(val color: Int, val label: String)
+
+        val density = resources.displayMetrics.density
+        val textColorOptions = listOf(
+            NamedColor(Color.WHITE, getString(R.string.text_color_white)),
+            NamedColor(Color.BLACK, getString(R.string.text_color_black)),
+            NamedColor(Color.parseColor("#FF3B30"), getString(R.string.text_color_red)),
+            NamedColor(Color.parseColor("#FF9500"), getString(R.string.text_color_orange)),
+            NamedColor(Color.parseColor("#FFD60A"), getString(R.string.text_color_yellow)),
+            NamedColor(Color.parseColor("#34C759"), getString(R.string.text_color_green)),
+            NamedColor(Color.parseColor("#0A84FF"), getString(R.string.text_color_blue)),
+            NamedColor(Color.parseColor("#FF2D55"), getString(R.string.text_color_pink))
+        )
+
+        var selectedTextColor = initialTextColor
+        val chipTheme = com.google.android.material.R.style.Widget_MaterialComponents_Chip_Choice
+        val chipContext = ContextThemeWrapper(this, chipTheme)
+        textColorGroup.removeAllViews()
+        textColorOptions.forEach { option ->
+            val chip = Chip(chipContext).apply {
+                id = View.generateViewId()
+                text = option.label
+                isCheckable = true
+                isClickable = true
+                isFocusable = true
+                isCheckedIconVisible = true
+                tag = option
+                val onColor = if (ColorUtils.calculateLuminance(option.color) < 0.5f) Color.WHITE else Color.BLACK
+                chipBackgroundColor = ColorStateList.valueOf(option.color)
+                checkedIconTint = ColorStateList.valueOf(onColor)
+                val strokeAlpha = (0.28f * 255).roundToInt()
+                chipStrokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(onColor, strokeAlpha))
+                chipStrokeWidth = (1.5f * density)
+                rippleColor = ColorStateList.valueOf(
+                    ColorUtils.setAlphaComponent(onColor, (0.16f * 255).roundToInt())
+                )
+                setTextColor(onColor)
+                isChecked = option.color == initialTextColor
+            }
+            textColorGroup.addView(chip)
+        }
+
+        if (textColorGroup.checkedChipId == View.NO_ID) {
+            val fallbackChip = textColorGroup.getChildAt(0) as? Chip
+            fallbackChip?.let { chip ->
+                chip.isChecked = true
+                selectedTextColor = (chip.tag as? NamedColor)?.color ?: initialTextColor
+            }
+        }
+
+        textColorGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            val chipId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val chip = group.findViewById<Chip>(chipId)
+            val option = chip?.tag as? NamedColor ?: return@setOnCheckedStateChangeListener
+            selectedTextColor = option.color
+        }
 
         val builder = AlertDialog.Builder(this)
             .setTitle(if (isNew) getString(R.string.dialog_add_card_title) else getString(R.string.dialog_edit_card_title))
             .setView(dialogView)
             .setPositiveButton(R.string.dialog_save) { _, _ ->
-                onSave(titleInput.text.toString(), snippetInput.text.toString())
+                onSave(titleInput.text.toString(), snippetInput.text.toString(), selectedTextColor)
             }
             .setNegativeButton(android.R.string.cancel, null)
         if (onDelete != null) {
@@ -3021,6 +3093,7 @@ class MainActivity : AppCompatActivity() {
                 val cardObj = JSONObject()
                 cardObj.put("title", card.title)
                 cardObj.put("snippet", card.snippet)
+                cardObj.put("textColor", colorToString(card.textColor))
                 cardObj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { handwriting ->
                     handwritingToJson(handwriting)?.let { cardObj.put("handwriting", it) }
@@ -3140,6 +3213,7 @@ class MainActivity : AppCompatActivity() {
                         id = cardId,
                         title = importedCard.title,
                         snippet = importedCard.snippet,
+                        textColor = importedCard.textColor,
                         updatedAt = importedCard.updatedAt,
                         image = importedCard.image,
                         handwriting = importedCard.handwriting,
@@ -3190,11 +3264,12 @@ class MainActivity : AppCompatActivity() {
                     val title = cardObj.optString("title")
                     val snippet = cardObj.optString("snippet")
                     val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
+                    val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
                     val handwriting = decodeHandwritingFromExport(cardObj.optJSONObject("handwriting"), createdFiles)
                     val image = decodeImageFromExport(cardObj.optJSONObject("image"), createdFiles)
                     val imageHandwriting = cardObj.optJSONObject("imageHandwriting")
                         ?.let { decodeHandwritingSideFromExport(it, createdFiles) }
-                    cards += ImportedCard(title, snippet, updatedAt, handwriting, image, imageHandwriting)
+                    cards += ImportedCard(title, snippet, updatedAt, textColor, handwriting, image, imageHandwriting)
                 }
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
@@ -3501,6 +3576,7 @@ class MainActivity : AppCompatActivity() {
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
+                                textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE,
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
                                 handwriting = handwriting,
@@ -3540,6 +3616,7 @@ class MainActivity : AppCompatActivity() {
                             id = if (id >= 0) id else ++highestCardId,
                             title = obj.optString("title"),
                             snippet = obj.optString("snippet"),
+                            textColor = parseColorString(obj.optString("textColor")) ?: Color.WHITE,
                             updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
                             handwriting = null
                         )
@@ -3641,6 +3718,7 @@ class MainActivity : AppCompatActivity() {
                 obj.put("id", card.id)
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
+                obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { content ->
                     val handwritingObj = JSONObject().apply {
@@ -4033,6 +4111,7 @@ class MainActivity : AppCompatActivity() {
         val title: String,
         val snippet: String,
         val updatedAt: Long,
+        val textColor: Int,
         val handwriting: HandwritingContent?,
         val image: CardImage?,
         val imageHandwriting: HandwritingSide?
