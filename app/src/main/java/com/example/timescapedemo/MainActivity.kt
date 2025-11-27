@@ -69,8 +69,6 @@ import com.google.android.material.slider.Slider
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
-import java.net.HttpURLConnection
-import java.net.URL
 import java.io.FileNotFoundException
 import java.io.File
 import java.io.InputStream
@@ -118,7 +116,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
     private lateinit var drawerPickFontButton: MaterialButton
-    private lateinit var drawerDownloadFontButton: MaterialButton
     private lateinit var drawerResetFontButton: MaterialButton
     private lateinit var cardFontNameView: TextView
 
@@ -358,7 +355,6 @@ class MainActivity : AppCompatActivity() {
         cardFontSizeSlider = header.findViewById(R.id.sliderCardFontSize)
         cardFontSizeValue = header.findViewById(R.id.textCardFontSizeValue)
         drawerPickFontButton = header.findViewById(R.id.buttonDrawerPickFont)
-        drawerDownloadFontButton = header.findViewById(R.id.buttonDrawerDownloadFont)
         drawerResetFontButton = header.findViewById(R.id.buttonDrawerResetFont)
         cardFontNameView = header.findViewById(R.id.textCardFontName)
         val sliderMin = cardFontSizeSlider.valueFrom
@@ -441,7 +437,6 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
         }
         drawerPickFontButton.setOnClickListener { launchFontPicker() }
-        drawerDownloadFontButton.setOnClickListener { promptDownloadFont() }
         drawerResetFontButton.setOnClickListener { resetCardFont() }
 
         loadState()
@@ -3350,67 +3345,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun promptDownloadFont() {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_TEXT_VARIATION_URI
-            hint = "https://example.com/font.ttf"
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        val container = FrameLayout(this).apply {
-            val padding = (20 * resources.displayMetrics.density).roundToInt()
-            setPadding(padding, 0, padding, 0)
-            addView(input)
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.dialog_font_url_title)
-            .setMessage(R.string.dialog_font_url_message)
-            .setView(container)
-            .setPositiveButton(R.string.dialog_download) { _, _ ->
-                val url = input.text.toString().trim()
-                if (url.isBlank()) {
-                    snackbar(getString(R.string.snackbar_font_no_selection))
-                } else {
-                    downloadFontFromUrl(url)
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun downloadFontFromUrl(urlString: String) {
-        snackbar(getString(R.string.snackbar_font_downloading))
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                var connection: HttpURLConnection? = null
-                try {
-                    connection = URL(urlString).openConnection() as HttpURLConnection
-                    connection.instanceFollowRedirects = true
-                    connection.connectTimeout = FONT_DOWNLOAD_TIMEOUT_MS
-                    connection.readTimeout = FONT_DOWNLOAD_TIMEOUT_MS
-                    connection.connect()
-                    if (connection.responseCode !in 200..299) return@withContext null
-                    val resolvedName = connection.url.path.substringAfterLast('/').substringBefore('?')
-                    val extension = guessFontExtension(connection.contentType, resolvedName)
-                    connection.inputStream.use { input ->
-                        copyFontStream(input, extension, resolvedName.takeIf { it.isNotBlank() })
-                    }
-                } catch (_: Exception) {
-                    null
-                } finally {
-                    connection?.disconnect()
-                }
-            }
-            if (result != null) {
-                applyCardFontFromPath(result.path, result.displayName, announce = true)
-            } else {
-                snackbar(getString(R.string.snackbar_font_failed))
-            }
-        }
-    }
-
     private fun importCardFontFromUri(uri: Uri) {
         lifecycleScope.launch {
             val displayName = queryDisplayName(uri) ?: uri.lastPathSegment
@@ -4150,7 +4084,6 @@ private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
 private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
 private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
 private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
-private const val FONT_DOWNLOAD_TIMEOUT_MS = 15000
 private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
 private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
 private const val NOTES_EXPORT_VERSION = 1
