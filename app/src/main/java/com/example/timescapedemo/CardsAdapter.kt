@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
@@ -27,6 +28,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -74,6 +76,7 @@ data class CardItem(
     val id: Long,
     var title: String,
     var snippet: String,
+    var textColor: Int = Color.WHITE,
     var bg: BgImage? = null,
     var image: CardImage? = null,
     var updatedAt: Long = System.currentTimeMillis(),
@@ -269,6 +272,12 @@ class CardsAdapter(
         holder.snippet.typeface = bodyTypeface
         holder.time.typeface = bodyTypeface
         holder.title.typeface = boldTypeface ?: bodyTypeface?.let { Typeface.create(it, Typeface.BOLD) }
+        val textColor = item.textColor
+        val timeColor = ColorUtils.setAlphaComponent(textColor, 0xF2)
+        holder.title.setTextColor(textColor)
+        holder.snippet.setTextColor(textColor)
+        holder.time.setTextColor(timeColor)
+        holder.titleSpeakButton.imageTintList = ColorStateList.valueOf(textColor)
 
         // ---- Bind background image (drawable or Uri) ----
         val shouldDisplayBackground = handwritingContent == null && imageContent == null
@@ -333,8 +342,6 @@ class CardsAdapter(
 
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
-        holder.snippet.setTextColor(Color.WHITE)
-        holder.time.setTextColor(0xF2FFFFFF.toInt())
         addShadow(holder.time, holder.title, holder.snippet)
     }
 
