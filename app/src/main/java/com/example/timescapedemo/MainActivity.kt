@@ -869,17 +869,18 @@ class MainActivity : AppCompatActivity() {
         if (!isCardMovePagerDragActive) return
         if (flows.size <= 1) return
         val width = flowPager.width.takeIf { it > 0 } ?: return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
-        val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
+        val leftZone = width * 0.35f
+        val rightZone = width * 0.65f
         val currentIndex = flowPager.currentItem
         val targetIndex = when {
-            positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
-            positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
+            positionX < leftZone && currentIndex > 0 -> currentIndex - 1
+            positionX > rightZone && currentIndex < flows.lastIndex -> currentIndex + 1
             else -> null
         } ?: return
-        flowPager.setCurrentItem(targetIndex, true)
-        lastCardMovePagerSwitchTime = now
+        if (targetIndex != currentIndex || SystemClock.elapsedRealtime() - lastCardMovePagerSwitchTime > CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) {
+            flowPager.setCurrentItem(targetIndex, true)
+            lastCardMovePagerSwitchTime = SystemClock.elapsedRealtime()
+        }
     }
 
     private fun confirmMergeFlows(sourceId: Long, targetId: Long) {
@@ -4122,8 +4123,6 @@ class MainActivity : AppCompatActivity() {
         private fun handleCardReorderDrag(event: DragEvent): Boolean {
             val flow = owningFlow() ?: return false
             val moveData = event.localState as? CardMoveDragData ?: return false
-            if (moveData.sourceFlowId != flow.id) return false
-            if (adapter.itemCount <= 1) return false
             return when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> true
                 DragEvent.ACTION_DRAG_LOCATION -> {
@@ -4131,7 +4130,12 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 DragEvent.ACTION_DROP -> {
-                    reorderCard(flow, moveData, event.y)
+                    val anchor = findReorderAnchor(event.y)
+                    if (moveData.sourceFlowId == flow.id) {
+                        anchor?.let { moveCardWithinFlow(flow, moveData.cardId, it.first, it.second) }
+                    } else {
+                        moveCardIntoFlow(flow, moveData, anchor)
+                    }
                     true
                 }
                 DragEvent.ACTION_DRAG_ENDED -> true
@@ -4139,9 +4143,46 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        private fun reorderCard(flow: CardFlow, moveData: CardMoveDragData, y: Float) {
-            val anchor = findReorderAnchor(y) ?: return
-            moveCardWithinFlow(flow, moveData.cardId, anchor.first, anchor.second)
+        private fun moveCardIntoFlow(
+            targetFlow: CardFlow,
+            moveData: CardMoveDragData,
+            anchor: Pair<Long?, Boolean>?
+        ) {
+            val sourceFlow = flows.firstOrNull { it.id == moveData.sourceFlowId } ?: return
+            val sourceIndex = sourceFlow.cards.indexOfFirst { it.id == moveData.cardId }
+            if (sourceIndex < 0) return
+            val card = sourceFlow.cards.removeAt(sourceIndex)
+            card.updatedAt = System.currentTimeMillis()
+            card.relativeTimeText = null
+
+            val clampedSourceIndex = sourceFlow.lastViewedCardIndex
+                .coerceIn(0, max(0, sourceFlow.cards.lastIndex))
+            sourceFlow.lastViewedCardIndex = clampedSourceIndex
+            sourceFlow.lastViewedCardId = sourceFlow.cards.getOrNull(clampedSourceIndex)?.id
+            sourceFlow.lastViewedCardFocused = sourceFlow.lastViewedCardFocused && sourceFlow.cards.isNotEmpty()
+
+            val anchorId = anchor?.first
+            val placeBefore = anchor?.second ?: false
+            val targetCards = targetFlow.cards
+            val anchorIndex = anchorId?.let { id -> targetCards.indexOfFirst { it.id == id } }
+            val desiredIndex = when {
+                anchorIndex == null || anchorIndex < 0 -> targetCards.size
+                placeBefore -> anchorIndex
+                else -> anchorIndex + 1
+            }.coerceIn(0, targetCards.size)
+
+            targetCards.add(desiredIndex, card)
+            targetFlow.lastViewedCardIndex = desiredIndex
+            targetFlow.lastViewedCardId = card.id
+            targetFlow.lastViewedCardFocused = true
+
+            flowShuffleStates.remove(sourceFlow.id)
+            flowShuffleStates.remove(targetFlow.id)
+
+            refreshFlow(sourceFlow, scrollToTop = false)
+            refreshFlow(targetFlow, scrollToTop = false)
+            saveState()
+            snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
         }
 
         private fun findReorderAnchor(y: Float): Pair<Long?, Boolean>? {
@@ -4248,7 +4289,6 @@ private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
-private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
