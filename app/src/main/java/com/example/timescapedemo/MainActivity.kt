@@ -3303,7 +3303,7 @@ class MainActivity : AppCompatActivity() {
         val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
         val bytes = decodeBase64Payload(data) ?: return null
         val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
-        val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
+        val filename = "handwriting_${System.currentTimeMillis()}_${UUID.randomUUID()}.${options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Handwriting(filename)
