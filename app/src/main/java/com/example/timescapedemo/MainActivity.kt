@@ -848,10 +848,9 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
             DragEvent.ACTION_DROP -> {
-                val moveData = event.localState as? CardMoveDragData ?: return false
-                val targetFlowId = currentFlow()?.id ?: return false
-                moveCardToFlow(moveData.cardId, moveData.sourceFlowId, targetFlowId)
-                return true
+                // Let the drop land on the target flow's recycler so it can compute the
+                // exact insertion anchor instead of forcing a top insert here.
+                return false
             }
             DragEvent.ACTION_DRAG_LOCATION -> {
                 maybeSwitchFlowForCardDrag(event.x)
