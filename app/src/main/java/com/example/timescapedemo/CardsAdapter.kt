@@ -76,6 +76,7 @@ data class CardItem(
     var snippet: String,
     var bg: BgImage? = null,
     var image: CardImage? = null,
+    var backImage: CardImage? = null,
     var updatedAt: Long = System.currentTimeMillis(),
     var handwriting: HandwritingContent? = null,
     var imageHandwriting: HandwritingSide? = null,
@@ -170,11 +171,12 @@ class CardsAdapter(
             buildList {
                 (card.bg as? BgImage.UriRef)?.uri?.let { add(it) }
                 card.image?.uri?.let { add(it) }
+                card.backImage?.uri?.let { add(it) }
             }
         }.toSet()
         blockedUris.retainAll(activeUris)
         val flippableIds = copies.filter {
-            it.handwriting != null || it.imageHandwriting != null
+            it.handwriting != null || it.imageHandwriting != null || (it.backImage != null && it.image != null)
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
         return copies
@@ -430,9 +432,13 @@ class CardsAdapter(
         position: Int
     ) {
         val backSide = item.imageHandwriting
+        val backImage = item.backImage
         if (face == HandwritingFace.BACK) {
             if (backSide != null) {
                 bindImageBack(holder, item, backSide, fallbackText, position)
+                return
+            } else if (backImage != null) {
+                bindImageBack(holder, item, backImage, fallbackText)
                 return
             } else {
                 handwritingFaces.remove(item.id)
@@ -521,12 +527,61 @@ class CardsAdapter(
         prefetchNeighbors(holder, position, side.options)
     }
 
+    private fun bindImageBack(
+        holder: VH,
+        item: CardItem,
+        backImage: CardImage,
+        fallbackText: CharSequence
+    ) {
+        HandwritingBitmapLoader.clear(holder.handwriting)
+        holder.handwriting.contentDescription = null
+        BackgroundImageLoader.clear(holder.imageCard)
+        setCardMode(holder, CardMode.IMAGE, fallbackText)
+        val snippet = item.snippet.takeIf { it.isNotBlank() }
+        holder.imageCard.contentDescription = snippet
+            ?: holder.itemView.context.getString(R.string.image_card_content_desc)
+        val uri = backImage.uri
+        if (blockedUris.contains(uri)) {
+            holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+            return
+        }
+        val (targetWidth, targetHeight) = estimateImageTargetSize(holder)
+        BackgroundImageLoader.load(
+            context = holder.itemView.context,
+            imageView = holder.imageCard,
+            uri = uri,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight
+        ) { result ->
+            val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+            if (!isSameCard) return@load
+            val expectedFace = currentCardFace(item.id)
+            if (expectedFace != HandwritingFace.BACK) return@load
+            when (result) {
+                is BackgroundImageLoader.Result.Success -> {
+                    blockedUris.remove(uri)
+                    holder.imageCard.setImageBitmap(result.bitmap)
+                }
+                is BackgroundImageLoader.Result.PermissionDenied -> {
+                    blockedUris.add(uri)
+                    holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+                }
+                is BackgroundImageLoader.Result.NotFound -> {
+                    holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+                }
+                is BackgroundImageLoader.Result.Error -> {
+                    holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+                }
+            }
+        }
+    }
+
     fun toggleCardFace(holder: VH): HandwritingFace? {
         val position = holder.bindingAdapterPosition
         if (position == RecyclerView.NO_POSITION) return null
         val item = getItem(position)
         val handwritingContent = item.handwriting
-        val hasImageBack = item.imageHandwriting != null
+        val hasImageBack = item.imageHandwriting != null || item.backImage != null
         val hasHandwriting = handwritingContent != null
         if (!hasHandwriting && (!hasImageBack || item.image == null)) return null
         val current = currentCardFace(item.id)
@@ -1048,6 +1103,7 @@ private fun CardItem.deepCopy(): CardItem = copy(
         null -> null
     },
     image = image?.copy(),
+    backImage = backImage?.copy(),
     handwriting = handwriting?.let { content ->
         content.copy(
             options = content.options.copy(),
