@@ -14,6 +14,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
@@ -124,6 +125,8 @@ class CardsAdapter(
 
     private val blockedUris = mutableSetOf<Uri>()
     private var bodyTextSizeSp: Float = DEFAULT_BODY_TEXT_SIZE_SP
+    private var bodyTypeface: Typeface? = null
+    private var boldTypeface: Typeface? = null
     private var backgroundSizingConfig: BackgroundSizingConfig = backgroundSizing.normalized()
     private val tintProcessor = TintProcessor(tint)
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
@@ -263,6 +266,9 @@ class CardsAdapter(
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
         holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
+        holder.snippet.typeface = bodyTypeface
+        holder.time.typeface = bodyTypeface
+        holder.title.typeface = boldTypeface ?: bodyTypeface?.let { Typeface.create(it, Typeface.BOLD) }
 
         // ---- Bind background image (drawable or Uri) ----
         val shouldDisplayBackground = handwritingContent == null && imageContent == null
@@ -940,6 +946,13 @@ class CardsAdapter(
         val clamped = sizeSp.coerceIn(MIN_BODY_TEXT_SIZE_SP, MAX_BODY_TEXT_SIZE_SP)
         if (abs(bodyTextSizeSp - clamped) < 0.01f) return
         bodyTextSizeSp = clamped
+        notifyDataSetChanged()
+    }
+
+    fun setBodyTypeface(typeface: Typeface?) {
+        if (bodyTypeface == typeface) return
+        bodyTypeface = typeface
+        boldTypeface = typeface?.let { Typeface.create(it, Typeface.BOLD) }
         notifyDataSetChanged()
     }
 
