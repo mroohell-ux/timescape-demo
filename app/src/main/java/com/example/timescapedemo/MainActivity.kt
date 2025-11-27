@@ -437,7 +437,10 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
         }
         drawerPickFontButton.setOnClickListener { launchFontPicker() }
-        drawerResetFontButton.setOnClickListener { resetCardFont() }
+        drawerResetFontButton.setOnClickListener {
+            resetCardFont()
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
 
         loadState()
 

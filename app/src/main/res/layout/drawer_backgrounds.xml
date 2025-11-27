@@ -158,12 +158,12 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerResetFont"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/drawer_reset_font"
-            android:textColor="@color/flow_bar_stroke"/>
+            app:iconGravity="textStart"/>
 
         <TextView
             android:id="@+id/labelAppBackground"

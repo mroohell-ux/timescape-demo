@@ -90,7 +90,7 @@
     <string name="drawer_card_font_default">Using system font</string>
     <string name="drawer_card_font_named">Using %1$s</string>
     <string name="drawer_pick_font_file">Upload font file</string>
-    <string name="drawer_reset_font">Reset to system font</string>
+    <string name="drawer_reset_font">Use system default font</string>
     <string name="snackbar_font_no_selection">No font selected</string>
     <string name="snackbar_font_failed">Could not load that font.</string>
     <string name="snackbar_font_updated">Applied %1$s to cards</string>
