@@ -48,6 +48,59 @@
                 android:scaleType="centerCrop"/>
         </FrameLayout>
 
+        <FrameLayout
+            android:id="@+id/videoCardContainer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent">
+
+            <ImageView
+                android:id="@+id/videoThumbnail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/video_card_content_desc"
+                android:scaleType="centerCrop" />
+
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/videoPlayer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true"
+                android:visibility="gone"
+                app:use_controller="false" />
+
+            <ImageButton
+                android:id="@+id/videoDeleteButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|start"
+                android:layout_margin="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/video_delete_button_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_delete"
+                android:tint="#FFFFFFFF" />
+
+            <ImageButton
+                android:id="@+id/videoMuteToggle"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/video_unmute_button_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_volume_off"
+                android:tint="#FFFFFFFF" />
+        </FrameLayout>
+
         <!-- LOCAL scrim: very light, only beneath the text block for readability -->
         <View
             android:id="@+id/textScrim"

@@ -77,4 +77,17 @@ class AspectRatioCardView @JvmOverloads constructor(
     fun setRatioString(r: String) {
         parseRatio(r)?.let { ratio = it; useRatio = true; requestLayout() }
     }
+
+    fun setRatio(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        ratio = width.toFloat() / height
+        useRatio = true
+        requestLayout()
+    }
+
+    fun clearRatio() {
+        if (!useRatio) return
+        useRatio = false
+        requestLayout()
+    }
 }
