@@ -51,6 +51,7 @@ class HandwritingView @JvmOverloads constructor(
         strokeWidth = 6f * density
     }
     private val eraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.TRANSPARENT
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
@@ -462,7 +463,13 @@ class HandwritingView @JvmOverloads constructor(
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
         val canvas = drawingCanvas ?: return
-        canvas.drawPath(path, currentCommitPaint())
+        if (drawingTool == ERASER) {
+            val checkpoint = canvas.saveLayer(null, null)
+            canvas.drawPath(path, eraserPaint)
+            canvas.restoreToCount(checkpoint)
+        } else {
+            canvas.drawPath(path, penPaint)
+        }
         path.reset()
         hasContent = true
         if (addToHistory) {
@@ -673,11 +680,6 @@ class HandwritingView @JvmOverloads constructor(
             viewParent.requestDisallowInterceptTouchEvent(disallow)
             viewParent = viewParent.parent
         }
-    }
-
-    private fun currentCommitPaint(): Paint = when (drawingTool) {
-        PEN -> penPaint
-        ERASER -> eraserPaint
     }
 
     private fun currentPreviewPaint(): Paint = when (drawingTool) {
