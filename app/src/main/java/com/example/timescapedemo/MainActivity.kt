@@ -2557,11 +2557,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun addImageCardToFlow(flowId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
+        val image = buildCardImage(uri)
+        if (image == null) {
+            snackbar(getString(R.string.image_card_copy_failed))
+            return
+        }
         val card = CardItem(
             id = nextCardId++,
             title = "",
             snippet = "",
-            image = buildCardImage(uri),
+            image = image,
             updatedAt = System.currentTimeMillis()
         )
         flow.cards += card
@@ -2573,17 +2578,42 @@ class MainActivity : AppCompatActivity() {
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
         val card = flow.cards.firstOrNull { it.id == cardId } ?: return
+        val image = buildCardImage(uri)
+        if (image == null) {
+            snackbar(getString(R.string.image_card_copy_failed))
+            return
+        }
         deleteOwnedImage(card.image)
-        card.image = buildCardImage(uri)
+        card.image = image
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
         saveState()
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
-    private fun buildCardImage(uri: Uri, owned: Boolean = false): CardImage {
+    private fun buildCardImage(uri: Uri): CardImage? {
         val mimeType = contentResolver.getType(uri)
-        return CardImage(uri, mimeType, owned)
+        val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            ?.takeIf { it.isNotBlank() }
+            ?: when (mimeType?.lowercase(Locale.ROOT)) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                else -> "jpg"
+            }
+        val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.$extension"
+        val copied = runCatching {
+            contentResolver.openInputStream(uri)?.use { input ->
+                openFileOutput(filename, MODE_PRIVATE).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: false
+        }.getOrElse { false }
+        if (!copied) {
+            runCatching { deleteFile(filename) }
+            return null
+        }
+        val file = File(filesDir, filename)
+        return CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
     }
 
     private fun deleteOwnedImage(image: CardImage?) {
