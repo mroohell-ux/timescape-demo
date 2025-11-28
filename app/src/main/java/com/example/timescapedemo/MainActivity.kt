@@ -1463,7 +1463,7 @@ class MainActivity : AppCompatActivity() {
                     if (snippetValue.isNotEmpty()) card.snippet = snippetValue
                     card.textColor = newColor
                     card.updatedAt = System.currentTimeMillis()
-                    refreshFlow(flow, scrollToTop = true)
+                    refreshFlow(flow, scrollToTop = false)
                     saveState()
                     snackbar("Card updated")
                 }, onDelete = {
