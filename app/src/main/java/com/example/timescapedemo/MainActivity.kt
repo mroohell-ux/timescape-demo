@@ -59,7 +59,6 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
-import com.example.timescapedemo.BuildConfig
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -3232,7 +3231,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     FileProvider.getUriForFile(
                         this@MainActivity,
-                        "${BuildConfig.APPLICATION_ID}.fileprovider",
+                        "${applicationContext.packageName}.fileprovider",
                         exportFile
                     )
                 }.getOrNull()
