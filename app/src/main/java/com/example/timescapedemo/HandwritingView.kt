@@ -81,6 +81,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private var baseBitmap: Bitmap? = null
     private var baseCanvas: Canvas? = null
+    private var baseSourceBitmap: Bitmap? = null
     private var drawingBitmap: Bitmap? = null
     private var drawingCanvas: Canvas? = null
     private var pendingBaseBitmap: Bitmap? = null
@@ -143,7 +144,9 @@ class HandwritingView @JvmOverloads constructor(
             drawingBitmap = null
             drawingCanvas = null
             baseBitmap?.recycle()
+            baseSourceBitmap?.recycle()
             baseBitmap = null
+            baseSourceBitmap = null
             baseCanvas = null
             return
         }
@@ -163,9 +166,10 @@ class HandwritingView @JvmOverloads constructor(
 
         recycleHistory()
         history.clear()
-        if (pendingBaseBitmap != null || pendingDrawingBitmap != null) {
-            pendingBaseBitmap?.let { bitmap ->
-                baseCanvas?.let { drawBitmapOntoCanvas(bitmap, it, recycleAfter = true) }
+        if (pendingBaseBitmap != null || pendingDrawingBitmap != null || (pendingHasBase && baseSourceBitmap != null)) {
+            val baseToDraw = pendingBaseBitmap ?: baseSourceBitmap
+            baseToDraw?.let { bitmap ->
+                baseCanvas?.let { drawBitmapOntoCanvas(bitmap, it, recycleAfter = pendingBaseBitmap != null) }
             }
             pendingDrawingBitmap?.let { bitmap ->
                 drawingCanvas?.let { drawBitmapOntoCanvas(bitmap, it, recycleAfter = true) }
@@ -229,6 +233,8 @@ class HandwritingView @JvmOverloads constructor(
         baseCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
         hasContent = false
         hasBaseImage = false
+        baseSourceBitmap?.recycle()
+        baseSourceBitmap = null
         if (hadAnyContent) {
             pushCurrentState(false, false)
         } else {
@@ -288,20 +294,19 @@ class HandwritingView @JvmOverloads constructor(
             return
         }
         commitCurrentPath()
+        baseSourceBitmap?.recycle()
         val copy = bitmap.copy(Config.ARGB_8888, false)
-        if (!bitmap.isRecycled) {
-            bitmap.recycle()
-        }
+        baseSourceBitmap = copy
         if (width > 0 && height > 0 && baseCanvas != null && drawingCanvas != null) {
             drawingCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-            baseCanvas?.let { drawBitmapOntoCanvas(copy, it, recycleAfter = true) }
+            baseCanvas?.let { drawBitmapOntoCanvas(copy, it) }
             hasBaseImage = true
             hasContent = false
             replaceHistoryWithCurrent(hasContent, hasBaseImage)
             invalidate()
             notifyContentChanged()
         } else {
-            pendingBaseBitmap = copy
+            pendingBaseBitmap = copy.copy(Config.ARGB_8888, false)
             pendingDrawingBitmap = Bitmap.createBitmap(copy.width, copy.height, Config.ARGB_8888).apply {
                 eraseColor(Color.TRANSPARENT)
             }
@@ -321,7 +326,7 @@ class HandwritingView @JvmOverloads constructor(
         val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
         drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
         val destRect = Rect(0, 0, targetW, targetH)
-        baseBitmap?.let { canvas.drawBitmap(it, null, destRect, null) }
+        (baseSourceBitmap ?: baseBitmap)?.let { canvas.drawBitmap(it, null, destRect, null) }
         canvas.drawBitmap(sourceDrawing, null, destRect, null)
         return result
     }
@@ -400,7 +405,8 @@ class HandwritingView @JvmOverloads constructor(
         if (widthPx <= 0 || heightPx <= 0) return
         if (widthPx == exportWidth && heightPx == exportHeight) return
         commitCurrentPath()
-        val baseSnapshot = baseBitmap?.copy(Config.ARGB_8888, false)
+        val baseSnapshot = baseSourceBitmap?.copy(Config.ARGB_8888, false)
+            ?: baseBitmap?.copy(Config.ARGB_8888, false)
         val drawingSnapshot = drawingBitmap?.copy(Config.ARGB_8888, false)
         pendingBaseBitmap?.recycle()
         pendingDrawingBitmap?.recycle()
@@ -426,7 +432,9 @@ class HandwritingView @JvmOverloads constructor(
         drawingBitmap = null
         drawingCanvas = null
         baseBitmap?.recycle()
+        baseSourceBitmap?.recycle()
         baseBitmap = null
+        baseSourceBitmap = null
         baseCanvas = null
         pendingBaseBitmap?.recycle()
         pendingDrawingBitmap?.recycle()
