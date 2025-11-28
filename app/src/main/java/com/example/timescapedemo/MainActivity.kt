@@ -2620,9 +2620,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun isValidImageFile(file: File): Boolean {
         if (!file.exists() || file.length() <= 0) return false
-        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, options)
-        return options.outWidth > 0 && options.outHeight > 0
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0) return false
+        val targetMaxEdge = max(width, height).coerceAtMost(4096)
+        val sample = computeSample(width, height, targetMaxEdge)
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return false
+        val hasPixels = bitmap.width > 0 && bitmap.height > 0
+        if (!bitmap.isRecycled) {
+            bitmap.recycle()
+        }
+        return hasPixels
     }
 
     private fun deleteOwnedImage(image: CardImage?) {
