@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.content.ClipData
 import android.content.ClipDescription
+import android.content.ContentResolver
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
@@ -2627,7 +2628,7 @@ class MainActivity : AppCompatActivity() {
                 runCatching { output.fd.sync() }
                 written > 0
             }
-        }
+        } ?: false
     }.getOrDefault(false)
 
     private fun copyImageToOwnedFile(uri: Uri, target: File): Boolean {
