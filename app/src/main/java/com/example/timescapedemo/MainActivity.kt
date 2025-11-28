@@ -1571,7 +1571,7 @@ class MainActivity : AppCompatActivity() {
                 lockedFormat = format,
                 onSaveBitmap = { annotatedBitmap, options ->
                     val updatedImage = card.image?.let {
-                        saveAnnotatedImage(it, annotatedBitmap, options.format)
+                        saveAnnotatedImage(it, annotatedBitmap, options.format, card.id)
                     } ?: run {
                         snackbar(getString(R.string.image_card_annotation_failed))
                         return@HandwritingDialogExtras false
@@ -2563,13 +2563,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun addImageCardToFlow(flowId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
-        val image = buildCardImage(uri)
+        val cardId = nextCardId++
+        val image = buildCardImage(uri, cardId = cardId)
         if (image == null) {
             snackbar(getString(R.string.image_card_copy_failed))
             return
         }
         val card = CardItem(
-            id = nextCardId++,
+            id = cardId,
             title = "",
             snippet = "",
             image = image,
@@ -2585,7 +2586,7 @@ class MainActivity : AppCompatActivity() {
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
         val card = flow.cards.firstOrNull { it.id == cardId } ?: return
-        val image = buildCardImage(uri, card.image)
+        val image = buildCardImage(uri, card.image, cardId = card.id)
         if (image == null) {
             snackbar(getString(R.string.image_card_copy_failed))
             return
@@ -2597,10 +2598,10 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
-    private fun buildCardImage(uri: Uri, existing: CardImage? = null): CardImage? {
+    private fun buildCardImage(uri: Uri, existing: CardImage? = null, cardId: Long? = null): CardImage? {
         val mimeType = contentResolver.getType(uri)
         val extension = resolveImageExtension(mimeType)
-        val targetFile = resolveCardImageFile(existing, extension)
+        val targetFile = resolveCardImageFile(existing, extension, cardId)
         val copied = copyImageToOwnedFile(uri, targetFile)
         if (!copied) return null
         BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
@@ -2620,10 +2621,13 @@ class MainActivity : AppCompatActivity() {
                 else -> "jpg"
             }
 
-    private fun resolveCardImageFile(existing: CardImage?, extension: String): File {
+    private fun resolveCardImageFile(existing: CardImage?, extension: String, cardId: Long?): File {
         val ownedFile = existing?.takeIf { it.ownedByApp }?.uri?.path?.let(::File)
         if (ownedFile != null && ownedFile.parentFile == filesDir) {
             return ownedFile
+        }
+        if (cardId != null) {
+            return File(filesDir, "image_card_${'$'}cardId.$extension")
         }
         return File(filesDir, "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.$extension")
     }
@@ -2681,9 +2685,10 @@ class MainActivity : AppCompatActivity() {
     private fun saveAnnotatedImage(
         existing: CardImage,
         bitmap: Bitmap,
-        format: HandwritingFormat
+        format: HandwritingFormat,
+        cardId: Long
     ): CardImage? {
-        val targetFile = resolveCardImageFile(existing, format.extension)
+        val targetFile = resolveCardImageFile(existing, format.extension, cardId)
         val temp = File.createTempFile("image_card_annotation_", ".tmp", cacheDir)
         val wroteBytes = writeBitmapToFile(temp, bitmap, format)
         val validSave = wroteBytes && isValidImageFile(temp)
