@@ -1440,10 +1440,13 @@ class MainActivity : AppCompatActivity() {
                 },
                 onDelete = {
                     disposeCardResources(card)
-                    flow.cards.removeAt(index)
-                    refreshFlow(flow, scrollToTop = true)
-                    saveState()
-                    snackbar(getString(R.string.snackbar_deleted_card))
+                    val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
+                    if (cardIndex >= 0) {
+                        flow.cards.removeAt(cardIndex)
+                        refreshFlow(flow, scrollToTop = true)
+                        saveState()
+                        snackbar(getString(R.string.snackbar_deleted_card))
+                    }
                 }
             )
             }
