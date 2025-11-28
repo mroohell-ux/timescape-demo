@@ -2605,11 +2605,7 @@ class MainActivity : AppCompatActivity() {
         val copied = copyImageToOwnedFile(uri, targetFile)
         if (!copied) return null
         BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
-        val image = existing ?: CardImage(Uri.fromFile(targetFile), mimeType, ownedByApp = true)
-        image.uri = Uri.fromFile(targetFile)
-        image.mimeType = mimeType
-        image.ownedByApp = true
-        return image
+        return CardImage(Uri.fromFile(targetFile), mimeType ?: existing?.mimeType, ownedByApp = true)
     }
 
     private fun resolveImageExtension(mimeType: String?): String =
@@ -2698,10 +2694,7 @@ class MainActivity : AppCompatActivity() {
             return null
         }
         BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
-        existing.uri = Uri.fromFile(targetFile)
-        existing.mimeType = format.mimeType()
-        existing.ownedByApp = true
-        return existing
+        return CardImage(Uri.fromFile(targetFile), format.mimeType(), ownedByApp = true)
     }
 
     private fun isValidImageFile(file: File): Boolean {
