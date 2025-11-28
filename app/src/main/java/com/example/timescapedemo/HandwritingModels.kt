@@ -56,6 +56,7 @@ enum class HandwritingEraserType {
 enum class HandwritingPaletteSection {
     PEN,
     ERASER,
+    TEXT,
     CANVAS;
 
     companion object {
@@ -66,7 +67,8 @@ enum class HandwritingPaletteSection {
 
 enum class HandwritingDrawingTool {
     PEN,
-    ERASER;
+    ERASER,
+    TEXT;
 
     companion object {
         fun fromName(name: String?): HandwritingDrawingTool? =
@@ -77,7 +79,9 @@ enum class HandwritingDrawingTool {
 data class HandwritingOptions(
     @ColorInt val backgroundColor: Int,
     @ColorInt val brushColor: Int,
+    @ColorInt val textColor: Int,
     val brushSizeDp: Float,
+    val textSizeSp: Float,
     val canvasWidth: Int,
     val canvasHeight: Int,
     val format: HandwritingFormat,

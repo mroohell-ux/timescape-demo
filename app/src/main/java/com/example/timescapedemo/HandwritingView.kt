@@ -6,6 +6,7 @@ import android.graphics.Bitmap.Config
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
@@ -17,13 +18,16 @@ import android.graphics.DiscretePathEffect
 import android.graphics.Matrix
 import android.graphics.PathDashPathEffect
 import android.util.AttributeSet
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewParent
+import android.view.ViewConfiguration
 import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
 import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
+import com.example.timescapedemo.HandwritingDrawingTool.TEXT
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
@@ -38,6 +42,7 @@ class HandwritingView @JvmOverloads constructor(
     private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
 
     private val density = resources.displayMetrics.density
+    private val scaledDensity = resources.displayMetrics.scaledDensity
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
         style = Paint.Style.STROKE
@@ -45,6 +50,12 @@ class HandwritingView @JvmOverloads constructor(
         strokeCap = Paint.Cap.ROUND
         strokeWidth = 6f * density
     }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        style = Paint.Style.FILL
+        textSize = 18f * scaledDensity
+    }
+    private val textPreviewPaint = Paint(textPaint)
     private val eraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
@@ -90,6 +101,8 @@ class HandwritingView @JvmOverloads constructor(
     private var backgroundColorInt: Int = Color.WHITE
     @ColorInt
     private var brushColorInt: Int = Color.BLACK
+    @ColorInt
+    private var textColorInt: Int = Color.BLACK
     private var paperStyle: HandwritingPaperStyle = HandwritingPaperStyle.PLAIN
     private var penType: HandwritingPenType = HandwritingPenType.ROUND
     private var eraserType: HandwritingEraserType = HandwritingEraserType.ROUND
@@ -97,6 +110,13 @@ class HandwritingView @JvmOverloads constructor(
     private var targetAspectRatio: Float? = null
     private var exportWidth = 0
     private var exportHeight = 0
+
+    private var textPosition: PointF = PointF()
+    private var textContent: String = ""
+    private var isDraggingText = false
+    private val textDragOffset: PointF = PointF()
+    private var lastTextTapTime = 0L
+    private var preserveTextAfterStamp = false
 
     private var contentChangedListener: (() -> Unit)? = null
 
@@ -108,6 +128,7 @@ class HandwritingView @JvmOverloads constructor(
         updatePenColor()
         applyEraserType(eraserType)
         updateGuidePaintColor()
+        updateTextColor()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -159,6 +180,11 @@ class HandwritingView @JvmOverloads constructor(
         }
         pendingHasContent = false
         pendingHasBase = false
+        if (textPosition.x == 0f && textPosition.y == 0f) {
+            textPosition.set(w / 2f, h / 2f)
+        } else {
+            clampTextPosition()
+        }
         invalidate()
         notifyContentChanged()
     }
@@ -169,24 +195,31 @@ class HandwritingView @JvmOverloads constructor(
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, currentPreviewPaint())
+        if (drawingTool == TEXT && textContent.isNotBlank()) {
+            drawTextLines(canvas, textPreviewPaint, textPosition.x, textPosition.y)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                disallowParentIntercept(true)
-                touchStart(x, y)
-            }
-            MotionEvent.ACTION_MOVE -> touchMove(x, y)
-            MotionEvent.ACTION_UP -> {
-                touchUp()
-                disallowParentIntercept(false)
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                touchCancel()
-                disallowParentIntercept(false)
+        if (drawingTool == TEXT) {
+            handleTextTouch(event, x, y)
+        } else {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    disallowParentIntercept(true)
+                    touchStart(x, y)
+                }
+                MotionEvent.ACTION_MOVE -> touchMove(x, y)
+                MotionEvent.ACTION_UP -> {
+                    touchUp()
+                    disallowParentIntercept(false)
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    touchCancel()
+                    disallowParentIntercept(false)
+                }
             }
         }
         invalidate()
@@ -322,6 +355,35 @@ class HandwritingView @JvmOverloads constructor(
 
     fun getBrushSizeDp(): Float = penPaint.strokeWidth / density
 
+    fun setTextContent(text: String) {
+        textContent = text
+        preserveTextAfterStamp = false
+        if (drawingTool == TEXT) invalidate()
+    }
+
+    fun consumePreserveTextAfterStamp(): Boolean {
+        val preserve = preserveTextAfterStamp
+        preserveTextAfterStamp = false
+        return preserve
+    }
+
+    fun setTextColor(@ColorInt color: Int) {
+        textColorInt = color
+        updateTextColor()
+        if (drawingTool == TEXT) invalidate()
+    }
+
+    fun getTextColor(): Int = textColorInt
+
+    fun setTextSizeSp(sizeSp: Float) {
+        val px = sizeSp * scaledDensity
+        textPaint.textSize = px
+        textPreviewPaint.textSize = px
+        if (drawingTool == TEXT) invalidate()
+    }
+
+    fun getTextSizeSp(): Float = textPaint.textSize / scaledDensity
+
     fun setPenType(type: HandwritingPenType) {
         if (penType == type) return
         penType = type
@@ -353,6 +415,7 @@ class HandwritingView @JvmOverloads constructor(
         if (drawingTool == tool) return
         commitCurrentPath()
         drawingTool = tool
+        isDraggingText = false
         invalidate()
     }
 
@@ -410,6 +473,68 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchCancel() {
         path.reset()
+    }
+
+    private fun handleTextTouch(event: MotionEvent, x: Float, y: Float) {
+        val action = event.actionMasked
+        val isInsideText = currentTextBounds()?.contains(x, y) == true
+        when (action) {
+            MotionEvent.ACTION_DOWN -> {
+                if (isInsideText) {
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastTextTapTime <= ViewConfiguration.getDoubleTapTimeout()) {
+                        preserveTextAfterStamp = true
+                    }
+                    lastTextTapTime = now
+                } else {
+                    lastTextTapTime = 0L
+                    preserveTextAfterStamp = false
+                }
+                isDraggingText = true
+                textDragOffset.set(x - textPosition.x, y - textPosition.y)
+                disallowParentIntercept(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!isDraggingText) {
+                    textDragOffset.set(x - textPosition.x, y - textPosition.y)
+                    isDraggingText = true
+                }
+                updateTextPosition(x - textDragOffset.x, y - textDragOffset.y)
+                disallowParentIntercept(true)
+            }
+            MotionEvent.ACTION_UP -> {
+                if (isDraggingText) {
+                    updateTextPosition(x - textDragOffset.x, y - textDragOffset.y)
+                }
+                disallowParentIntercept(false)
+                isDraggingText = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                isDraggingText = false
+                disallowParentIntercept(false)
+            }
+        }
+    }
+
+    fun placeTextStamp(addToHistory: Boolean = true): Boolean = commitTextStamp(addToHistory)
+
+    private fun commitTextStamp(addToHistory: Boolean = true): Boolean {
+        if (textContent.isBlank()) return false
+        val canvas = extraCanvas ?: return false
+        drawTextLines(canvas, textPaint, textPosition.x, textPosition.y)
+        hasContent = true
+        if (addToHistory) {
+            pushCurrentState(true, hasBaseImage)
+        }
+        notifyContentChanged()
+        invalidate()
+        return true
+    }
+
+    private fun updateTextPosition(x: Float, y: Float) {
+        textPosition.set(x, y)
+        clampTextPosition()
+        invalidate()
     }
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
@@ -479,6 +604,28 @@ class HandwritingView @JvmOverloads constructor(
         }
     }
 
+    private fun drawTextLines(canvas: Canvas, paint: Paint, x: Float, y: Float) {
+        if (textContent.isBlank()) return
+        var currentY = y
+        val lines = textContent.lines()
+        for (line in lines) {
+            canvas.drawText(line, x, currentY, paint)
+            currentY += paint.fontSpacing
+        }
+    }
+
+    private fun currentTextBounds(paint: Paint = textPreviewPaint): RectF? {
+        if (textContent.isBlank()) return null
+        val lines = textContent.lines()
+        if (lines.isEmpty()) return null
+        val metrics = paint.fontMetrics
+        val maxWidth = lines.maxOf { max(1f, paint.measureText(it)) }
+        val lineHeight = paint.fontSpacing
+        val top = textPosition.y + metrics.ascent
+        val bottom = textPosition.y + metrics.descent + (lines.size - 1) * lineHeight
+        return RectF(textPosition.x, top, textPosition.x + maxWidth, bottom)
+    }
+
     private fun applyPenType(type: HandwritingPenType) {
         penPaint.maskFilter = null
         penPaint.pathEffect = null
@@ -543,6 +690,11 @@ class HandwritingView @JvmOverloads constructor(
         penPaint.color = updatedColor
     }
 
+    private fun updateTextColor() {
+        textPaint.color = textColorInt
+        textPreviewPaint.color = ColorUtils.setAlphaComponent(textColorInt, (0.85f * 255).roundToInt())
+    }
+
     private fun buildCalligraphyNibPath(strokeWidth: Float): Path {
         val nibLength = max(2f, strokeWidth * 1.35f)
         val nibThickness = max(1f, strokeWidth * 0.45f)
@@ -588,6 +740,13 @@ class HandwritingView @JvmOverloads constructor(
         marginPaint.color = ColorUtils.setAlphaComponent(accent, (0.65f * 255).roundToInt())
     }
 
+    private fun clampTextPosition() {
+        if (width <= 0 || height <= 0) return
+        val clampedX = textPosition.x.coerceIn(0f, width.toFloat())
+        val clampedY = textPosition.y.coerceIn(0f, height.toFloat())
+        textPosition.set(clampedX, clampedY)
+    }
+
     private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {
         val source = extraBitmap ?: return
         val snapshot = source.copy(Config.ARGB_8888, false)
@@ -629,10 +788,12 @@ class HandwritingView @JvmOverloads constructor(
     private fun currentCommitPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPaint
+        TEXT -> textPaint
     }
 
     private fun currentPreviewPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPreviewPaint
+        TEXT -> textPreviewPaint
     }
 }
