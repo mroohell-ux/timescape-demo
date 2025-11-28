@@ -112,6 +112,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportCurrentFlowButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
+    private lateinit var drawerVideoToCollageButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
@@ -302,6 +303,19 @@ class MainActivity : AppCompatActivity() {
             } else snackbar(getString(R.string.snackbar_import_cancelled))
         }
 
+    private val videoToCollageLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val uri = result.data?.data
+                val mimeType = result.data?.getStringExtra(VideoToCollageActivity.EXTRA_RESULT_MIME_TYPE)
+                if (uri != null) {
+                    addCollageImageToCurrentFlow(uri, mimeType)
+                } else {
+                    snackbar(getString(R.string.video_to_collage_result_missing))
+                }
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -346,6 +360,7 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportCurrentFlowButton = header.findViewById(R.id.buttonDrawerExportCurrentFlow)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
+        drawerVideoToCollageButton = header.findViewById(R.id.buttonDrawerVideoToCollage)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -415,6 +430,11 @@ class MainActivity : AppCompatActivity() {
         }
         drawerImportNotesButton.setOnClickListener {
             importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        drawerVideoToCollageButton.setOnClickListener {
+            openVideoToCollage()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
 
@@ -2531,6 +2551,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openVideoToCollage() {
+        val intent = Intent(this, VideoToCollageActivity::class.java)
+        videoToCollageLauncher.launch(intent)
+    }
+
     private fun startImageCardPicker(request: ImageCardRequest) {
         pendingImageCardRequest = request
         if (isPhotoPickerAvailable()) {
@@ -2555,19 +2580,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun addImageCardToFlow(flowId: Long, uri: Uri) {
+    private fun addImageCardToFlow(
+        flowId: Long,
+        uri: Uri,
+        mimeType: String? = null,
+        owned: Boolean = false,
+        announce: Boolean = true
+    ) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
         val card = CardItem(
             id = nextCardId++,
             title = "",
             snippet = "",
-            image = buildCardImage(uri),
+            image = buildCardImage(uri, mimeType, owned),
             updatedAt = System.currentTimeMillis()
         )
         flow.cards += card
         refreshFlow(flow, scrollToTop = true)
         saveState()
-        snackbar(getString(R.string.snackbar_added_image_card))
+        if (announce) snackbar(getString(R.string.snackbar_added_image_card))
+    }
+
+    private fun addCollageImageToCurrentFlow(uri: Uri, mimeType: String?) {
+        val flow = currentFlow()
+        if (flow == null) {
+            snackbar(getString(R.string.snackbar_add_flow_first))
+            return
+        }
+        addImageCardToFlow(flow.id, uri, mimeType, owned = true, announce = false)
+        snackbar(getString(R.string.video_to_collage_added_card))
     }
 
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
@@ -2581,8 +2622,8 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
-    private fun buildCardImage(uri: Uri, owned: Boolean = false): CardImage {
-        val mimeType = contentResolver.getType(uri)
+    private fun buildCardImage(uri: Uri, mimeTypeOverride: String? = null, owned: Boolean = false): CardImage {
+        val mimeType = mimeTypeOverride ?: contentResolver.getType(uri)
         return CardImage(uri, mimeType, owned)
     }
 
