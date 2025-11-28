@@ -20,6 +20,26 @@
             android:text="@string/drawer_notes_tools"
             android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
 
+        <TextView
+            android:id="@+id/labelGlobalSearch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/drawer_search_all_cards"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+            android:textStyle="bold"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerGlobalSearch"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_launch_search"
+            app:icon="@drawable/ic_search"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerExportNotes"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
@@ -48,6 +68,17 @@
             android:layout_marginTop="8dp"
             android:text="@string/drawer_import_notes"
             app:iconGravity="textStart"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerShuffleAllCards"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_shuffle_all_cards"
+            app:icon="@drawable/ic_shuffle"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
 
         <View
             android:layout_width="match_parent"
@@ -122,7 +153,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:valueFrom="14"
+            android:valueFrom="8"
             android:valueTo="26"
             android:stepSize="1"/>
 

@@ -1017,10 +1017,10 @@ class CardsAdapter(
     @Suppress("ConstPropertyName")
     private companion object {
         private const val DEFAULT_BODY_TEXT_SIZE_SP = 18f
-        private const val MIN_BODY_TEXT_SIZE_SP = 12f
+        private const val MIN_BODY_TEXT_SIZE_SP = 8f
         private const val MAX_BODY_TEXT_SIZE_SP = 32f
         private const val TIME_SIZE_DELTA = 3f
-        private const val MIN_TIME_TEXT_SIZE_SP = 10f
+        private const val MIN_TIME_TEXT_SIZE_SP = 8f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
         private const val HANDWRITING_FLIP_HALF_DURATION = 140L
@@ -1052,7 +1052,7 @@ class CardsAdapter(
 
 private const val HANDWRITING_PREFETCH_DISTANCE = 2
 
-private fun CardItem.deepCopy(): CardItem = copy(
+fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
         is BgImage.Res -> background.copy()
         is BgImage.UriRef -> background.copy()

@@ -116,6 +116,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportCurrentFlowButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
+    private lateinit var drawerShuffleAllCardsButton: MaterialButton
+    private lateinit var drawerGlobalSearchButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
@@ -350,6 +352,8 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportCurrentFlowButton = header.findViewById(R.id.buttonDrawerExportCurrentFlow)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
+        drawerShuffleAllCardsButton = header.findViewById(R.id.buttonDrawerShuffleAllCards)
+        drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -421,6 +425,11 @@ class MainActivity : AppCompatActivity() {
             importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
             drawerLayout.closeDrawer(GravityCompat.START)
         }
+        drawerShuffleAllCardsButton.setOnClickListener {
+            launchShuffledFlow()
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerGlobalSearchButton.setOnClickListener { launchGlobalSearchFromDrawer() }
 
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
@@ -1010,6 +1019,30 @@ class MainActivity : AppCompatActivity() {
         saveState()
     }
 
+    private fun launchShuffledFlow() {
+        val allCards = flows.flatMap { flow -> flow.cards.map { it.deepCopy() } }
+        if (allCards.isEmpty()) {
+            snackbar(getString(R.string.snackbar_no_cards_available))
+            return
+        }
+        ShuffledFlowCache.store(allCards.shuffled())
+        startActivity(Intent(this, ShuffledFlowActivity::class.java))
+    }
+
+    private fun launchGlobalSearchFromDrawer() {
+        val allCards = flows.flatMap { flow -> flow.cards.map { it.deepCopy() } }
+        when {
+            allCards.isEmpty() -> snackbar(getString(R.string.snackbar_no_cards_to_search))
+            else -> {
+                GlobalSearchCache.store(
+                    GlobalSearchPayload(query = "", cards = allCards)
+                )
+                drawerLayout.closeDrawer(GravityCompat.START)
+                startActivity(Intent(this, GlobalSearchActivity::class.java))
+            }
+        }
+    }
+
     private fun centerSelectedChip(position: Int) {
         if (position !in 0 until flowChipGroup.childCount) return
         val chip = flowChipGroup.getChildAt(position) ?: return
@@ -1182,20 +1215,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createLayoutManager(): RightRailFlowLayoutManager {
-        val metrics = resources.displayMetrics
-        val density = metrics.density
-        val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
-        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
-        val baseSide = availableWidth
-        val focusSide = availableWidth
-        val pitch = (availableWidth * 0.26f).roundToInt()
-        return RightRailFlowLayoutManager(
-            baseSidePx = baseSide,
-            focusSidePx = focusSide,
-            itemPitchPx = pitch,
-            rightInsetPx = (8 * density).roundToInt()
-        )
+        return FlowLayoutManagerFactory.create(this)
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
@@ -1205,14 +1225,8 @@ class MainActivity : AppCompatActivity() {
         applyCardBackgrounds(flow)
     }
 
-    private fun filterCardsForSearch(cards: List<CardItem>, query: String): List<CardItem> {
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return cards.toList()
-        return cards.filter { card ->
-            card.title.contains(trimmed, ignoreCase = true) ||
-                card.snippet.contains(trimmed, ignoreCase = true)
-        }
-    }
+    private fun filterCardsForSearch(cards: List<CardItem>, query: String): List<CardItem> =
+        CardSearch.filter(cards, query)
 
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
         prepareFlowCards(flow)
