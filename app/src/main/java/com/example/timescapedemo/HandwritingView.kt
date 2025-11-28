@@ -456,6 +456,9 @@ class HandwritingView @JvmOverloads constructor(
             path.quadTo(currentX, currentY, (x + currentX) / 2, (y + currentY) / 2)
             currentX = x
             currentY = y
+            if (drawingTool == ERASER) {
+                applyEraserPath()
+            }
         }
     }
 
@@ -472,9 +475,7 @@ class HandwritingView @JvmOverloads constructor(
         if (path.isEmpty) return
         val canvas = drawingCanvas ?: return
         if (drawingTool == ERASER) {
-            val checkpoint = canvas.saveLayer(null, null)
-            canvas.drawPath(path, eraserPaint)
-            canvas.restoreToCount(checkpoint)
+            applyEraserPath()
         } else {
             canvas.drawPath(path, penPaint)
         }
@@ -484,6 +485,14 @@ class HandwritingView @JvmOverloads constructor(
             pushCurrentState(hasContent, hasBaseImage)
         }
         notifyContentChanged()
+    }
+
+    private fun applyEraserPath() {
+        drawingCanvas?.let { canvas ->
+            val checkpoint = canvas.save()
+            canvas.drawPath(path, eraserPaint)
+            canvas.restoreToCount(checkpoint)
+        }
     }
 
     private fun drawBitmapOntoCanvas(bitmap: Bitmap, canvas: Canvas, recycleAfter: Boolean = false) {
