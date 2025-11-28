@@ -3980,7 +3980,7 @@ class MainActivity : AppCompatActivity() {
             val adapter = CardsAdapter(
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { cardId -> holder.onCardDoubleTapped(cardId) },
+                onItemDoubleClick = { cardId, index -> holder.onCardDoubleTapped(cardId, index) },
                 onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                 onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
@@ -4054,10 +4054,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            fun onCardDoubleTapped(cardId: Long) {
+            fun onCardDoubleTapped(cardId: Long, index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
-                val card = flow.cards.firstOrNull { it.id == cardId } ?: return
-                val face = adapter.currentFaceForId(cardId)
+                val displayedCard = adapter.getItemAt(index)
+                val resolvedId = displayedCard?.id ?: cardId
+                val card = flow.cards.firstOrNull { it.id == resolvedId }
+                    ?: flow.cards.firstOrNull { it.id == cardId }
+                    ?: return
+                val face = adapter.currentFaceForId(resolvedId)
                 editCard(flow, card, face)
             }
 
