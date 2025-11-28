@@ -203,10 +203,11 @@ class CardsAdapter(
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                val cardId = (v.getTag(R.id.tag_card_id) as? Long)
-                    ?: getItemAt(vh.bindingAdapterPosition)?.id
                 val index = vh.bindingAdapterPosition
-                if (cardId != null && index != RecyclerView.NO_POSITION) {
+                if (index == RecyclerView.NO_POSITION) return true
+                val cardId = getItemAt(index)?.id
+                    ?: (v.getTag(R.id.tag_card_id) as? Long)
+                if (cardId != null) {
                     onItemDoubleClick(cardId, index)
                 }
                 return true
