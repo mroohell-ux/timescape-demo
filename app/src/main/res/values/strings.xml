@@ -22,7 +22,6 @@
     <string name="drawer_clear_images">Clear all</string>
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
-    <string name="drawer_export_current_flow">Export current flow</string>
     <string name="drawer_import_notes">Import notes</string>
     <string name="drawer_app_background">App background</string>
     <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
@@ -69,9 +68,12 @@
     <string name="snackbar_import_failed">Couldnt import notes</string>
     <string name="snackbar_import_empty">Nothing to import from that file</string>
     <string name="snackbar_export_cancelled">Export cancelled</string>
+    <string name="snackbar_action_share">Share</string>
+    <string name="snackbar_share_failed">Unable to share export</string>
     <string name="snackbar_import_cancelled">Import cancelled</string>
     <string name="snackbar_export_success">%1$s across %2$s.</string>
     <string name="snackbar_import_success">Imported %1$s across %2$s.</string>
+    <string name="share_export_chooser_title">Share exported notes</string>
     <string name="snackbar_tts_unavailable">Text to speech is unavailable right now.</string>
     <string name="snackbar_tts_initializing">Preparing text to speech…</string>
     <string name="snackbar_tts_missing_data">Download speech data to enable title playback.</string>
