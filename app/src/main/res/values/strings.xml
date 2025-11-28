@@ -165,6 +165,7 @@
     <string name="image_card_option_delete">Delete card</string>
     <string name="image_card_handwriting_saved">Saved back handwriting</string>
     <string name="image_card_handwriting_removed">Removed back handwriting</string>
+    <string name="image_card_copy_failed">Could not save a copy of that photo.</string>
     <string name="dialog_annotate_image_title">Annotate image</string>
     <string name="image_card_annotation_saved">Saved annotated image</string>
     <string name="image_card_annotation_failed">Couldnt save that edit.</string>

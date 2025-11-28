@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.content.ClipData
 import android.content.ClipDescription
+import android.content.ContentResolver
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
@@ -71,6 +72,8 @@ import org.json.JSONObject
 import android.webkit.MimeTypeMap
 import java.io.FileNotFoundException
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
@@ -87,6 +90,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
 
@@ -1195,9 +1199,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
-        if (!isFlowShuffled(flow.id)) {
-            flow.cards.sortByDescending { it.updatedAt }
-        } else {
+        if (isFlowShuffled(flow.id)) {
             flowShuffleStates[flow.id]?.syncWith(flow)
         }
         applyCardBackgrounds(flow)
@@ -1324,19 +1326,20 @@ class MainActivity : AppCompatActivity() {
             initialTextColor = Color.WHITE,
             isNew = true,
             onSave = { title, snippet, textColor ->
-            val finalTitle = title.trim()
-            val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
-            val card = CardItem(
-                id = nextCardId++,
-                title = finalTitle,
-                snippet = finalSnippet,
-                textColor = textColor,
-                updatedAt = System.currentTimeMillis()
-            )
-            flow.cards += card
-            refreshFlow(flow, scrollToTop = true)
-            saveState()
-            snackbar("Added card")
+                val finalTitle = title.trim()
+                val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
+                val card = CardItem(
+                    id = nextCardId++,
+                    title = finalTitle,
+                    snippet = finalSnippet,
+                    textColor = textColor,
+                    updatedAt = System.currentTimeMillis()
+                )
+                flow.cards.add(0, card)
+                flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
+                refreshFlow(flow, scrollToTop = true)
+                saveState()
+                snackbar("Added card")
             }
         )
     }
@@ -1374,7 +1377,8 @@ class MainActivity : AppCompatActivity() {
                     handwriting = HandwritingContent(content.path, content.options),
                     updatedAt = System.currentTimeMillis()
                 )
-                flow.cards += card
+                flow.cards.add(0, card)
+                flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
                 refreshFlow(flow, scrollToTop = true)
                 saveState()
                 snackbar(getString(R.string.snackbar_added_handwriting))
@@ -1382,13 +1386,17 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun editCard(flow: CardFlow, index: Int, face: HandwritingFace = HandwritingFace.FRONT) {
+    private fun editCard(
+        flow: CardFlow,
+        tappedCard: CardItem,
+        face: HandwritingFace = HandwritingFace.FRONT
+    ) {
         flowControllers[flow.id]?.captureState(flow)
-        val card = flow.cards.getOrNull(index) ?: return
+        val card = flow.cards.firstOrNull { it.id == tappedCard.id } ?: return
         val handwritingContent = card.handwriting
         when {
             card.image != null -> {
-                editImageCard(flow, index, face)
+                editImageCard(flow, card, face)
             }
             handwritingContent != null -> {
             showHandwritingDialog(
@@ -1433,10 +1441,13 @@ class MainActivity : AppCompatActivity() {
                 },
                 onDelete = {
                     disposeCardResources(card)
-                    flow.cards.removeAt(index)
-                    refreshFlow(flow, scrollToTop = true)
-                    saveState()
-                    snackbar(getString(R.string.snackbar_deleted_card))
+                    val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
+                    if (cardIndex >= 0) {
+                        flow.cards.removeAt(cardIndex)
+                        refreshFlow(flow, scrollToTop = true)
+                        saveState()
+                        snackbar(getString(R.string.snackbar_deleted_card))
+                    }
                 }
             )
             }
@@ -1466,8 +1477,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun editImageCard(flow: CardFlow, index: Int, face: HandwritingFace) {
-        val card = flow.cards.getOrNull(index) ?: return
+    private fun editImageCard(flow: CardFlow, card: CardItem, face: HandwritingFace) {
         if (face == HandwritingFace.BACK) {
             editImageCardBack(flow, card)
         } else {
@@ -1561,12 +1571,12 @@ class MainActivity : AppCompatActivity() {
                 lockedPaperStyle = HandwritingPaperStyle.PLAIN,
                 lockedFormat = format,
                 onSaveBitmap = { annotatedBitmap, options ->
-                    val updatedImage = saveAnnotatedImage(annotatedBitmap, options.format) ?: run {
+                    val updatedImage = card.image?.let {
+                        saveAnnotatedImage(it, annotatedBitmap, options.format, card.id)
+                    } ?: run {
                         snackbar(getString(R.string.image_card_annotation_failed))
                         return@HandwritingDialogExtras false
                     }
-                    val previousImage = card.image
-                    deleteOwnedImage(previousImage)
                     card.image = updatedImage
                     card.updatedAt = System.currentTimeMillis()
                     refreshFlow(flow, scrollToTop = false)
@@ -1597,7 +1607,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadEditableCardBitmap(image: CardImage): Bitmap? = try {
         val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
+        openImageInputStream(image)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
         val width = boundsOptions.outWidth
         val height = boundsOptions.outHeight
         when {
@@ -1610,7 +1620,7 @@ class MainActivity : AppCompatActivity() {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
-                contentResolver.openInputStream(image.uri)?.use {
+                openImageInputStream(image)?.use {
                     BitmapFactory.decodeStream(it, null, decodeOptions)
                 }
             }
@@ -1619,30 +1629,27 @@ class MainActivity : AppCompatActivity() {
         null
     }
 
+    private fun openImageUriStream(uri: Uri): InputStream? = when {
+        uri.scheme.equals(ContentResolver.SCHEME_FILE, ignoreCase = true) -> {
+            val path = uri.path ?: return null
+            runCatching { FileInputStream(path) }.getOrNull()
+        }
+        else -> runCatching { contentResolver.openInputStream(uri) }.getOrNull()
+    }
+
+    private fun openImageInputStream(image: CardImage): InputStream? {
+        val ownedPath = image.uri.path
+        if (image.ownedByApp && ownedPath != null) {
+            val ownedStream = runCatching { FileInputStream(ownedPath) }.getOrNull()
+            if (ownedStream != null) return ownedStream
+        }
+        return openImageUriStream(image.uri)
+    }
+
     private fun mimeTypeToHandwritingFormat(mimeType: String?): HandwritingFormat = when (mimeType?.lowercase(Locale.ROOT)) {
         "image/png" -> HandwritingFormat.PNG
         "image/webp" -> HandwritingFormat.WEBP
         else -> HandwritingFormat.JPEG
-    }
-
-    private fun saveAnnotatedImage(bitmap: Bitmap, format: HandwritingFormat): CardImage? {
-        val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{format.extension}"
-        val success = runCatching {
-            openFileOutput(filename, MODE_PRIVATE).use { out ->
-                val quality = when (format) {
-                    HandwritingFormat.PNG -> 100
-                    HandwritingFormat.JPEG -> 95
-                    HandwritingFormat.WEBP -> 100
-                }
-                bitmap.compress(format.compressFormat, quality, out)
-            }
-        }.isSuccess
-        if (!success) {
-            runCatching { deleteFile(filename) }
-            return null
-        }
-        val file = File(filesDir, filename)
-        return CardImage(Uri.fromFile(file), format.mimeType(), ownedByApp = true)
     }
 
     private fun HandwritingFormat.mimeType(): String = when (this) {
@@ -2557,14 +2564,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun addImageCardToFlow(flowId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
+        val cardId = nextCardId++
+        val image = buildCardImage(uri, cardId = cardId)
+        if (image == null) {
+            snackbar(getString(R.string.image_card_copy_failed))
+            return
+        }
         val card = CardItem(
-            id = nextCardId++,
+            id = cardId,
             title = "",
             snippet = "",
-            image = buildCardImage(uri),
+            image = image,
             updatedAt = System.currentTimeMillis()
         )
-        flow.cards += card
+        flow.cards.add(0, card)
+        flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
         refreshFlow(flow, scrollToTop = true)
         saveState()
         snackbar(getString(R.string.snackbar_added_image_card))
@@ -2573,17 +2587,136 @@ class MainActivity : AppCompatActivity() {
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
         val card = flow.cards.firstOrNull { it.id == cardId } ?: return
-        deleteOwnedImage(card.image)
-        card.image = buildCardImage(uri)
+        val image = buildCardImage(uri, card.image, cardId = card.id)
+        if (image == null) {
+            snackbar(getString(R.string.image_card_copy_failed))
+            return
+        }
+        card.image = image
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
         saveState()
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
-    private fun buildCardImage(uri: Uri, owned: Boolean = false): CardImage {
+    private fun buildCardImage(uri: Uri, existing: CardImage? = null, cardId: Long? = null): CardImage? {
         val mimeType = contentResolver.getType(uri)
-        return CardImage(uri, mimeType, owned)
+        val extension = resolveImageExtension(mimeType)
+        val targetFile = resolveCardImageFile(existing, extension, cardId)
+        val copied = copyImageToOwnedFile(uri, targetFile)
+        if (!copied) return null
+        BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
+        return CardImage(Uri.fromFile(targetFile), mimeType ?: existing?.mimeType, ownedByApp = true)
+    }
+
+    private fun resolveImageExtension(mimeType: String?): String =
+        MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            ?.takeIf { it.isNotBlank() }
+            ?: when (mimeType?.lowercase(Locale.ROOT)) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                else -> "jpg"
+            }
+
+    private fun resolveCardImageFile(existing: CardImage?, extension: String, cardId: Long?): File {
+        val ownedFile = existing?.takeIf { it.ownedByApp }?.uri?.path?.let(::File)
+        if (ownedFile != null && ownedFile.parentFile == filesDir) {
+            return ownedFile
+        }
+        if (cardId != null) {
+            return File(filesDir, "image_card_${cardId}.$extension")
+        }
+        return File(filesDir, "image_card_${System.currentTimeMillis()}_${UUID.randomUUID()}.$extension")
+    }
+
+    private fun copyImageToFile(uri: Uri, dest: File): Boolean = runCatching {
+        openImageUriStream(uri)?.use { input ->
+            FileOutputStream(dest).use { output ->
+                val written = input.copyTo(output)
+                output.flush()
+                runCatching { output.fd.sync() }
+                written > 0
+            }
+        } ?: false
+    }.getOrDefault(false)
+
+    private fun copyImageToOwnedFile(uri: Uri, target: File): Boolean {
+        val temp = File.createTempFile("image_card_copy_", ".tmp", cacheDir)
+        val copied = copyImageToFile(uri, temp)
+        val validCopy = copied && isValidImageFile(temp)
+        val applied = validCopy && replaceFile(temp, target)
+        if (!applied) {
+            runCatching { temp.delete() }
+        }
+        return applied
+    }
+
+    private fun replaceFile(source: File, target: File): Boolean {
+        if (source == target) return source.exists()
+        val renamed = source.renameTo(target)
+        if (renamed) return true
+        return runCatching {
+            source.copyTo(target, overwrite = true)
+            source.delete()
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun writeBitmapToFile(file: File, bitmap: Bitmap, format: HandwritingFormat): Boolean = runCatching {
+        FileOutputStream(file).use { out ->
+            val quality = when (format) {
+                HandwritingFormat.PNG -> 100
+                HandwritingFormat.JPEG -> 95
+                HandwritingFormat.WEBP -> 100
+            }
+            if (!bitmap.compress(format.compressFormat, quality, out)) return@runCatching false
+            out.flush()
+            runCatching { out.fd.sync() }
+            true
+        }
+    }.getOrElse {
+        runCatching { file.delete() }
+        false
+    }
+
+    private fun saveAnnotatedImage(
+        existing: CardImage,
+        bitmap: Bitmap,
+        format: HandwritingFormat,
+        cardId: Long
+    ): CardImage? {
+        val targetFile = resolveCardImageFile(existing, format.extension, cardId)
+        val temp = File.createTempFile("image_card_annotation_", ".tmp", cacheDir)
+        val wroteBytes = writeBitmapToFile(temp, bitmap, format)
+        val validSave = wroteBytes && isValidImageFile(temp)
+        val applied = validSave && replaceFile(temp, targetFile)
+        if (!applied) {
+            runCatching { temp.delete() }
+            return null
+        }
+        BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
+        return CardImage(Uri.fromFile(targetFile), format.mimeType(), ownedByApp = true)
+    }
+
+    private fun isValidImageFile(file: File): Boolean {
+        if (!file.exists() || file.length() <= 0) return false
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        FileInputStream(file).use { BitmapFactory.decodeStream(it, null, bounds) }
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0) return false
+        val targetMaxEdge = max(width, height).coerceAtMost(4096)
+        val sample = computeSample(width, height, targetMaxEdge)
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = FileInputStream(file).use { BitmapFactory.decodeStream(it, null, decodeOptions) } ?: return false
+        val hasPixels = bitmap.width > 0 && bitmap.height > 0
+        if (!bitmap.isRecycled) {
+            bitmap.recycle()
+        }
+        return hasPixels
     }
 
     private fun deleteOwnedImage(image: CardImage?) {
@@ -3180,7 +3313,7 @@ class MainActivity : AppCompatActivity() {
         runCatching { openFileInput(path).use { it.readBytes() } }.getOrNull()
 
     private fun readImageBytes(uri: Uri): ByteArray? =
-        runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        runCatching { openImageUriStream(uri)?.use { it.readBytes() } }.getOrNull()
 
     private fun decodeBase64Payload(raw: String): ByteArray? {
         val normalized = raw.filterNot(Char::isWhitespace)
@@ -3860,7 +3993,8 @@ class MainActivity : AppCompatActivity() {
             val adapter = CardsAdapter(
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { index -> holder.onCardDoubleTapped(index) },
+                onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
+                    holder.onCardDoubleTapped(card, index) },
                 onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                 onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
@@ -3934,10 +4068,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            fun onCardDoubleTapped(index: Int) {
+            fun onCardDoubleTapped(card: CardItem, index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
-                val face = adapter.currentFaceFor(index)
-                editCard(flow, index, face)
+                val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
+                if (cardIndex == -1) return
+                val targetCard = flow.cards[cardIndex]
+                val face = adapter.currentFaceForId(card.id)
+                Log.d(
+                    "DoubleClick",
+                    "Target card: id=${targetCard.id}, imageUri=${targetCard.image?.uri}, face=$face"
+                )
+                editCard(flow, targetCard, face)
             }
 
             fun onCardLongPressed(index: Int, cardView: View): Boolean {

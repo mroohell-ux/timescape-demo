@@ -71,6 +71,12 @@ object BackgroundImageLoader {
         imageView.setTag(R.id.tag_bg_uri, null)
     }
 
+    fun invalidate(uri: Uri) {
+        val prefix = "${uri}@"
+        val keys = cache.snapshot().keys
+        keys.filter { it.startsWith(prefix) }.forEach { cache.remove(it) }
+    }
+
     private fun enqueueDecode(
         context: Context,
         cacheKey: String,
