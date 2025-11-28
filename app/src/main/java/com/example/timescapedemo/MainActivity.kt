@@ -1198,9 +1198,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
-        if (!isFlowShuffled(flow.id)) {
-            flow.cards.sortByDescending { it.updatedAt }
-        } else {
+        if (isFlowShuffled(flow.id)) {
             flowShuffleStates[flow.id]?.syncWith(flow)
         }
         applyCardBackgrounds(flow)
