@@ -2606,6 +2606,7 @@ class MainActivity : AppCompatActivity() {
                 openFileOutput(filename, MODE_PRIVATE).use { output ->
                     input.copyTo(output)
                 }
+                true
             } ?: false
         }.getOrElse { false }
         if (!copied) {
