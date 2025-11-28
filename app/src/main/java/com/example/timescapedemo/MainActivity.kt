@@ -90,6 +90,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
 
@@ -2623,9 +2624,9 @@ class MainActivity : AppCompatActivity() {
             return ownedFile
         }
         if (cardId != null) {
-            return File(filesDir, "image_card_${'$'}cardId.$extension")
+            return File(filesDir, "image_card_${cardId}.$extension")
         }
-        return File(filesDir, "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.$extension")
+        return File(filesDir, "image_card_${System.currentTimeMillis()}_${UUID.randomUUID()}.$extension")
     }
 
     private fun copyImageToFile(uri: Uri, dest: File): Boolean = runCatching {
@@ -3980,7 +3981,8 @@ class MainActivity : AppCompatActivity() {
             val adapter = CardsAdapter(
                 cardTint,
                 onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { card, index -> holder.onCardDoubleTapped(card, index) },
+                onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
+                    holder.onCardDoubleTapped(card, index) },
                 onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                 onTitleSpeakClick = { card -> speakCardTitle(card) }
             )
@@ -4060,6 +4062,10 @@ class MainActivity : AppCompatActivity() {
                 if (cardIndex == -1) return
                 val targetCard = flow.cards[cardIndex]
                 val face = adapter.currentFaceForId(card.id)
+                Log.d(
+                    "DoubleClick",
+                    "Target card: id=${targetCard.id}, imageUri=${targetCard.image?.uri}, face=$face"
+                )
                 editCard(flow, targetCard, face)
             }
 
