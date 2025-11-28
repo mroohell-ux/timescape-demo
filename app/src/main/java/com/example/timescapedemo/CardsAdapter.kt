@@ -104,7 +104,7 @@ sealed class TintStyle {
 class CardsAdapter(
     private val tint: TintStyle,
     private val onItemClick: (index: Int) -> Unit,
-    private val onItemDoubleClick: (index: Int) -> Unit,
+    private val onItemDoubleClick: (cardId: Long) -> Unit,
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
@@ -203,8 +203,9 @@ class CardsAdapter(
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                val idx = vh.bindingAdapterPosition
-                if (idx != RecyclerView.NO_POSITION) onItemDoubleClick(idx)
+                val cardId = (v.getTag(R.id.tag_card_id) as? Long)
+                    ?: getItemAt(vh.bindingAdapterPosition)?.id
+                if (cardId != null) onItemDoubleClick(cardId)
                 return true
             }
 
@@ -556,6 +557,8 @@ class CardsAdapter(
         val item = getItemAt(index) ?: return HandwritingFace.FRONT
         return currentCardFace(item.id)
     }
+
+    fun currentFaceForId(cardId: Long): HandwritingFace = currentCardFace(cardId)
 
     fun canFlipCardAt(index: Int): Boolean {
         val item = getItemAt(index) ?: return false
