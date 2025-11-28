@@ -1627,7 +1627,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveAnnotatedImage(bitmap: Bitmap, format: HandwritingFormat): CardImage? {
         val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{format.extension}"
-        val success = runCatching {
+        val wroteBytes = runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { out ->
                 val quality = when (format) {
                     HandwritingFormat.PNG -> 100
@@ -1636,12 +1636,13 @@ class MainActivity : AppCompatActivity() {
                 }
                 bitmap.compress(format.compressFormat, quality, out)
             }
-        }.isSuccess
-        if (!success) {
+        }.getOrNull() == true
+        val file = File(filesDir, filename)
+        val validSave = wroteBytes && file.length() > 0
+        if (!validSave) {
             runCatching { deleteFile(filename) }
             return null
         }
-        val file = File(filesDir, filename)
         return CardImage(Uri.fromFile(file), format.mimeType(), ownedByApp = true)
     }
 
@@ -2606,14 +2607,14 @@ class MainActivity : AppCompatActivity() {
                 openFileOutput(filename, MODE_PRIVATE).use { output ->
                     input.copyTo(output)
                 }
-                true
-            } ?: false
-        }.getOrElse { false }
-        if (!copied) {
+            }
+        }.isSuccess
+        val file = File(filesDir, filename)
+        val validCopy = copied && file.length() > 0
+        if (!validCopy) {
             runCatching { deleteFile(filename) }
             return null
         }
-        val file = File(filesDir, filename)
         return CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
     }
 
