@@ -2596,6 +2596,7 @@ class MainActivity : AppCompatActivity() {
         val targetFile = resolveCardImageFile(existing, extension)
         val copied = copyImageToOwnedFile(uri, targetFile)
         if (!copied) return null
+        BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
         val image = existing ?: CardImage(Uri.fromFile(targetFile), mimeType, ownedByApp = true)
         image.uri = Uri.fromFile(targetFile)
         image.mimeType = mimeType
@@ -2684,6 +2685,7 @@ class MainActivity : AppCompatActivity() {
             runCatching { temp.delete() }
             return null
         }
+        BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
         existing.uri = Uri.fromFile(targetFile)
         existing.mimeType = format.mimeType()
         existing.ownedByApp = true
