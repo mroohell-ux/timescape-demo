@@ -1563,12 +1563,12 @@ class MainActivity : AppCompatActivity() {
                 lockedPaperStyle = HandwritingPaperStyle.PLAIN,
                 lockedFormat = format,
                 onSaveBitmap = { annotatedBitmap, options ->
-                    val updatedImage = saveAnnotatedImage(annotatedBitmap, options.format) ?: run {
+                    val updatedImage = card.image?.let {
+                        saveAnnotatedImage(it, annotatedBitmap, options.format)
+                    } ?: run {
                         snackbar(getString(R.string.image_card_annotation_failed))
                         return@HandwritingDialogExtras false
                     }
-                    val previousImage = card.image
-                    deleteOwnedImage(previousImage)
                     card.image = updatedImage
                     card.updatedAt = System.currentTimeMillis()
                     refreshFlow(flow, scrollToTop = false)
@@ -1642,18 +1642,6 @@ class MainActivity : AppCompatActivity() {
         "image/png" -> HandwritingFormat.PNG
         "image/webp" -> HandwritingFormat.WEBP
         else -> HandwritingFormat.JPEG
-    }
-
-    private fun saveAnnotatedImage(bitmap: Bitmap, format: HandwritingFormat): CardImage? {
-        val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{format.extension}"
-        val file = File(filesDir, filename)
-        val wroteBytes = writeBitmapToFile(file, bitmap, format)
-        val validSave = wroteBytes && isValidImageFile(file)
-        if (!validSave) {
-            runCatching { deleteFile(filename) }
-            return null
-        }
-        return CardImage(Uri.fromFile(file), format.mimeType(), ownedByApp = true)
     }
 
     private fun HandwritingFormat.mimeType(): String = when (this) {
@@ -2589,12 +2577,11 @@ class MainActivity : AppCompatActivity() {
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
         val flow = flows.firstOrNull { it.id == flowId } ?: return
         val card = flow.cards.firstOrNull { it.id == cardId } ?: return
-        val image = buildCardImage(uri)
+        val image = buildCardImage(uri, card.image)
         if (image == null) {
             snackbar(getString(R.string.image_card_copy_failed))
             return
         }
-        deleteOwnedImage(card.image)
         card.image = image
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
@@ -2602,24 +2589,34 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
-    private fun buildCardImage(uri: Uri): CardImage? {
+    private fun buildCardImage(uri: Uri, existing: CardImage? = null): CardImage? {
         val mimeType = contentResolver.getType(uri)
-        val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+        val extension = resolveImageExtension(mimeType)
+        val targetFile = resolveCardImageFile(existing, extension)
+        val copied = copyImageToOwnedFile(uri, targetFile)
+        if (!copied) return null
+        val image = existing ?: CardImage(Uri.fromFile(targetFile), mimeType, ownedByApp = true)
+        image.uri = Uri.fromFile(targetFile)
+        image.mimeType = mimeType
+        image.ownedByApp = true
+        return image
+    }
+
+    private fun resolveImageExtension(mimeType: String?): String =
+        MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?.takeIf { it.isNotBlank() }
             ?: when (mimeType?.lowercase(Locale.ROOT)) {
                 "image/png" -> "png"
                 "image/webp" -> "webp"
                 else -> "jpg"
             }
-        val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.$extension"
-        val file = File(filesDir, filename)
-        val copied = copyImageToFile(uri, file)
-        val validCopy = copied && isValidImageFile(file)
-        if (!validCopy) {
-            runCatching { deleteFile(filename) }
-            return null
+
+    private fun resolveCardImageFile(existing: CardImage?, extension: String): File {
+        val ownedFile = existing?.takeIf { it.ownedByApp }?.uri?.path?.let(::File)
+        if (ownedFile != null && ownedFile.parentFile == filesDir) {
+            return ownedFile
         }
-        return CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
+        return File(filesDir, "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.$extension")
     }
 
     private fun copyImageToFile(uri: Uri, dest: File): Boolean = runCatching {
@@ -2632,6 +2629,28 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }.getOrDefault(false)
+
+    private fun copyImageToOwnedFile(uri: Uri, target: File): Boolean {
+        val temp = File.createTempFile("image_card_copy_", ".tmp", cacheDir)
+        val copied = copyImageToFile(uri, temp)
+        val validCopy = copied && isValidImageFile(temp)
+        val applied = validCopy && replaceFile(temp, target)
+        if (!applied) {
+            runCatching { temp.delete() }
+        }
+        return applied
+    }
+
+    private fun replaceFile(source: File, target: File): Boolean {
+        if (source == target) return source.exists()
+        val renamed = source.renameTo(target)
+        if (renamed) return true
+        return runCatching {
+            source.copyTo(target, overwrite = true)
+            source.delete()
+            true
+        }.getOrDefault(false)
+    }
 
     private fun writeBitmapToFile(file: File, bitmap: Bitmap, format: HandwritingFormat): Boolean = runCatching {
         FileOutputStream(file).use { out ->
@@ -2648,6 +2667,26 @@ class MainActivity : AppCompatActivity() {
     }.getOrElse {
         runCatching { file.delete() }
         false
+    }
+
+    private fun saveAnnotatedImage(
+        existing: CardImage,
+        bitmap: Bitmap,
+        format: HandwritingFormat
+    ): CardImage? {
+        val targetFile = resolveCardImageFile(existing, format.extension)
+        val temp = File.createTempFile("image_card_annotation_", ".tmp", cacheDir)
+        val wroteBytes = writeBitmapToFile(temp, bitmap, format)
+        val validSave = wroteBytes && isValidImageFile(temp)
+        val applied = validSave && replaceFile(temp, targetFile)
+        if (!applied) {
+            runCatching { temp.delete() }
+            return null
+        }
+        existing.uri = Uri.fromFile(targetFile)
+        existing.mimeType = format.mimeType()
+        existing.ownedByApp = true
+        return existing
     }
 
     private fun isValidImageFile(file: File): Boolean {
