@@ -71,6 +71,8 @@ import org.json.JSONObject
 import android.webkit.MimeTypeMap
 import java.io.FileNotFoundException
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
@@ -1597,7 +1599,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadEditableCardBitmap(image: CardImage): Bitmap? = try {
         val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        contentResolver.openInputStream(image.uri)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
+        openImageInputStream(image)?.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
         val width = boundsOptions.outWidth
         val height = boundsOptions.outHeight
         when {
@@ -1610,13 +1612,30 @@ class MainActivity : AppCompatActivity() {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
-                contentResolver.openInputStream(image.uri)?.use {
+                openImageInputStream(image)?.use {
                     BitmapFactory.decodeStream(it, null, decodeOptions)
                 }
             }
         }
     } catch (_: Exception) {
         null
+    }
+
+    private fun openImageUriStream(uri: Uri): InputStream? = when {
+        uri.scheme.equals(ContentResolver.SCHEME_FILE, ignoreCase = true) -> {
+            val path = uri.path ?: return null
+            runCatching { FileInputStream(path) }.getOrNull()
+        }
+        else -> runCatching { contentResolver.openInputStream(uri) }.getOrNull()
+    }
+
+    private fun openImageInputStream(image: CardImage): InputStream? {
+        val ownedPath = image.uri.path
+        if (image.ownedByApp && ownedPath != null) {
+            val ownedStream = runCatching { FileInputStream(ownedPath) }.getOrNull()
+            if (ownedStream != null) return ownedStream
+        }
+        return openImageUriStream(image.uri)
     }
 
     private fun mimeTypeToHandwritingFormat(mimeType: String?): HandwritingFormat = when (mimeType?.lowercase(Locale.ROOT)) {
@@ -1627,19 +1646,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveAnnotatedImage(bitmap: Bitmap, format: HandwritingFormat): CardImage? {
         val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{format.extension}"
-        val wroteBytes = runCatching {
-            openFileOutput(filename, MODE_PRIVATE).use { out ->
-                val quality = when (format) {
-                    HandwritingFormat.PNG -> 100
-                    HandwritingFormat.JPEG -> 95
-                    HandwritingFormat.WEBP -> 100
-                }
-                val compressed = bitmap.compress(format.compressFormat, quality, out)
-                runCatching { out.fd.sync() }
-                compressed
-            }
-        }.getOrNull() == true
         val file = File(filesDir, filename)
+        val wroteBytes = writeBitmapToFile(file, bitmap, format)
         val validSave = wroteBytes && isValidImageFile(file)
         if (!validSave) {
             runCatching { deleteFile(filename) }
@@ -2604,15 +2612,8 @@ class MainActivity : AppCompatActivity() {
                 else -> "jpg"
             }
         val filename = "image_card_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.$extension"
-        val copied = runCatching {
-            contentResolver.openInputStream(uri)?.use { input ->
-                openFileOutput(filename, MODE_PRIVATE).use { output ->
-                    input.copyTo(output)
-                    runCatching { output.fd.sync() }
-                }
-            }
-        }.isSuccess
         val file = File(filesDir, filename)
+        val copied = copyImageToFile(uri, file)
         val validCopy = copied && isValidImageFile(file)
         if (!validCopy) {
             runCatching { deleteFile(filename) }
@@ -2621,10 +2622,38 @@ class MainActivity : AppCompatActivity() {
         return CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
     }
 
+    private fun copyImageToFile(uri: Uri, dest: File): Boolean = runCatching {
+        openImageUriStream(uri)?.use { input ->
+            FileOutputStream(dest).use { output ->
+                val written = input.copyTo(output)
+                output.flush()
+                runCatching { output.fd.sync() }
+                written > 0
+            }
+        }
+    }.getOrDefault(false)
+
+    private fun writeBitmapToFile(file: File, bitmap: Bitmap, format: HandwritingFormat): Boolean = runCatching {
+        FileOutputStream(file).use { out ->
+            val quality = when (format) {
+                HandwritingFormat.PNG -> 100
+                HandwritingFormat.JPEG -> 95
+                HandwritingFormat.WEBP -> 100
+            }
+            if (!bitmap.compress(format.compressFormat, quality, out)) return@runCatching false
+            out.flush()
+            runCatching { out.fd.sync() }
+            true
+        }
+    }.getOrElse {
+        runCatching { file.delete() }
+        false
+    }
+
     private fun isValidImageFile(file: File): Boolean {
         if (!file.exists() || file.length() <= 0) return false
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        FileInputStream(file).use { BitmapFactory.decodeStream(it, null, bounds) }
         val width = bounds.outWidth
         val height = bounds.outHeight
         if (width <= 0 || height <= 0) return false
@@ -2634,7 +2663,7 @@ class MainActivity : AppCompatActivity() {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return false
+        val bitmap = FileInputStream(file).use { BitmapFactory.decodeStream(it, null, decodeOptions) } ?: return false
         val hasPixels = bitmap.width > 0 && bitmap.height > 0
         if (!bitmap.isRecycled) {
             bitmap.recycle()
@@ -3236,7 +3265,7 @@ class MainActivity : AppCompatActivity() {
         runCatching { openFileInput(path).use { it.readBytes() } }.getOrNull()
 
     private fun readImageBytes(uri: Uri): ByteArray? =
-        runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        runCatching { openImageUriStream(uri)?.use { it.readBytes() } }.getOrNull()
 
     private fun decodeBase64Payload(raw: String): ByteArray? {
         val normalized = raw.filterNot(Char::isWhitespace)
