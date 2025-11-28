@@ -3492,9 +3492,8 @@ class MainActivity : AppCompatActivity() {
         val brush = parseColorString(optionsObj.optString("brushColor")) ?: defaults.brushColor
         val brushSize = optionsObj.optDouble("brushSizeDp", defaults.brushSizeDp.toDouble()).toFloat()
         val eraserSize = optionsObj.optDouble("eraserSizeDp", defaults.eraserSizeDp.toDouble()).toFloat()
-        val width = optionsObj.optInt("canvasWidth", defaults.canvasWidth)
-        val height = optionsObj.optInt("canvasHeight", defaults.canvasHeight)
-        val (clampedWidth, clampedHeight) = clampCanvasSize(width, height)
+        val width = optionsObj.optInt("canvasWidth", defaults.canvasWidth).coerceAtLeast(1)
+        val height = optionsObj.optInt("canvasHeight", defaults.canvasHeight).coerceAtLeast(1)
         val format = HandwritingFormat.fromName(optionsObj.optString("format")) ?: defaults.format
         val paperStyle = HandwritingPaperStyle.fromName(optionsObj.optString("paperStyle")) ?: defaults.paperStyle
         val penType = HandwritingPenType.fromName(optionsObj.optString("penType")) ?: defaults.penType
@@ -3503,8 +3502,8 @@ class MainActivity : AppCompatActivity() {
             backgroundColor = background,
             brushColor = brush,
             brushSizeDp = brushSize.coerceIn(MIN_HANDWRITING_BRUSH_SIZE_DP, MAX_HANDWRITING_BRUSH_SIZE_DP),
-            canvasWidth = clampedWidth,
-            canvasHeight = clampedHeight,
+            canvasWidth = width,
+            canvasHeight = height,
             format = format,
             paperStyle = paperStyle,
             penType = penType,
