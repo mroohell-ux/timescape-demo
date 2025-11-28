@@ -1634,7 +1634,9 @@ class MainActivity : AppCompatActivity() {
                     HandwritingFormat.JPEG -> 95
                     HandwritingFormat.WEBP -> 100
                 }
-                bitmap.compress(format.compressFormat, quality, out)
+                val compressed = bitmap.compress(format.compressFormat, quality, out)
+                runCatching { out.fd.sync() }
+                compressed
             }
         }.getOrNull() == true
         val file = File(filesDir, filename)
@@ -2606,6 +2608,7 @@ class MainActivity : AppCompatActivity() {
             contentResolver.openInputStream(uri)?.use { input ->
                 openFileOutput(filename, MODE_PRIVATE).use { output ->
                     input.copyTo(output)
+                    runCatching { output.fd.sync() }
                 }
             }
         }.isSuccess
