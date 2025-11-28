@@ -1325,19 +1325,20 @@ class MainActivity : AppCompatActivity() {
             initialTextColor = Color.WHITE,
             isNew = true,
             onSave = { title, snippet, textColor ->
-            val finalTitle = title.trim()
-            val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
-            val card = CardItem(
-                id = nextCardId++,
-                title = finalTitle,
-                snippet = finalSnippet,
-                textColor = textColor,
-                updatedAt = System.currentTimeMillis()
-            )
-            flow.cards += card
-            refreshFlow(flow, scrollToTop = true)
-            saveState()
-            snackbar("Added card")
+                val finalTitle = title.trim()
+                val finalSnippet = snippet.trim().ifBlank { "Tap to edit this card." }
+                val card = CardItem(
+                    id = nextCardId++,
+                    title = finalTitle,
+                    snippet = finalSnippet,
+                    textColor = textColor,
+                    updatedAt = System.currentTimeMillis()
+                )
+                flow.cards.add(0, card)
+                flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
+                refreshFlow(flow, scrollToTop = true)
+                saveState()
+                snackbar("Added card")
             }
         )
     }
@@ -1375,7 +1376,8 @@ class MainActivity : AppCompatActivity() {
                     handwriting = HandwritingContent(content.path, content.options),
                     updatedAt = System.currentTimeMillis()
                 )
-                flow.cards += card
+                flow.cards.add(0, card)
+                flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
                 refreshFlow(flow, scrollToTop = true)
                 saveState()
                 snackbar(getString(R.string.snackbar_added_handwriting))
@@ -2573,7 +2575,8 @@ class MainActivity : AppCompatActivity() {
             image = image,
             updatedAt = System.currentTimeMillis()
         )
-        flow.cards += card
+        flow.cards.add(0, card)
+        flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
         refreshFlow(flow, scrollToTop = true)
         saveState()
         snackbar(getString(R.string.snackbar_added_image_card))
