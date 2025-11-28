@@ -3301,8 +3301,11 @@ class MainActivity : AppCompatActivity() {
         createdFiles: MutableList<CreatedFile>
     ): HandwritingSide? {
         val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val bytes = decodeBase64Payload(data) ?: return null
         val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
+        val bytes = decodeBase64Payload(data) ?: return null
+        if (!validateHandwritingPayload(bytes, options)) {
+            throw IllegalArgumentException("Invalid handwriting payload for canvas ${'$'}{options.canvasWidth}x${'$'}{options.canvasHeight}")
+        }
         val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
@@ -3312,6 +3315,15 @@ class MainActivity : AppCompatActivity() {
             deleteFile(filename)
             null
         }
+    }
+
+    private fun validateHandwritingPayload(bytes: ByteArray, options: HandwritingOptions): Boolean {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val minEdge = 2
+        val hasValidSize = bounds.outWidth >= minEdge && bounds.outHeight >= minEdge
+        val matchesCanvas = bounds.outWidth == options.canvasWidth && bounds.outHeight == options.canvasHeight
+        return hasValidSize && matchesCanvas
     }
 
     private fun decodeImageFromExport(
