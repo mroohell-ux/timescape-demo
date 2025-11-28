@@ -19,19 +19,19 @@
     <item
         android:id="@+id/action_export_flow"
         android:title="@string/menu_export_flow"
-        android:icon="@android:drawable/ic_menu_save"
+        android:icon="@drawable/ic_save"
         app:showAsAction="always"/>
 
     <item
         android:id="@+id/action_add_card"
         android:title="@string/menu_add_card"
-        android:icon="@android:drawable/ic_menu_edit"
+        android:icon="@drawable/ic_edit"
         app:showAsAction="always"/>
 
     <item
         android:id="@+id/action_add_image_card"
         android:title="@string/menu_add_image_card"
-        android:icon="@android:drawable/ic_menu_gallery"
+        android:icon="@drawable/ic_gallery"
         app:showAsAction="always"/>
 
     <item
@@ -43,7 +43,7 @@
     <item
         android:id="@+id/action_add_flow"
         android:title="@string/menu_add_flow"
-        android:icon="@android:drawable/ic_menu_add"
+        android:icon="@drawable/ic_add"
         app:showAsAction="always"/>
 
 </menu>
