@@ -1638,7 +1638,7 @@ class MainActivity : AppCompatActivity() {
             }
         }.getOrNull() == true
         val file = File(filesDir, filename)
-        val validSave = wroteBytes && file.length() > 0
+        val validSave = wroteBytes && isValidImageFile(file)
         if (!validSave) {
             runCatching { deleteFile(filename) }
             return null
@@ -2610,12 +2610,19 @@ class MainActivity : AppCompatActivity() {
             }
         }.isSuccess
         val file = File(filesDir, filename)
-        val validCopy = copied && file.length() > 0
+        val validCopy = copied && isValidImageFile(file)
         if (!validCopy) {
             runCatching { deleteFile(filename) }
             return null
         }
         return CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
+    }
+
+    private fun isValidImageFile(file: File): Boolean {
+        if (!file.exists() || file.length() <= 0) return false
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        return options.outWidth > 0 && options.outHeight > 0
     }
 
     private fun deleteOwnedImage(image: CardImage?) {
