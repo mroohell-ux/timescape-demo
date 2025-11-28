@@ -1385,13 +1385,17 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun editCard(flow: CardFlow, index: Int, face: HandwritingFace = HandwritingFace.FRONT) {
+    private fun editCard(
+        flow: CardFlow,
+        tappedCard: CardItem,
+        face: HandwritingFace = HandwritingFace.FRONT
+    ) {
         flowControllers[flow.id]?.captureState(flow)
-        val card = flow.cards.getOrNull(index) ?: return
+        val card = flow.cards.firstOrNull { it.id == tappedCard.id } ?: return
         val handwritingContent = card.handwriting
         when {
             card.image != null -> {
-                editImageCard(flow, index, face)
+                editImageCard(flow, card, face)
             }
             handwritingContent != null -> {
             showHandwritingDialog(
@@ -1469,8 +1473,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun editImageCard(flow: CardFlow, index: Int, face: HandwritingFace) {
-        val card = flow.cards.getOrNull(index) ?: return
+    private fun editImageCard(flow: CardFlow, card: CardItem, face: HandwritingFace) {
         if (face == HandwritingFace.BACK) {
             editImageCardBack(flow, card)
         } else {
@@ -4051,8 +4054,9 @@ class MainActivity : AppCompatActivity() {
 
             fun onCardDoubleTapped(index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val card = adapter.getItemAt(index) ?: return
                 val face = adapter.currentFaceFor(index)
-                editCard(flow, index, face)
+                editCard(flow, card, face)
             }
 
             fun onCardLongPressed(index: Int, cardView: View): Boolean {
