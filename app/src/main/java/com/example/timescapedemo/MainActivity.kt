@@ -4056,12 +4056,8 @@ class MainActivity : AppCompatActivity() {
 
             fun onCardDoubleTapped(cardId: Long, index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
-                val displayedCard = adapter.getItemAt(index)
-                val resolvedId = displayedCard?.id ?: cardId
-                val card = flow.cards.firstOrNull { it.id == resolvedId }
-                    ?: flow.cards.firstOrNull { it.id == cardId }
-                    ?: return
-                val face = adapter.currentFaceForId(resolvedId)
+                val card = flow.cards.firstOrNull { it.id == cardId } ?: return
+                val face = adapter.currentFaceForId(cardId)
                 editCard(flow, card, face)
             }
 
