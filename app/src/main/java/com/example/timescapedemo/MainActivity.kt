@@ -1,5 +1,6 @@
 package com.example.timescapedemo
 
+import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
@@ -114,6 +115,13 @@ class MainActivity : AppCompatActivity() {
     private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
     private var drawerGlobalSearchView: SearchView? = null
     private var isSyncingSearchInputs: Boolean = false
+    private var searchResultsDialog: Dialog? = null
+    private var searchResultsAdapter: CardsAdapter? = null
+    private var searchResultsLayoutManager: RightRailFlowLayoutManager? = null
+    private var searchResultsRecycler: RecyclerView? = null
+    private var searchResultsSummary: TextView? = null
+    private var searchResultsEmpty: TextView? = null
+    private var searchResultEntries: List<SearchResultEntry> = emptyList()
 
     private enum class SearchSource { TOOLBAR, DRAWER, PROGRAMMATIC }
 
@@ -396,6 +404,7 @@ class MainActivity : AppCompatActivity() {
             setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean {
                     setSearchQuery(query.orEmpty(), restoreStateWhenCleared = true, source = SearchSource.DRAWER)
+                    showSearchResultsFlow()
                     drawerLayout.closeDrawer(GravityCompat.START)
                     clearFocus()
                     return true
@@ -608,6 +617,7 @@ class MainActivity : AppCompatActivity() {
             view.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean {
                     setSearchQuery(query.orEmpty(), restoreStateWhenCleared = true, source = SearchSource.TOOLBAR)
+                    showSearchResultsFlow()
                     view.clearFocus()
                     return true
                 }
@@ -670,6 +680,7 @@ class MainActivity : AppCompatActivity() {
         searchQueryNormalized = normalized
         syncSearchInputs(source, rawQuery)
         updateSearchResults(restoreStateWhenCleared)
+        refreshSearchResultsOverlay()
     }
 
     private fun syncSearchInputs(source: SearchSource, rawQuery: String) {
@@ -716,6 +727,144 @@ class MainActivity : AppCompatActivity() {
                 shouldScrollToTop = shouldScrollToTop
             )
         }
+    }
+
+    private fun refreshSearchResultsOverlay() {
+        val normalized = searchQueryNormalized
+        if (normalized.isBlank()) {
+            dismissSearchResultsDialog()
+            return
+        }
+        if (searchResultsDialog?.isShowing == true) {
+            bindSearchResultsToDialog(normalized)
+        }
+    }
+
+    private fun showSearchResultsFlow() {
+        val normalized = searchQueryNormalized
+        if (normalized.isBlank()) {
+            dismissSearchResultsDialog()
+            return
+        }
+        val dialog = ensureSearchResultsDialog()
+        bindSearchResultsToDialog(normalized)
+        if (dialog.isShowing) return
+        dialog.show()
+    }
+
+    private fun ensureSearchResultsDialog(): Dialog {
+        val existing = searchResultsDialog
+        if (existing != null) return existing
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val content = layoutInflater.inflate(R.layout.dialog_search_results, null)
+        dialog.setContentView(content)
+        val toolbar = content.findViewById<MaterialToolbar>(R.id.searchResultsToolbar)
+        toolbar.setNavigationIcon(android.R.drawable.ic_menu_close_clear_cancel)
+        toolbar.setNavigationOnClickListener { dialog.dismiss() }
+        searchResultsSummary = content.findViewById(R.id.searchResultsSummary)
+        searchResultsEmpty = content.findViewById(R.id.searchResultsEmpty)
+        val recycler = content.findViewById<RecyclerView>(R.id.searchResultsRecycler)
+        searchResultsRecycler = recycler
+        val layoutManager = createLayoutManager()
+        recycler.layoutManager = layoutManager
+        recycler.setHasFixedSize(true)
+        searchResultsLayoutManager = layoutManager
+        val adapter = CardsAdapter(
+            cardTint,
+            onItemClick = { index -> handleSearchResultTap(index) },
+            onItemDoubleClick = { card, _ -> handleSearchResultCardOpen(card) },
+            onItemLongPress = { _, _ -> false },
+            onTitleSpeakClick = { card -> speakCardTitle(card) }
+        )
+        adapter.setBodyTextSize(cardFontSizeSp)
+        adapter.setBodyTypeface(cardTypeface)
+        recycler.adapter = adapter
+        searchResultsAdapter = adapter
+        dialog.setOnDismissListener {
+            searchResultsDialog = null
+            searchResultsAdapter = null
+            searchResultsLayoutManager = null
+            searchResultsRecycler = null
+            searchResultsSummary = null
+            searchResultsEmpty = null
+            searchResultEntries = emptyList()
+        }
+        searchResultsDialog = dialog
+        return dialog
+    }
+
+    private fun dismissSearchResultsDialog() {
+        searchResultsDialog?.dismiss()
+    }
+
+    private fun bindSearchResultsToDialog(query: String) {
+        val entries = buildSearchResultEntries(query)
+        searchResultEntries = entries
+        val flowCount = entries.map { it.flowId }.toSet().size
+        searchResultsSummary?.text = getString(
+            R.string.search_results_summary,
+            entries.size,
+            flowCount,
+            query
+        )
+        val hasResults = entries.isNotEmpty()
+        searchResultsEmpty?.apply {
+            isVisible = !hasResults
+            text = getString(R.string.search_results_empty, query)
+        }
+        searchResultsRecycler?.isVisible = hasResults
+        if (hasResults) {
+            searchResultsLayoutManager?.clearFocus(immediate = true)
+            searchResultsLayoutManager?.restoreState(0, false)
+        }
+        searchResultsAdapter?.submitList(entries.map { it.card })
+    }
+
+    private fun buildSearchResultEntries(query: String): List<SearchResultEntry> {
+        if (query.isBlank()) return emptyList()
+        return flows.flatMap { flow ->
+            filterCardsForSearch(flow.cards, query).map { card ->
+                SearchResultEntry(card, flow.id, flow.name)
+            }
+        }
+    }
+
+    private fun handleSearchResultTap(index: Int) {
+        val entry = searchResultEntries.getOrNull(index) ?: return
+        openCardFromSearch(entry.flowId, entry.card.id)
+    }
+
+    private fun handleSearchResultCardOpen(card: CardItem) {
+        val entry = searchResultEntries.firstOrNull { it.card.id == card.id } ?: return
+        openCardFromSearch(entry.flowId, card.id)
+    }
+
+    private fun openCardFromSearch(flowId: Long, cardId: Long) {
+        val flowIndex = flows.indexOfFirst { it.id == flowId }
+        if (flowIndex < 0) return
+        val flow = flows.getOrNull(flowIndex) ?: return
+        val cardIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex < 0) return
+        flow.lastViewedCardIndex = cardIndex
+        flow.lastViewedCardId = cardId
+        flow.lastViewedCardFocused = true
+        flowPager.setCurrentItem(flowIndex, false)
+        val controller = flowControllers[flowId]
+        if (controller != null) {
+            controller.updateDisplayedCards(
+                flow = flow,
+                query = searchQueryNormalized,
+                shouldRestoreState = true,
+                shouldScrollToTop = false
+            )
+            controller.restoreState(flow)
+        } else {
+            flowAdapter.notifyItemChanged(flowIndex)
+        }
+        flowPager.post {
+            flowControllers[flowId]?.restoreState(flow)
+        }
+        searchResultsDialog?.dismiss()
     }
 
     private fun updateToolbarSubtitle() {
@@ -3728,12 +3877,14 @@ class MainActivity : AppCompatActivity() {
         flowControllers.forEach { (_, controller) ->
             controller.adapter.setBodyTextSize(cardFontSizeSp)
         }
+        searchResultsAdapter?.setBodyTextSize(cardFontSizeSp)
     }
 
     private fun applyCardTypefaceToAdapters() {
         flowControllers.forEach { (_, controller) ->
             controller.adapter.setBodyTypeface(cardTypeface)
         }
+        searchResultsAdapter?.setBodyTypeface(cardTypeface)
     }
 
     private fun launchFontPicker() {
@@ -4149,6 +4300,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        dismissSearchResultsDialog()
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
@@ -4421,6 +4573,8 @@ class MainActivity : AppCompatActivity() {
             cardCountView.isVisible = true
         }
     }
+
+    private data class SearchResultEntry(val card: CardItem, val flowId: Long, val flowName: String)
 
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
         fun syncWith(flow: CardFlow) {
