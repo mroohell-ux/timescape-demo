@@ -20,15 +20,16 @@
             android:text="@string/drawer_global_search_label"
             android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
 
-        <androidx.appcompat.widget.SearchView
-            android:id="@+id/drawerGlobalSearchView"
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerGlobalSearch"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:iconifiedByDefault="false"
-            android:imeOptions="actionSearch"
-            android:queryHint="@string/drawer_global_search_hint"
-            android:inputType="text"/>
+            android:text="@string/drawer_global_search_button"
+            app:icon="@drawable/ic_search"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
 
         <View
             android:layout_width="match_parent"

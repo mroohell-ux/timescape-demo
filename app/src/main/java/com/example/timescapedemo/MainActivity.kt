@@ -115,9 +115,11 @@ class MainActivity : AppCompatActivity() {
     private var globalSearchQueryText: String = ""
     private var globalSearchQueryNormalized: String = ""
     private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
-    private var drawerGlobalSearchView: SearchView? = null
+    private lateinit var drawerGlobalSearchButton: MaterialButton
     private var isUpdatingFlowSearchInput: Boolean = false
+    private var isUpdatingGlobalSearchInput: Boolean = false
     private var searchResultsDialog: Dialog? = null
+    private var searchResultsSearchView: SearchView? = null
     private var searchResultsAdapter: CardsAdapter? = null
     private var searchResultsLayoutManager: RightRailFlowLayoutManager? = null
     private var searchResultsRecycler: RecyclerView? = null
@@ -372,7 +374,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = ""
 
         val header = navigationView.getHeaderView(0)
-        drawerGlobalSearchView = header.findViewById(R.id.drawerGlobalSearchView)
+        drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
@@ -396,28 +398,9 @@ class MainActivity : AppCompatActivity() {
         }
         updateCardFontLabel()
 
-        drawerGlobalSearchView?.apply {
-            setIconifiedByDefault(false)
-            isIconified = false
-            queryHint = getString(R.string.drawer_global_search_hint)
-            clearFocus()
-            setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-                override fun onQueryTextSubmit(query: String?): Boolean {
-                    setGlobalSearchQuery(query.orEmpty())
-                    showSearchResultsFlow()
-                    drawerLayout.closeDrawer(GravityCompat.START)
-                    clearFocus()
-                    return true
-                }
-
-                override fun onQueryTextChange(newText: String?): Boolean {
-                    val value = newText.orEmpty()
-                    if (value == globalSearchQueryText) return true
-                    setGlobalSearchQuery(value)
-                    return true
-                }
-            })
-            setQuery(globalSearchQueryText, false)
+        drawerGlobalSearchButton.setOnClickListener {
+            showGlobalSearchDialog(focusSearchInput = true)
+            drawerLayout.closeDrawer(GravityCompat.START)
         }
 
         toolbarBasePaddingTop = toolbar.paddingTop
@@ -689,6 +672,15 @@ class MainActivity : AppCompatActivity() {
         isUpdatingFlowSearchInput = false
     }
 
+    private fun syncGlobalSearchInput(rawQuery: String) {
+        if (isUpdatingGlobalSearchInput) return
+        isUpdatingGlobalSearchInput = true
+        searchResultsSearchView?.let { view ->
+            if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
+        }
+        isUpdatingGlobalSearchInput = false
+    }
+
     private fun setGlobalSearchQuery(rawQuery: String) {
         val normalized = rawQuery.trim()
         val rawChanged = rawQuery != globalSearchQueryText
@@ -696,6 +688,7 @@ class MainActivity : AppCompatActivity() {
         if (!rawChanged && !normalizedChanged) return
         globalSearchQueryText = rawQuery
         globalSearchQueryNormalized = normalized
+        syncGlobalSearchInput(rawQuery)
         refreshSearchResultsOverlay()
     }
 
@@ -720,25 +713,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshSearchResultsOverlay() {
         val normalized = globalSearchQueryNormalized
-        if (normalized.isBlank()) {
-            dismissSearchResultsDialog()
-            return
-        }
         if (searchResultsDialog?.isShowing == true) {
             bindSearchResultsToDialog(normalized)
         }
     }
 
-    private fun showSearchResultsFlow() {
+    private fun showGlobalSearchDialog(focusSearchInput: Boolean) {
         val normalized = globalSearchQueryNormalized
-        if (normalized.isBlank()) {
-            dismissSearchResultsDialog()
-            return
-        }
         val dialog = ensureSearchResultsDialog()
         bindSearchResultsToDialog(normalized)
-        if (dialog.isShowing) return
-        dialog.show()
+        if (!dialog.isShowing) dialog.show()
+        if (focusSearchInput) {
+            searchResultsSearchView?.apply {
+                requestFocus()
+                isIconified = false
+            }
+        }
     }
 
     private fun ensureSearchResultsDialog(): Dialog {
@@ -750,6 +740,7 @@ class MainActivity : AppCompatActivity() {
         val toolbar = content.findViewById<MaterialToolbar>(R.id.searchResultsToolbar)
         toolbar.setNavigationIcon(android.R.drawable.ic_menu_close_clear_cancel)
         toolbar.setNavigationOnClickListener { dialog.dismiss() }
+        searchResultsSearchView = content.findViewById(R.id.searchResultsInput)
         searchResultsSummary = content.findViewById(R.id.searchResultsSummary)
         searchResultsEmpty = content.findViewById(R.id.searchResultsEmpty)
         val recycler = content.findViewById<RecyclerView>(R.id.searchResultsRecycler)
@@ -769,6 +760,27 @@ class MainActivity : AppCompatActivity() {
         adapter.setBodyTypeface(cardTypeface)
         recycler.adapter = adapter
         searchResultsAdapter = adapter
+        searchResultsSearchView?.apply {
+            setIconifiedByDefault(false)
+            isIconified = false
+            queryHint = getString(R.string.drawer_global_search_hint)
+            setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+                override fun onQueryTextSubmit(query: String?): Boolean {
+                    setGlobalSearchQuery(query.orEmpty())
+                    bindSearchResultsToDialog(globalSearchQueryNormalized)
+                    clearFocus()
+                    return true
+                }
+
+                override fun onQueryTextChange(newText: String?): Boolean {
+                    val value = newText.orEmpty()
+                    if (value == globalSearchQueryText) return true
+                    setGlobalSearchQuery(value)
+                    return true
+                }
+            })
+            setQuery(globalSearchQueryText, false)
+        }
         dialog.setOnDismissListener {
             searchResultsDialog = null
             searchResultsAdapter = null
@@ -776,6 +788,7 @@ class MainActivity : AppCompatActivity() {
             searchResultsRecycler = null
             searchResultsSummary = null
             searchResultsEmpty = null
+            searchResultsSearchView = null
             searchResultEntries = emptyList()
         }
         searchResultsDialog = dialog
@@ -787,6 +800,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindSearchResultsToDialog(query: String) {
+        if (query.isBlank()) {
+            searchResultEntries = emptyList()
+            searchResultsSummary?.text = getString(R.string.drawer_global_search_hint)
+            searchResultsEmpty?.apply {
+                isVisible = true
+                text = getString(R.string.search_results_empty_prompt)
+            }
+            searchResultsRecycler?.isVisible = false
+            searchResultsAdapter?.submitList(emptyList())
+            return
+        }
         val entries = buildSearchResultEntries(query)
         searchResultEntries = entries
         val flowCount = entries.map { it.flowId }.toSet().size

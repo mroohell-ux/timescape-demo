@@ -21,10 +21,12 @@
     <string name="drawer_add_images">Add background images</string>
     <string name="drawer_clear_images">Clear all</string>
     <string name="drawer_global_search_label">Global search</string>
+    <string name="drawer_global_search_button">Open global search</string>
     <string name="drawer_global_search_hint">Search all cards</string>
     <string name="search_results_title">Search results</string>
     <string name="search_results_summary">%1$d results across %2$d flows for "%3$s"</string>
     <string name="search_results_empty">No cards matched "%1$s".</string>
+    <string name="search_results_empty_prompt">Start typing to search across every flow</string>
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
     <string name="drawer_import_notes">Import notes</string>
