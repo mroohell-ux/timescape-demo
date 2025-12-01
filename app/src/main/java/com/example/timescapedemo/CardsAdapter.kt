@@ -82,6 +82,7 @@ data class CardItem(
     var updatedAt: Long = System.currentTimeMillis(),
     var handwriting: HandwritingContent? = null,
     var imageHandwriting: HandwritingSide? = null,
+    var recognizedText: String? = null,
     var relativeTimeText: CharSequence? = null
 )
 

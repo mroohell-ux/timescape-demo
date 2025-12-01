@@ -92,6 +92,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
 import android.util.Log
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
 class MainActivity : AppCompatActivity() {
 
@@ -148,6 +152,9 @@ class MainActivity : AppCompatActivity() {
     private var textToSpeechReady: Boolean = false
     private var textToSpeechInitializing: Boolean = false
     private val pendingTextToSpeechRequests: ArrayDeque<String> = ArrayDeque()
+    private val textRecognizer by lazy {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -452,6 +459,7 @@ class MainActivity : AppCompatActivity() {
 
         imagesAdapter.submit(selectedImages)
         refreshAllFlows()
+        indexExistingImageCardText()
         applyCardFontSizeToAdapters()
         applyCardTypefaceToAdapters()
 
@@ -1212,7 +1220,8 @@ class MainActivity : AppCompatActivity() {
         if (trimmed.isEmpty()) return cards.toList()
         return cards.filter { card ->
             card.title.contains(trimmed, ignoreCase = true) ||
-                card.snippet.contains(trimmed, ignoreCase = true)
+                card.snippet.contains(trimmed, ignoreCase = true) ||
+                card.recognizedText?.contains(trimmed, ignoreCase = true) == true
         }
     }
 
@@ -2583,6 +2592,7 @@ class MainActivity : AppCompatActivity() {
         flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
         refreshFlow(flow, scrollToTop = true)
         saveState()
+        analyzeImageCardText(flow, card)
         snackbar(getString(R.string.snackbar_added_image_card))
     }
 
@@ -2595,9 +2605,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         card.image = image
+        card.recognizedText = null
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
         saveState()
+        analyzeImageCardText(flow, card)
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
@@ -2609,6 +2621,57 @@ class MainActivity : AppCompatActivity() {
         if (!copied) return null
         BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
         return CardImage(Uri.fromFile(targetFile), mimeType ?: existing?.mimeType, ownedByApp = true)
+    }
+
+    private fun analyzeImageCardText(
+        flow: CardFlow,
+        card: CardItem,
+        refreshOnComplete: Boolean = true,
+        persistOnComplete: Boolean = true
+    ) {
+        val image = card.image ?: return
+        lifecycleScope.launch {
+            val recognized = recognizeTextFromImage(image)
+            if (recognized.isNullOrBlank() || recognized == card.recognizedText) return@launch
+            card.recognizedText = recognized
+            card.updatedAt = System.currentTimeMillis()
+            if (refreshOnComplete) refreshFlow(flow, scrollToTop = false)
+            if (persistOnComplete) saveState()
+            if (searchQueryNormalized.isNotEmpty()) {
+                updateSearchResults(restoreStateWhenCleared = false)
+            }
+        }
+    }
+
+    private suspend fun recognizeTextFromImage(image: CardImage): String? = withContext(Dispatchers.IO) {
+        val bitmap = openImageInputStream(image)?.use { input ->
+            BitmapFactory.decodeStream(input)
+        } ?: return@withContext null
+
+        try {
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val result = Tasks.await(textRecognizer.process(inputImage))
+            result.text.trim().takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to recognize text for ${image.uri}", e)
+            null
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun indexExistingImageCardText() {
+        flows.forEach { flow ->
+            flow.cards.filter { it.image != null && it.recognizedText.isNullOrBlank() }
+                .forEach { card ->
+                    analyzeImageCardText(
+                        flow,
+                        card,
+                        refreshOnComplete = false,
+                        persistOnComplete = true
+                    )
+                }
+        }
     }
 
     private fun resolveImageExtension(mimeType: String?): String =
@@ -3265,6 +3328,7 @@ class MainActivity : AppCompatActivity() {
                 val cardObj = JSONObject()
                 cardObj.put("title", card.title)
                 cardObj.put("snippet", card.snippet)
+                card.recognizedText?.let { cardObj.put("recognizedText", it) }
                 cardObj.put("textColor", colorToString(card.textColor))
                 cardObj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { handwriting ->
@@ -3379,17 +3443,18 @@ class MainActivity : AppCompatActivity() {
                 val flowId = nextFlowId++
                 val flowName = importedFlow.name.takeIf { it.isNotBlank() }
                     ?: defaultFlowName()
-                val newCards = importedFlow.cards.map { importedCard ->
-                    val cardId = nextCardId++
-                    CardItem(
-                        id = cardId,
-                        title = importedCard.title,
-                        snippet = importedCard.snippet,
-                        textColor = importedCard.textColor,
-                        updatedAt = importedCard.updatedAt,
-                        image = importedCard.image,
-                        handwriting = importedCard.handwriting,
-                        imageHandwriting = importedCard.imageHandwriting
+                    val newCards = importedFlow.cards.map { importedCard ->
+                        val cardId = nextCardId++
+                        CardItem(
+                            id = cardId,
+                            title = importedCard.title,
+                            snippet = importedCard.snippet,
+                            recognizedText = importedCard.recognizedText,
+                            textColor = importedCard.textColor,
+                            updatedAt = importedCard.updatedAt,
+                            image = importedCard.image,
+                            handwriting = importedCard.handwriting,
+                            imageHandwriting = importedCard.imageHandwriting
                     )
                 }.toMutableList()
                 val newFlow = CardFlow(
@@ -3441,7 +3506,17 @@ class MainActivity : AppCompatActivity() {
                     val image = decodeImageFromExport(cardObj.optJSONObject("image"), createdFiles)
                     val imageHandwriting = cardObj.optJSONObject("imageHandwriting")
                         ?.let { decodeHandwritingSideFromExport(it, createdFiles) }
-                    cards += ImportedCard(title, snippet, updatedAt, textColor, handwriting, image, imageHandwriting)
+                    val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
+                    cards += ImportedCard(
+                        title,
+                        snippet,
+                        updatedAt,
+                        textColor,
+                        handwriting,
+                        image,
+                        imageHandwriting,
+                        recognizedText
+                    )
                 }
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
@@ -3759,6 +3834,8 @@ class MainActivity : AppCompatActivity() {
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
+                                recognizedText = cardObj.optString("recognizedText")
+                                    .takeIf { it.isNotBlank() },
                                 textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE,
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
@@ -3901,6 +3978,7 @@ class MainActivity : AppCompatActivity() {
                 obj.put("id", card.id)
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
+                card.recognizedText?.let { obj.put("recognizedText", it) }
                 obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { content ->
@@ -4306,7 +4384,8 @@ class MainActivity : AppCompatActivity() {
         val textColor: Int,
         val handwriting: HandwritingContent?,
         val image: CardImage?,
-        val imageHandwriting: HandwritingSide?
+        val imageHandwriting: HandwritingSide?,
+        val recognizedText: String?
     )
 
 }
