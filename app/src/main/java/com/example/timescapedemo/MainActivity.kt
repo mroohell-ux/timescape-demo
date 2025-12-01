@@ -692,6 +692,11 @@ class MainActivity : AppCompatActivity() {
         refreshSearchResultsOverlay()
     }
 
+    private fun clearGlobalSearchState() {
+        setGlobalSearchQuery("")
+        searchResultEntries = emptyList()
+    }
+
     private fun updateFlowSearchResults(restoreStateWhenCleared: Boolean) {
         val normalized = flowSearchQueryNormalized
         val flow = currentFlow() ?: return
@@ -735,6 +740,7 @@ class MainActivity : AppCompatActivity() {
         val existing = searchResultsDialog
         if (existing != null) return existing
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         val content = layoutInflater.inflate(R.layout.dialog_search_results, null)
         dialog.setContentView(content)
         val toolbar = content.findViewById<MaterialToolbar>(R.id.searchResultsToolbar)
@@ -782,6 +788,7 @@ class MainActivity : AppCompatActivity() {
             setQuery(globalSearchQueryText, false)
         }
         dialog.setOnDismissListener {
+            clearGlobalSearchState()
             searchResultsDialog = null
             searchResultsAdapter = null
             searchResultsLayoutManager = null

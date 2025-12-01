@@ -15,7 +15,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@color/flow_bar_surface"
-            android:elevation="2dp"
             app:navigationIconTint="#111111"
             app:title="@string/search_results_title"
             app:titleTextColor="#111111" />
