@@ -110,11 +110,13 @@ class MainActivity : AppCompatActivity() {
 
     private var searchMenuItem: MenuItem? = null
     private var searchView: SearchView? = null
-    private var searchQueryText: String = ""
-    private var searchQueryNormalized: String = ""
+    private var flowSearchQueryText: String = ""
+    private var flowSearchQueryNormalized: String = ""
+    private var globalSearchQueryText: String = ""
+    private var globalSearchQueryNormalized: String = ""
     private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
     private var drawerGlobalSearchView: SearchView? = null
-    private var isSyncingSearchInputs: Boolean = false
+    private var isUpdatingFlowSearchInput: Boolean = false
     private var searchResultsDialog: Dialog? = null
     private var searchResultsAdapter: CardsAdapter? = null
     private var searchResultsLayoutManager: RightRailFlowLayoutManager? = null
@@ -122,8 +124,6 @@ class MainActivity : AppCompatActivity() {
     private var searchResultsSummary: TextView? = null
     private var searchResultsEmpty: TextView? = null
     private var searchResultEntries: List<SearchResultEntry> = emptyList()
-
-    private enum class SearchSource { TOOLBAR, DRAWER, PROGRAMMATIC }
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -403,7 +403,7 @@ class MainActivity : AppCompatActivity() {
             clearFocus()
             setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean {
-                    setSearchQuery(query.orEmpty(), restoreStateWhenCleared = true, source = SearchSource.DRAWER)
+                    setGlobalSearchQuery(query.orEmpty())
                     showSearchResultsFlow()
                     drawerLayout.closeDrawer(GravityCompat.START)
                     clearFocus()
@@ -412,12 +412,12 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onQueryTextChange(newText: String?): Boolean {
                     val value = newText.orEmpty()
-                    if (value == searchQueryText) return true
-                    setSearchQuery(value, restoreStateWhenCleared = true, source = SearchSource.DRAWER)
+                    if (value == globalSearchQueryText) return true
+                    setGlobalSearchQuery(value)
                     return true
                 }
             })
-            setQuery(searchQueryText, false)
+            setQuery(globalSearchQueryText, false)
         }
 
         toolbarBasePaddingTop = toolbar.paddingTop
@@ -616,16 +616,15 @@ class MainActivity : AppCompatActivity() {
             view.imeOptions = EditorInfo.IME_ACTION_SEARCH
             view.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String?): Boolean {
-                    setSearchQuery(query.orEmpty(), restoreStateWhenCleared = true, source = SearchSource.TOOLBAR)
-                    showSearchResultsFlow()
+                    setFlowSearchQuery(query.orEmpty(), restoreStateWhenCleared = true)
                     view.clearFocus()
                     return true
                 }
 
                 override fun onQueryTextChange(newText: String?): Boolean {
                     val value = newText.orEmpty()
-                    if (value == searchQueryText) return true
-                    setSearchQuery(value, restoreStateWhenCleared = true, source = SearchSource.TOOLBAR)
+                    if (value == flowSearchQueryText) return true
+                    setFlowSearchQuery(value, restoreStateWhenCleared = true)
                     return true
                 }
             })
@@ -636,7 +635,7 @@ class MainActivity : AppCompatActivity() {
                 if (flow != null && controller != null) {
                     controller.captureState(flow)
                 }
-                view.setQuery(searchQueryText, false)
+                view.setQuery(flowSearchQueryText, false)
                 view.post {
                     view.requestFocus()
                     expandSearchViewToToolbarWidth(view)
@@ -647,7 +646,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 view.clearFocus()
-                if (searchQueryText.isNotEmpty()) {
+                if (flowSearchQueryText.isNotEmpty()) {
                     view.setQuery("", false)
                 }
                 setToolbarItemsHiddenForSearch(false)
@@ -655,82 +654,72 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        if (searchQueryText.isNotEmpty()) {
+        if (flowSearchQueryText.isNotEmpty()) {
             searchItem.expandActionView()
-            view.setQuery(searchQueryText, false)
+            view.setQuery(flowSearchQueryText, false)
             view.clearFocus()
         } else {
             view.setQuery("", false)
         }
     }
 
-    private fun setSearchQuery(
+    private fun setFlowSearchQuery(
         rawQuery: String,
-        restoreStateWhenCleared: Boolean,
-        source: SearchSource = SearchSource.PROGRAMMATIC
+        restoreStateWhenCleared: Boolean
     ) {
         val normalized = rawQuery.trim()
-        val rawChanged = rawQuery != searchQueryText
-        val normalizedChanged = normalized != searchQueryNormalized
+        val rawChanged = rawQuery != flowSearchQueryText
+        val normalizedChanged = normalized != flowSearchQueryNormalized
         if (!rawChanged && !normalizedChanged) {
-            syncSearchInputs(source, rawQuery)
+            syncFlowSearchInput(rawQuery)
             return
         }
-        searchQueryText = rawQuery
-        searchQueryNormalized = normalized
-        syncSearchInputs(source, rawQuery)
-        updateSearchResults(restoreStateWhenCleared)
+        flowSearchQueryText = rawQuery
+        flowSearchQueryNormalized = normalized
+        syncFlowSearchInput(rawQuery)
+        updateFlowSearchResults(restoreStateWhenCleared)
+    }
+
+    private fun syncFlowSearchInput(rawQuery: String) {
+        if (isUpdatingFlowSearchInput) return
+        isUpdatingFlowSearchInput = true
+        searchView?.let { view ->
+            if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
+        }
+        isUpdatingFlowSearchInput = false
+    }
+
+    private fun setGlobalSearchQuery(rawQuery: String) {
+        val normalized = rawQuery.trim()
+        val rawChanged = rawQuery != globalSearchQueryText
+        val normalizedChanged = normalized != globalSearchQueryNormalized
+        if (!rawChanged && !normalizedChanged) return
+        globalSearchQueryText = rawQuery
+        globalSearchQueryNormalized = normalized
         refreshSearchResultsOverlay()
     }
 
-    private fun syncSearchInputs(source: SearchSource, rawQuery: String) {
-        if (isSyncingSearchInputs) return
-        isSyncingSearchInputs = true
-        when (source) {
-            SearchSource.TOOLBAR -> {
-                drawerGlobalSearchView?.apply {
-                    if (query.toString() != rawQuery) setQuery(rawQuery, false)
-                    clearFocus()
-                }
-            }
-            SearchSource.DRAWER -> {
-                if (rawQuery.isNotEmpty()) {
-                    searchMenuItem?.expandActionView()
-                }
-                searchView?.let { view ->
-                    if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
-                    view.clearFocus()
-                }
-            }
-            SearchSource.PROGRAMMATIC -> {
-                drawerGlobalSearchView?.let { view ->
-                    if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
-                }
-                searchView?.let { view ->
-                    if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
-                }
-            }
-        }
-        isSyncingSearchInputs = false
-    }
-
-    private fun updateSearchResults(restoreStateWhenCleared: Boolean) {
-        val normalized = searchQueryNormalized
-        flowControllers.forEach { (id, controller) ->
-            val flow = flows.firstOrNull { it.id == id } ?: return@forEach
-            val shouldRestoreState = normalized.isEmpty() && restoreStateWhenCleared
-            val shouldScrollToTop = normalized.isNotEmpty()
+    private fun updateFlowSearchResults(restoreStateWhenCleared: Boolean) {
+        val normalized = flowSearchQueryNormalized
+        val flow = currentFlow() ?: return
+        val controller = flowControllers[flow.id]
+        val shouldRestoreState = normalized.isEmpty() && restoreStateWhenCleared
+        val shouldScrollToTop = normalized.isNotEmpty()
+        if (controller != null) {
             controller.updateDisplayedCards(
                 flow = flow,
                 query = normalized,
                 shouldRestoreState = shouldRestoreState,
                 shouldScrollToTop = shouldScrollToTop
             )
+        } else {
+            val index = flows.indexOfFirst { it.id == flow.id }
+            if (index >= 0) flowAdapter.notifyItemChanged(index)
         }
     }
 
     private fun refreshSearchResultsOverlay() {
-        val normalized = searchQueryNormalized
+        val normalized = globalSearchQueryNormalized
         if (normalized.isBlank()) {
             dismissSearchResultsDialog()
             return
@@ -741,7 +730,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSearchResultsFlow() {
-        val normalized = searchQueryNormalized
+        val normalized = globalSearchQueryNormalized
         if (normalized.isBlank()) {
             dismissSearchResultsDialog()
             return
@@ -849,11 +838,12 @@ class MainActivity : AppCompatActivity() {
         flow.lastViewedCardId = cardId
         flow.lastViewedCardFocused = true
         flowPager.setCurrentItem(flowIndex, false)
+        setFlowSearchQuery(globalSearchQueryText, restoreStateWhenCleared = true)
         val controller = flowControllers[flowId]
         if (controller != null) {
             controller.updateDisplayedCards(
                 flow = flow,
-                query = searchQueryNormalized,
+                query = flowSearchQueryNormalized,
                 shouldRestoreState = true,
                 shouldScrollToTop = false
             )
@@ -1223,9 +1213,9 @@ class MainActivity : AppCompatActivity() {
         if (controller != null) {
             controller.updateDisplayedCards(
                 flow = flow,
-                query = searchQueryNormalized,
-                shouldRestoreState = searchQueryNormalized.isEmpty(),
-                shouldScrollToTop = searchQueryNormalized.isNotEmpty()
+                query = flowSearchQueryNormalized,
+                shouldRestoreState = flowSearchQueryNormalized.isEmpty(),
+                shouldScrollToTop = flowSearchQueryNormalized.isNotEmpty()
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
@@ -1444,17 +1434,17 @@ class MainActivity : AppCompatActivity() {
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
-        if (scrollToTop && searchQueryNormalized.isEmpty()) {
+        if (scrollToTop && flowSearchQueryNormalized.isEmpty()) {
             flow.lastViewedCardIndex = 0
             flow.lastViewedCardId = flow.cards.firstOrNull()?.id
             flow.lastViewedCardFocused = false
         }
         if (controller != null) {
-            val shouldRestoreState = searchQueryNormalized.isEmpty() && !scrollToTop
-            val shouldScrollToTop = scrollToTop || searchQueryNormalized.isNotEmpty()
+            val shouldRestoreState = flowSearchQueryNormalized.isEmpty() && !scrollToTop
+            val shouldScrollToTop = scrollToTop || flowSearchQueryNormalized.isNotEmpty()
             controller.updateDisplayedCards(
                 flow = flow,
-                query = searchQueryNormalized,
+                query = flowSearchQueryNormalized,
                 shouldRestoreState = shouldRestoreState,
                 shouldScrollToTop = shouldScrollToTop
             )
@@ -2853,8 +2843,8 @@ class MainActivity : AppCompatActivity() {
             card.updatedAt = System.currentTimeMillis()
             if (refreshOnComplete) refreshFlow(flow, scrollToTop = false)
             if (persistOnComplete) saveState()
-            if (searchQueryNormalized.isNotEmpty()) {
-                updateSearchResults(restoreStateWhenCleared = false)
+            if (flowSearchQueryNormalized.isNotEmpty()) {
+                updateFlowSearchResults(restoreStateWhenCleared = false)
             }
         }
     }
@@ -4377,9 +4367,9 @@ class MainActivity : AppCompatActivity() {
                 adapter.setBodyTypeface(cardTypeface)
                 controller.updateDisplayedCards(
                     flow = flow,
-                    query = searchQueryNormalized,
-                    shouldRestoreState = searchQueryNormalized.isEmpty(),
-                    shouldScrollToTop = searchQueryNormalized.isNotEmpty()
+                    query = flowSearchQueryNormalized,
+                    shouldRestoreState = flowSearchQueryNormalized.isEmpty(),
+                    shouldScrollToTop = flowSearchQueryNormalized.isNotEmpty()
                 )
             }
 
