@@ -20,6 +20,8 @@
     <string name="drawer_card_backgrounds">Card backgrounds</string>
     <string name="drawer_add_images">Add background images</string>
     <string name="drawer_clear_images">Clear all</string>
+    <string name="drawer_global_search_label">Global search</string>
+    <string name="drawer_global_search_hint">Search all cards</string>
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
     <string name="drawer_import_notes">Import notes</string>
