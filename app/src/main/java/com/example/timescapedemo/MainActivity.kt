@@ -869,7 +869,6 @@ class MainActivity : AppCompatActivity() {
         flow.lastViewedCardId = cardId
         flow.lastViewedCardFocused = true
         flowPager.setCurrentItem(flowIndex, false)
-        setFlowSearchQuery(globalSearchQueryText, restoreStateWhenCleared = true)
         val controller = flowControllers[flowId]
         if (controller != null) {
             controller.updateDisplayedCards(
