@@ -41,6 +41,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.applyCanvas
@@ -740,7 +741,9 @@ class MainActivity : AppCompatActivity() {
         val existing = searchResultsDialog
         if (existing != null) return existing
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.window?.setBackgroundDrawable(
+            ColorDrawable(ContextCompat.getColor(this, R.color.white))
+        )
         val content = layoutInflater.inflate(R.layout.dialog_search_results, null)
         dialog.setContentView(content)
         val toolbar = content.findViewById<MaterialToolbar>(R.id.searchResultsToolbar)
