@@ -201,9 +201,16 @@
     <string name="debug_import_handwriting_base64">Skipped handwriting for %1$s because the data could not be decoded.</string>
     <string name="debug_import_handwriting_dimensions">Skipped handwriting for %1$s because the canvas size didnt match (%2$d×%3$d).</string>
     <string name="debug_import_handwriting_save">Skipped handwriting for %1$s because it couldnt be saved: %2$s</string>
+    <string name="debug_import_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
     <string name="debug_import_missing_image">Skipped image for %1$s because no data was provided.</string>
     <string name="debug_import_image_base64">Skipped image for %1$s because the data could not be decoded.</string>
     <string name="debug_import_image_save">Skipped image for %1$s because it couldnt be saved: %2$s</string>
     <string name="debug_import_image_back">%1$s (image back)</string>
+    <string name="dialog_export_warnings_title">Export warnings</string>
+    <string name="dialog_export_warnings_message">Some items may need attention:
+%1$s</string>
+    <string name="debug_export_card_label_with_title">Flow %1$d (%2$s) · Card %3$d (%4$s)</string>
+    <string name="debug_export_card_label">Flow %1$d (%2$s) · Card %3$d</string>
+    <string name="debug_export_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
     <string name="untitled_flow_name">Flow %1$d</string>
 </resources>
