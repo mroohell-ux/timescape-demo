@@ -3661,17 +3661,55 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showImportWarnings(warnings: List<String>) {
+        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_import_warnings_title)
+            .setMessage(getString(R.string.dialog_import_warnings_message, formatted))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showImportErrorDialog(error: Throwable) {
+        val reason = error.localizedMessage ?: error.javaClass.simpleName
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_import_error_title)
+            .setMessage(getString(R.string.dialog_import_error_message, reason))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun addImportWarning(warnings: MutableList<String>, message: String) {
+        warnings += message
+        Log.w(TAG, message)
+    }
+
+    private fun buildImportCardLabel(flowName: String, flowIndex: Int, cardIndex: Int, title: String): String {
+        val safeFlow = flowName.takeIf { it.isNotBlank() } ?: getString(R.string.untitled_flow_name, flowIndex + 1)
+        val safeTitle = title.takeIf { it.isNotBlank() }
+        val flowLabel = getString(R.string.debug_import_flow_label, flowIndex + 1, safeFlow)
+        return if (safeTitle != null) {
+            getString(R.string.debug_import_card_label_with_title, flowLabel, cardIndex + 1, safeTitle)
+        } else {
+            getString(R.string.debug_import_card_label, flowLabel, cardIndex + 1)
+        }
+    }
+
     private fun importNotes(uri: Uri) {
         lifecycleScope.launch {
             val payload = withContext(Dispatchers.IO) {
                 runCatching { readImportPayload(uri) }
             }.getOrElse {
+                showImportErrorDialog(it)
                 snackbar(getString(R.string.snackbar_import_failed))
                 return@launch
             }
             if (payload.flows.isEmpty()) {
                 snackbar(getString(R.string.snackbar_import_empty))
                 return@launch
+            }
+            if (payload.warnings.isNotEmpty()) {
+                showImportWarnings(payload.warnings)
             }
             val baseIndex = flows.size
             var insertedCards = 0
@@ -3720,6 +3758,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun readImportPayload(uri: Uri): ImportPayload {
         val createdFiles = mutableListOf<CreatedFile>()
+        val warnings = mutableListOf<String>()
         return try {
             val jsonText = contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { reader ->
                 reader.readText()
@@ -3739,10 +3778,22 @@ class MainActivity : AppCompatActivity() {
                     val snippet = cardObj.optString("snippet")
                     val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
                     val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
-                    val handwriting = decodeHandwritingFromExport(cardObj.optJSONObject("handwriting"), createdFiles)
-                    val image = decodeImageFromExport(cardObj.optJSONObject("image"), createdFiles)
-                    val imageHandwriting = cardObj.optJSONObject("imageHandwriting")
-                        ?.let { decodeHandwritingSideFromExport(it, createdFiles) }
+                    val cardLabel = buildImportCardLabel(flowName, i, j, title)
+                    val handwriting = decodeHandwritingFromExport(
+                        cardObj.optJSONObject("handwriting"),
+                        createdFiles,
+                        warnings,
+                        cardLabel
+                    )
+                    val image = decodeImageFromExport(
+                        cardObj.optJSONObject("image"),
+                        createdFiles,
+                        warnings,
+                        cardLabel
+                    )
+                    val imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
+                        decodeHandwritingSideFromExport(it, createdFiles, warnings, cardLabel, isImageBack = true)
+                    }
                     val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
                     cards += ImportedCard(
                         title,
@@ -3758,7 +3809,7 @@ class MainActivity : AppCompatActivity() {
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
             }
-            ImportPayload(importedFlows, totalCards)
+            ImportPayload(importedFlows, totalCards, warnings)
         } catch (e: Exception) {
             createdFiles.forEach { created ->
                 when (created) {
@@ -3772,23 +3823,52 @@ class MainActivity : AppCompatActivity() {
 
     private fun decodeHandwritingFromExport(
         handwritingObj: JSONObject?,
-        createdFiles: MutableList<CreatedFile>
+        createdFiles: MutableList<CreatedFile>,
+        warnings: MutableList<String>,
+        cardLabel: String
     ): HandwritingContent? {
         if (handwritingObj == null) return null
-        val front = decodeHandwritingSideFromExport(handwritingObj, createdFiles) ?: return null
-        val back = handwritingObj.optJSONObject("back")?.let { decodeHandwritingSideFromExport(it, createdFiles) }
+        val front = decodeHandwritingSideFromExport(handwritingObj, createdFiles, warnings, cardLabel, isImageBack = false)
+            ?: return null
+        val back = handwritingObj.optJSONObject("back")?.let {
+            decodeHandwritingSideFromExport(it, createdFiles, warnings, cardLabel, isImageBack = false)
+        }
         return HandwritingContent(front.path, front.options, back)
     }
 
     private fun decodeHandwritingSideFromExport(
         sideObj: JSONObject,
-        createdFiles: MutableList<CreatedFile>
+        createdFiles: MutableList<CreatedFile>,
+        warnings: MutableList<String>,
+        cardLabel: String,
+        isImageBack: Boolean
     ): HandwritingSide? {
-        val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
-        val bytes = decodeBase64Payload(data) ?: return null
+        val target = if (isImageBack) getString(R.string.debug_import_image_back, cardLabel) else cardLabel
+        val data = sideObj.optString("data").takeIf { it.isNotBlank() }
+        if (data == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_missing_handwriting, target))
+            return null
+        }
+        val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: run {
+            addImportWarning(warnings, getString(R.string.debug_import_handwriting_options, target))
+            return null
+        }
+        val bytes = decodeBase64Payload(data)
+        if (bytes == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_handwriting_base64, target))
+            return null
+        }
         if (!validateHandwritingPayload(bytes, options)) {
-            throw IllegalArgumentException("Invalid handwriting payload for canvas ${'$'}{options.canvasWidth}x${'$'}{options.canvasHeight}")
+            addImportWarning(
+                warnings,
+                getString(
+                    R.string.debug_import_handwriting_dimensions,
+                    target,
+                    options.canvasWidth,
+                    options.canvasHeight
+                )
+            )
+            return null
         }
         val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
@@ -3797,6 +3877,7 @@ class MainActivity : AppCompatActivity() {
             HandwritingSide(filename, options)
         }.getOrElse {
             deleteFile(filename)
+            addImportWarning(warnings, getString(R.string.debug_import_handwriting_save, target, it.localizedMessage))
             null
         }
     }
@@ -3812,11 +3893,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun decodeImageFromExport(
         imageObj: JSONObject?,
-        createdFiles: MutableList<CreatedFile>
+        createdFiles: MutableList<CreatedFile>,
+        warnings: MutableList<String>,
+        cardLabel: String
     ): CardImage? {
         if (imageObj == null) return null
-        val data = imageObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val bytes = decodeBase64Payload(data) ?: return null
+        val data = imageObj.optString("data").takeIf { it.isNotBlank() }
+        if (data == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_missing_image, cardLabel))
+            return null
+        }
+        val bytes = decodeBase64Payload(data)
+        if (bytes == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_image_base64, cardLabel))
+            return null
+        }
         val mimeType = imageObj.optString("mimeType").takeIf { it.isNotBlank() } ?: "image/jpeg"
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?: when (mimeType.lowercase(Locale.ROOT)) {
@@ -3832,6 +3923,7 @@ class MainActivity : AppCompatActivity() {
             CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
         }.getOrElse {
             deleteFile(filename)
+            addImportWarning(warnings, getString(R.string.debug_import_image_save, cardLabel, it.localizedMessage))
             null
         }
     }
@@ -4610,7 +4702,7 @@ class MainActivity : AppCompatActivity() {
 
     private data class ExportPayload(val json: String, val flowCount: Int, val cardCount: Int)
 
-    private data class ImportPayload(val flows: List<ImportedFlow>, val cardCount: Int)
+    private data class ImportPayload(val flows: List<ImportedFlow>, val cardCount: Int, val warnings: List<String>)
 
     private data class ImportedFlow(val name: String, val cards: List<ImportedCard>)
 
@@ -4632,6 +4724,7 @@ class MainActivity : AppCompatActivity() {
 
 }
 
+private const val TAG = "MainActivity"
 private const val PREFS_NAME = "timescape_state"
 private const val KEY_CARDS = "cards"
 private const val KEY_IMAGES = "images"
