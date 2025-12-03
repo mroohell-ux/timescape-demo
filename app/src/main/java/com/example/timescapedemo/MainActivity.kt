@@ -3710,6 +3710,7 @@ class MainActivity : AppCompatActivity() {
             renderFlowChips(selectedFlowIndex.coerceIn(0, flows.lastIndex))
             updateToolbarSubtitle()
             updateShuffleMenuState()
+            indexExistingImageCardText()
             saveState()
             val notesText = resources.getQuantityString(R.plurals.count_notes, insertedCards, insertedCards)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, insertedFlows, insertedFlows)
