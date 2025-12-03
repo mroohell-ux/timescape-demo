@@ -96,7 +96,7 @@ import android.util.Log
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 
 class MainActivity : AppCompatActivity() {
 
@@ -167,7 +167,7 @@ class MainActivity : AppCompatActivity() {
     private var textToSpeechInitializing: Boolean = false
     private val pendingTextToSpeechRequests: ArrayDeque<String> = ArrayDeque()
     private val textRecognizer by lazy {
-        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     }
 
     private sealed interface ImageCardRequest {
