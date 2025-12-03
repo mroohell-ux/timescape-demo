@@ -20,6 +20,13 @@
     <string name="drawer_card_backgrounds">Card backgrounds</string>
     <string name="drawer_add_images">Add background images</string>
     <string name="drawer_clear_images">Clear all</string>
+    <string name="drawer_global_search_label">Global search</string>
+    <string name="drawer_global_search_button">Open global search</string>
+    <string name="drawer_global_search_hint">Search all cards</string>
+    <string name="search_results_title">Search results</string>
+    <string name="search_results_summary">%1$d results across %2$d flows for "%3$s"</string>
+    <string name="search_results_empty">No cards matched "%1$s".</string>
+    <string name="search_results_empty_prompt">Start typing to search across every flow</string>
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
     <string name="drawer_import_notes">Import notes</string>
@@ -73,6 +80,11 @@
     <string name="snackbar_import_cancelled">Import cancelled</string>
     <string name="snackbar_export_success">%1$s across %2$s.</string>
     <string name="snackbar_import_success">Imported %1$s across %2$s.</string>
+    <string name="dialog_import_error_title">Import failed</string>
+    <string name="dialog_import_error_message">We couldnt finish the import because: %1$s</string>
+    <string name="dialog_import_warnings_title">Import warnings</string>
+    <string name="dialog_import_warnings_message">Some items couldnt be restored:
+%1$s</string>
     <string name="share_export_chooser_title">Share exported notes</string>
     <string name="snackbar_tts_unavailable">Text to speech is unavailable right now.</string>
     <string name="snackbar_tts_initializing">Preparing text to speech…</string>
@@ -181,4 +193,24 @@
     <string name="handwriting_eraser_type_label">Eraser style</string>
     <string name="handwriting_eraser_type_round">Round</string>
     <string name="handwriting_eraser_type_block">Block</string>
+    <string name="debug_import_flow_label">Flow %1$d (%2$s)</string>
+    <string name="debug_import_card_label_with_title">%1$s · Card %2$d (%3$s)</string>
+    <string name="debug_import_card_label">%1$s · Card %2$d</string>
+    <string name="debug_import_missing_handwriting">Skipped handwriting for %1$s because no data was provided.</string>
+    <string name="debug_import_handwriting_options">Skipped handwriting for %1$s because its settings were invalid.</string>
+    <string name="debug_import_handwriting_base64">Skipped handwriting for %1$s because the data could not be decoded.</string>
+    <string name="debug_import_handwriting_dimensions">Skipped handwriting for %1$s because the canvas size didnt match (%2$d×%3$d).</string>
+    <string name="debug_import_handwriting_save">Skipped handwriting for %1$s because it couldnt be saved: %2$s</string>
+    <string name="debug_import_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
+    <string name="debug_import_missing_image">Skipped image for %1$s because no data was provided.</string>
+    <string name="debug_import_image_base64">Skipped image for %1$s because the data could not be decoded.</string>
+    <string name="debug_import_image_save">Skipped image for %1$s because it couldnt be saved: %2$s</string>
+    <string name="debug_import_image_back">%1$s (image back)</string>
+    <string name="dialog_export_warnings_title">Export warnings</string>
+    <string name="dialog_export_warnings_message">Some items may need attention:
+%1$s</string>
+    <string name="debug_export_card_label_with_title">Flow %1$d (%2$s) · Card %3$d (%4$s)</string>
+    <string name="debug_export_card_label">Flow %1$d (%2$s) · Card %3$d</string>
+    <string name="debug_export_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
+    <string name="untitled_flow_name">Flow %1$d</string>
 </resources>

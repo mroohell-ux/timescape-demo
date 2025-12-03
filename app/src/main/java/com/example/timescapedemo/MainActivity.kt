@@ -1,5 +1,6 @@
 package com.example.timescapedemo
 
+import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
@@ -40,6 +41,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.applyCanvas
@@ -92,6 +94,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
 import android.util.Log
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 
 class MainActivity : AppCompatActivity() {
 
@@ -105,9 +111,22 @@ class MainActivity : AppCompatActivity() {
 
     private var searchMenuItem: MenuItem? = null
     private var searchView: SearchView? = null
-    private var searchQueryText: String = ""
-    private var searchQueryNormalized: String = ""
+    private var flowSearchQueryText: String = ""
+    private var flowSearchQueryNormalized: String = ""
+    private var globalSearchQueryText: String = ""
+    private var globalSearchQueryNormalized: String = ""
     private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
+    private lateinit var drawerGlobalSearchButton: MaterialButton
+    private var isUpdatingFlowSearchInput: Boolean = false
+    private var isUpdatingGlobalSearchInput: Boolean = false
+    private var searchResultsDialog: Dialog? = null
+    private var searchResultsSearchView: SearchView? = null
+    private var searchResultsAdapter: CardsAdapter? = null
+    private var searchResultsLayoutManager: RightRailFlowLayoutManager? = null
+    private var searchResultsRecycler: RecyclerView? = null
+    private var searchResultsSummary: TextView? = null
+    private var searchResultsEmpty: TextView? = null
+    private var searchResultEntries: List<SearchResultEntry> = emptyList()
 
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
@@ -148,6 +167,9 @@ class MainActivity : AppCompatActivity() {
     private var textToSpeechReady: Boolean = false
     private var textToSpeechInitializing: Boolean = false
     private val pendingTextToSpeechRequests: ArrayDeque<String> = ArrayDeque()
+    private val textRecognizer by lazy {
+        TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+    }
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -353,6 +375,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = ""
 
         val header = navigationView.getHeaderView(0)
+        drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
@@ -375,6 +398,11 @@ class MainActivity : AppCompatActivity() {
             updateCardFontSize(value, fromUser)
         }
         updateCardFontLabel()
+
+        drawerGlobalSearchButton.setOnClickListener {
+            showGlobalSearchDialog(focusSearchInput = true)
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
 
         toolbarBasePaddingTop = toolbar.paddingTop
         toolbarBasePaddingBottom = toolbar.paddingBottom
@@ -452,6 +480,7 @@ class MainActivity : AppCompatActivity() {
 
         imagesAdapter.submit(selectedImages)
         refreshAllFlows()
+        indexExistingImageCardText()
         applyCardFontSizeToAdapters()
         applyCardTypefaceToAdapters()
 
@@ -566,23 +595,23 @@ class MainActivity : AppCompatActivity() {
         }
         searchView = view
         view.maxWidth = resources.displayMetrics.widthPixels
-        view.queryHint = getString(R.string.search_cards_hint)
-        view.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        view.imeOptions = EditorInfo.IME_ACTION_SEARCH
-        view.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-            override fun onQueryTextSubmit(query: String?): Boolean {
-                setSearchQuery(query.orEmpty(), restoreStateWhenCleared = true)
-                view.clearFocus()
-                return true
-            }
+            view.queryHint = getString(R.string.search_cards_hint)
+            view.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            view.imeOptions = EditorInfo.IME_ACTION_SEARCH
+            view.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+                override fun onQueryTextSubmit(query: String?): Boolean {
+                    setFlowSearchQuery(query.orEmpty(), restoreStateWhenCleared = true)
+                    view.clearFocus()
+                    return true
+                }
 
-            override fun onQueryTextChange(newText: String?): Boolean {
-                val value = newText.orEmpty()
-                if (value == searchQueryText) return true
-                setSearchQuery(value, restoreStateWhenCleared = true)
-                return true
-            }
-        })
+                override fun onQueryTextChange(newText: String?): Boolean {
+                    val value = newText.orEmpty()
+                    if (value == flowSearchQueryText) return true
+                    setFlowSearchQuery(value, restoreStateWhenCleared = true)
+                    return true
+                }
+            })
         searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
             override fun onMenuItemActionExpand(item: MenuItem): Boolean {
                 val flow = currentFlow()
@@ -590,7 +619,7 @@ class MainActivity : AppCompatActivity() {
                 if (flow != null && controller != null) {
                     controller.captureState(flow)
                 }
-                view.setQuery(searchQueryText, false)
+                view.setQuery(flowSearchQueryText, false)
                 view.post {
                     view.requestFocus()
                     expandSearchViewToToolbarWidth(view)
@@ -601,7 +630,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 view.clearFocus()
-                if (searchQueryText.isNotEmpty()) {
+                if (flowSearchQueryText.isNotEmpty()) {
                     view.setQuery("", false)
                 }
                 setToolbarItemsHiddenForSearch(false)
@@ -609,38 +638,256 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        if (searchQueryText.isNotEmpty()) {
+        if (flowSearchQueryText.isNotEmpty()) {
             searchItem.expandActionView()
-            view.setQuery(searchQueryText, false)
+            view.setQuery(flowSearchQueryText, false)
             view.clearFocus()
         } else {
             view.setQuery("", false)
         }
     }
 
-    private fun setSearchQuery(rawQuery: String, restoreStateWhenCleared: Boolean) {
+    private fun setFlowSearchQuery(
+        rawQuery: String,
+        restoreStateWhenCleared: Boolean
+    ) {
         val normalized = rawQuery.trim()
-        val rawChanged = rawQuery != searchQueryText
-        val normalizedChanged = normalized != searchQueryNormalized
-        if (!rawChanged && !normalizedChanged) return
-        searchQueryText = rawQuery
-        searchQueryNormalized = normalized
-        updateSearchResults(restoreStateWhenCleared)
+        val rawChanged = rawQuery != flowSearchQueryText
+        val normalizedChanged = normalized != flowSearchQueryNormalized
+        if (!rawChanged && !normalizedChanged) {
+            syncFlowSearchInput(rawQuery)
+            return
+        }
+        flowSearchQueryText = rawQuery
+        flowSearchQueryNormalized = normalized
+        syncFlowSearchInput(rawQuery)
+        updateFlowSearchResults(restoreStateWhenCleared)
     }
 
-    private fun updateSearchResults(restoreStateWhenCleared: Boolean) {
-        val normalized = searchQueryNormalized
-        flowControllers.forEach { (id, controller) ->
-            val flow = flows.firstOrNull { it.id == id } ?: return@forEach
-            val shouldRestoreState = normalized.isEmpty() && restoreStateWhenCleared
-            val shouldScrollToTop = normalized.isNotEmpty()
+    private fun syncFlowSearchInput(rawQuery: String) {
+        if (isUpdatingFlowSearchInput) return
+        isUpdatingFlowSearchInput = true
+        searchView?.let { view ->
+            if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
+        }
+        isUpdatingFlowSearchInput = false
+    }
+
+    private fun syncGlobalSearchInput(rawQuery: String) {
+        if (isUpdatingGlobalSearchInput) return
+        isUpdatingGlobalSearchInput = true
+        searchResultsSearchView?.let { view ->
+            if (view.query.toString() != rawQuery) view.setQuery(rawQuery, false)
+        }
+        isUpdatingGlobalSearchInput = false
+    }
+
+    private fun setGlobalSearchQuery(rawQuery: String) {
+        val normalized = rawQuery.trim()
+        val rawChanged = rawQuery != globalSearchQueryText
+        val normalizedChanged = normalized != globalSearchQueryNormalized
+        if (!rawChanged && !normalizedChanged) return
+        globalSearchQueryText = rawQuery
+        globalSearchQueryNormalized = normalized
+        syncGlobalSearchInput(rawQuery)
+        refreshSearchResultsOverlay()
+    }
+
+    private fun clearGlobalSearchState() {
+        setGlobalSearchQuery("")
+        searchResultEntries = emptyList()
+    }
+
+    private fun updateFlowSearchResults(restoreStateWhenCleared: Boolean) {
+        val normalized = flowSearchQueryNormalized
+        val flow = currentFlow() ?: return
+        val controller = flowControllers[flow.id]
+        val shouldRestoreState = normalized.isEmpty() && restoreStateWhenCleared
+        val shouldScrollToTop = normalized.isNotEmpty()
+        if (controller != null) {
             controller.updateDisplayedCards(
                 flow = flow,
                 query = normalized,
                 shouldRestoreState = shouldRestoreState,
                 shouldScrollToTop = shouldScrollToTop
             )
+        } else {
+            val index = flows.indexOfFirst { it.id == flow.id }
+            if (index >= 0) flowAdapter.notifyItemChanged(index)
         }
+    }
+
+    private fun refreshSearchResultsOverlay() {
+        val normalized = globalSearchQueryNormalized
+        if (searchResultsDialog?.isShowing == true) {
+            bindSearchResultsToDialog(normalized)
+        }
+    }
+
+    private fun showGlobalSearchDialog(focusSearchInput: Boolean) {
+        val normalized = globalSearchQueryNormalized
+        val dialog = ensureSearchResultsDialog()
+        bindSearchResultsToDialog(normalized)
+        if (!dialog.isShowing) dialog.show()
+        if (focusSearchInput) {
+            searchResultsSearchView?.apply {
+                requestFocus()
+                isIconified = false
+            }
+        }
+    }
+
+    private fun ensureSearchResultsDialog(): Dialog {
+        val existing = searchResultsDialog
+        if (existing != null) return existing
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.window?.setBackgroundDrawable(
+            ColorDrawable(ContextCompat.getColor(this, R.color.white))
+        )
+        val content = layoutInflater.inflate(R.layout.dialog_search_results, null)
+        dialog.setContentView(content)
+        val toolbar = content.findViewById<MaterialToolbar>(R.id.searchResultsToolbar)
+        toolbar.setNavigationIcon(android.R.drawable.ic_menu_close_clear_cancel)
+        toolbar.setNavigationOnClickListener { dialog.dismiss() }
+        searchResultsSearchView = content.findViewById(R.id.searchResultsInput)
+        searchResultsSummary = content.findViewById(R.id.searchResultsSummary)
+        searchResultsEmpty = content.findViewById(R.id.searchResultsEmpty)
+        val recycler = content.findViewById<RecyclerView>(R.id.searchResultsRecycler)
+        searchResultsRecycler = recycler
+        val layoutManager = createLayoutManager()
+        recycler.layoutManager = layoutManager
+        recycler.setHasFixedSize(true)
+        searchResultsLayoutManager = layoutManager
+        val adapter = CardsAdapter(
+            cardTint,
+            onItemClick = { index -> handleSearchResultTap(index) },
+            onItemDoubleClick = { card, _ -> handleSearchResultCardOpen(card) },
+            onItemLongPress = { _, _ -> false },
+            onTitleSpeakClick = { card -> speakCardTitle(card) }
+        )
+        adapter.setBodyTextSize(cardFontSizeSp)
+        adapter.setBodyTypeface(cardTypeface)
+        recycler.adapter = adapter
+        searchResultsAdapter = adapter
+        searchResultsSearchView?.apply {
+            setIconifiedByDefault(false)
+            isIconified = false
+            queryHint = getString(R.string.drawer_global_search_hint)
+            setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+                override fun onQueryTextSubmit(query: String?): Boolean {
+                    setGlobalSearchQuery(query.orEmpty())
+                    bindSearchResultsToDialog(globalSearchQueryNormalized)
+                    clearFocus()
+                    return true
+                }
+
+                override fun onQueryTextChange(newText: String?): Boolean {
+                    val value = newText.orEmpty()
+                    if (value == globalSearchQueryText) return true
+                    setGlobalSearchQuery(value)
+                    return true
+                }
+            })
+            setQuery(globalSearchQueryText, false)
+        }
+        dialog.setOnDismissListener {
+            clearGlobalSearchState()
+            searchResultsDialog = null
+            searchResultsAdapter = null
+            searchResultsLayoutManager = null
+            searchResultsRecycler = null
+            searchResultsSummary = null
+            searchResultsEmpty = null
+            searchResultsSearchView = null
+            searchResultEntries = emptyList()
+        }
+        searchResultsDialog = dialog
+        return dialog
+    }
+
+    private fun dismissSearchResultsDialog() {
+        searchResultsDialog?.dismiss()
+    }
+
+    private fun bindSearchResultsToDialog(query: String) {
+        if (query.isBlank()) {
+            searchResultEntries = emptyList()
+            searchResultsSummary?.text = getString(R.string.drawer_global_search_hint)
+            searchResultsEmpty?.apply {
+                isVisible = true
+                text = getString(R.string.search_results_empty_prompt)
+            }
+            searchResultsRecycler?.isVisible = false
+            searchResultsAdapter?.submitList(emptyList())
+            return
+        }
+        val entries = buildSearchResultEntries(query)
+        searchResultEntries = entries
+        val flowCount = entries.map { it.flowId }.toSet().size
+        searchResultsSummary?.text = getString(
+            R.string.search_results_summary,
+            entries.size,
+            flowCount,
+            query
+        )
+        val hasResults = entries.isNotEmpty()
+        searchResultsEmpty?.apply {
+            isVisible = !hasResults
+            text = getString(R.string.search_results_empty, query)
+        }
+        searchResultsRecycler?.isVisible = hasResults
+        if (hasResults) {
+            searchResultsLayoutManager?.clearFocus(immediate = true)
+            searchResultsLayoutManager?.restoreState(0, false)
+        }
+        searchResultsAdapter?.submitList(entries.map { it.card })
+    }
+
+    private fun buildSearchResultEntries(query: String): List<SearchResultEntry> {
+        if (query.isBlank()) return emptyList()
+        return flows.flatMap { flow ->
+            filterCardsForSearch(flow.cards, query).map { card ->
+                SearchResultEntry(card, flow.id, flow.name)
+            }
+        }
+    }
+
+    private fun handleSearchResultTap(index: Int) {
+        val entry = searchResultEntries.getOrNull(index) ?: return
+        openCardFromSearch(entry.flowId, entry.card.id)
+    }
+
+    private fun handleSearchResultCardOpen(card: CardItem) {
+        val entry = searchResultEntries.firstOrNull { it.card.id == card.id } ?: return
+        openCardFromSearch(entry.flowId, card.id)
+    }
+
+    private fun openCardFromSearch(flowId: Long, cardId: Long) {
+        val flowIndex = flows.indexOfFirst { it.id == flowId }
+        if (flowIndex < 0) return
+        val flow = flows.getOrNull(flowIndex) ?: return
+        val cardIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex < 0) return
+        flow.lastViewedCardIndex = cardIndex
+        flow.lastViewedCardId = cardId
+        flow.lastViewedCardFocused = true
+        flowPager.setCurrentItem(flowIndex, false)
+        val controller = flowControllers[flowId]
+        if (controller != null) {
+            controller.updateDisplayedCards(
+                flow = flow,
+                query = flowSearchQueryNormalized,
+                shouldRestoreState = true,
+                shouldScrollToTop = false
+            )
+            controller.restoreState(flow)
+        } else {
+            flowAdapter.notifyItemChanged(flowIndex)
+        }
+        flowPager.post {
+            flowControllers[flowId]?.restoreState(flow)
+        }
+        searchResultsDialog?.dismiss()
     }
 
     private fun updateToolbarSubtitle() {
@@ -999,9 +1246,9 @@ class MainActivity : AppCompatActivity() {
         if (controller != null) {
             controller.updateDisplayedCards(
                 flow = flow,
-                query = searchQueryNormalized,
-                shouldRestoreState = searchQueryNormalized.isEmpty(),
-                shouldScrollToTop = searchQueryNormalized.isNotEmpty()
+                query = flowSearchQueryNormalized,
+                shouldRestoreState = flowSearchQueryNormalized.isEmpty(),
+                shouldScrollToTop = flowSearchQueryNormalized.isNotEmpty()
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
@@ -1212,24 +1459,25 @@ class MainActivity : AppCompatActivity() {
         if (trimmed.isEmpty()) return cards.toList()
         return cards.filter { card ->
             card.title.contains(trimmed, ignoreCase = true) ||
-                card.snippet.contains(trimmed, ignoreCase = true)
+                card.snippet.contains(trimmed, ignoreCase = true) ||
+                card.recognizedText?.contains(trimmed, ignoreCase = true) == true
         }
     }
 
     private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
-        if (scrollToTop && searchQueryNormalized.isEmpty()) {
+        if (scrollToTop && flowSearchQueryNormalized.isEmpty()) {
             flow.lastViewedCardIndex = 0
             flow.lastViewedCardId = flow.cards.firstOrNull()?.id
             flow.lastViewedCardFocused = false
         }
         if (controller != null) {
-            val shouldRestoreState = searchQueryNormalized.isEmpty() && !scrollToTop
-            val shouldScrollToTop = scrollToTop || searchQueryNormalized.isNotEmpty()
+            val shouldRestoreState = flowSearchQueryNormalized.isEmpty() && !scrollToTop
+            val shouldScrollToTop = scrollToTop || flowSearchQueryNormalized.isNotEmpty()
             controller.updateDisplayedCards(
                 flow = flow,
-                query = searchQueryNormalized,
+                query = flowSearchQueryNormalized,
                 shouldRestoreState = shouldRestoreState,
                 shouldScrollToTop = shouldScrollToTop
             )
@@ -2583,6 +2831,7 @@ class MainActivity : AppCompatActivity() {
         flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
         refreshFlow(flow, scrollToTop = true)
         saveState()
+        analyzeImageCardText(flow, card)
         snackbar(getString(R.string.snackbar_added_image_card))
     }
 
@@ -2595,9 +2844,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         card.image = image
+        card.recognizedText = null
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
         saveState()
+        analyzeImageCardText(flow, card)
         snackbar(getString(R.string.snackbar_image_card_updated))
     }
 
@@ -2609,6 +2860,57 @@ class MainActivity : AppCompatActivity() {
         if (!copied) return null
         BackgroundImageLoader.invalidate(Uri.fromFile(targetFile))
         return CardImage(Uri.fromFile(targetFile), mimeType ?: existing?.mimeType, ownedByApp = true)
+    }
+
+    private fun analyzeImageCardText(
+        flow: CardFlow,
+        card: CardItem,
+        refreshOnComplete: Boolean = true,
+        persistOnComplete: Boolean = true
+    ) {
+        val image = card.image ?: return
+        lifecycleScope.launch {
+            val recognized = recognizeTextFromImage(image)
+            if (recognized.isNullOrBlank() || recognized == card.recognizedText) return@launch
+            card.recognizedText = recognized
+            card.updatedAt = System.currentTimeMillis()
+            if (refreshOnComplete) refreshFlow(flow, scrollToTop = false)
+            if (persistOnComplete) saveState()
+            if (flowSearchQueryNormalized.isNotEmpty()) {
+                updateFlowSearchResults(restoreStateWhenCleared = false)
+            }
+        }
+    }
+
+    private suspend fun recognizeTextFromImage(image: CardImage): String? = withContext(Dispatchers.IO) {
+        val bitmap = openImageInputStream(image)?.use { input ->
+            BitmapFactory.decodeStream(input)
+        } ?: return@withContext null
+
+        try {
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val result = Tasks.await(textRecognizer.process(inputImage))
+            result.text.trim().takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to recognize text for ${image.uri}", e)
+            null
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun indexExistingImageCardText() {
+        flows.forEach { flow ->
+            flow.cards.filter { it.image != null && it.recognizedText.isNullOrBlank() }
+                .forEach { card ->
+                    analyzeImageCardText(
+                        flow,
+                        card,
+                        refreshOnComplete = false,
+                        persistOnComplete = true
+                    )
+                }
+        }
     }
 
     private fun resolveImageExtension(mimeType: String?): String =
@@ -3207,6 +3509,9 @@ class MainActivity : AppCompatActivity() {
                 snackbar(getString(R.string.snackbar_export_failed))
                 return@launch
             }
+            if (payload.warnings.isNotEmpty()) {
+                showExportWarnings(payload.warnings)
+            }
             val notesText = resources.getQuantityString(R.plurals.count_notes, payload.cardCount, payload.cardCount)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
             snackbarWithAction(
@@ -3254,19 +3559,23 @@ class MainActivity : AppCompatActivity() {
         root.put("version", NOTES_EXPORT_VERSION)
         root.put("generatedAt", System.currentTimeMillis())
         val flowsArray = JSONArray()
+        val warnings = mutableListOf<String>()
+        val imageBackPayloads = mutableMapOf<String, String>()
         var cardCount = 0
-        flowsToExport.forEach { flow ->
+        flowsToExport.forEachIndexed { flowIndex, flow ->
             val flowObj = JSONObject()
             flowObj.put("name", flow.name)
             val cardsArray = JSONArray()
             val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
             val cardsForExport = shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards
-            cardsForExport.forEach { card ->
+            cardsForExport.forEachIndexed { cardIndex, card ->
                 val cardObj = JSONObject()
                 cardObj.put("title", card.title)
                 cardObj.put("snippet", card.snippet)
+                card.recognizedText?.let { cardObj.put("recognizedText", it) }
                 cardObj.put("textColor", colorToString(card.textColor))
                 cardObj.put("updatedAt", card.updatedAt)
+                val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
                 card.handwriting?.let { handwriting ->
                     handwritingToJson(handwriting)?.let { cardObj.put("handwriting", it) }
                 }
@@ -3274,7 +3583,13 @@ class MainActivity : AppCompatActivity() {
                     imageToExportJson(image)?.let { cardObj.put("image", it) }
                 }
                 card.imageHandwriting?.let { back ->
-                    handwritingSideToExportJson(back)?.let { cardObj.put("imageHandwriting", it) }
+                    handwritingSideToExportPayload(back)?.let { export ->
+                        cardObj.put("imageHandwriting", export.json)
+                        val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
+                        if (duplicate != null && duplicate != cardLabel) {
+                            warnings += getString(R.string.debug_export_duplicate_image_back, cardLabel, duplicate)
+                        }
+                    }
                 }
                 cardsArray.put(cardObj)
                 cardCount++
@@ -3283,7 +3598,7 @@ class MainActivity : AppCompatActivity() {
             flowsArray.put(flowObj)
         }
         root.put("flows", flowsArray)
-        return ExportPayload(root.toString(2), flowsToExport.size, cardCount)
+        return ExportPayload(root.toString(2), flowsToExport.size, cardCount, warnings)
     }
 
     private fun handwritingOptionsToJson(options: HandwritingOptions): JSONObject = JSONObject().apply {
@@ -3302,6 +3617,16 @@ class MainActivity : AppCompatActivity() {
     private fun handwritingSideToJson(side: HandwritingSide): JSONObject = JSONObject().apply {
         put("path", side.path)
         put("options", handwritingOptionsToJson(side.options))
+    }
+
+    private fun handwritingSideToExportPayload(side: HandwritingSide): HandwritingExportPayload? {
+        val bytes = readHandwritingBytes(side.path) ?: return null
+        val data = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        val json = JSONObject().apply {
+            put("data", data)
+            put("options", handwritingOptionsToJson(side.options))
+        }
+        return HandwritingExportPayload(json, data)
     }
 
     private fun cardImageToJson(image: CardImage): JSONObject = JSONObject().apply {
@@ -3361,11 +3686,65 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showImportWarnings(warnings: List<String>) {
+        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_import_warnings_title)
+            .setMessage(getString(R.string.dialog_import_warnings_message, formatted))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showExportWarnings(warnings: List<String>) {
+        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_export_warnings_title)
+            .setMessage(getString(R.string.dialog_export_warnings_message, formatted))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showImportErrorDialog(error: Throwable) {
+        val reason = error.localizedMessage ?: error.javaClass.simpleName
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_import_error_title)
+            .setMessage(getString(R.string.dialog_import_error_message, reason))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun addImportWarning(warnings: MutableList<String>, message: String) {
+        warnings += message
+        Log.w(TAG, message)
+    }
+
+    private fun buildExportCardLabel(flowName: String, flowIndex: Int, cardIndex: Int, title: String): String {
+        val safeFlow = flowName.takeIf { it.isNotBlank() }
+            ?: getString(R.string.untitled_flow_name, flowIndex + 1)
+        return if (title.isNotBlank()) {
+            getString(R.string.debug_export_card_label_with_title, flowIndex + 1, safeFlow, cardIndex + 1, title)
+        } else {
+            getString(R.string.debug_export_card_label, flowIndex + 1, safeFlow, cardIndex + 1)
+        }
+    }
+
+    private fun buildImportCardLabel(flowName: String, flowIndex: Int, cardIndex: Int, title: String): String {
+        val safeFlow = flowName.takeIf { it.isNotBlank() } ?: getString(R.string.untitled_flow_name, flowIndex + 1)
+        val safeTitle = title.takeIf { it.isNotBlank() }
+        val flowLabel = getString(R.string.debug_import_flow_label, flowIndex + 1, safeFlow)
+        return if (safeTitle != null) {
+            getString(R.string.debug_import_card_label_with_title, flowLabel, cardIndex + 1, safeTitle)
+        } else {
+            getString(R.string.debug_import_card_label, flowLabel, cardIndex + 1)
+        }
+    }
+
     private fun importNotes(uri: Uri) {
         lifecycleScope.launch {
             val payload = withContext(Dispatchers.IO) {
                 runCatching { readImportPayload(uri) }
             }.getOrElse {
+                showImportErrorDialog(it)
                 snackbar(getString(R.string.snackbar_import_failed))
                 return@launch
             }
@@ -3373,23 +3752,27 @@ class MainActivity : AppCompatActivity() {
                 snackbar(getString(R.string.snackbar_import_empty))
                 return@launch
             }
+            if (payload.warnings.isNotEmpty()) {
+                showImportWarnings(payload.warnings)
+            }
             val baseIndex = flows.size
             var insertedCards = 0
             payload.flows.forEachIndexed { index, importedFlow ->
                 val flowId = nextFlowId++
                 val flowName = importedFlow.name.takeIf { it.isNotBlank() }
                     ?: defaultFlowName()
-                val newCards = importedFlow.cards.map { importedCard ->
-                    val cardId = nextCardId++
-                    CardItem(
-                        id = cardId,
-                        title = importedCard.title,
-                        snippet = importedCard.snippet,
-                        textColor = importedCard.textColor,
-                        updatedAt = importedCard.updatedAt,
-                        image = importedCard.image,
-                        handwriting = importedCard.handwriting,
-                        imageHandwriting = importedCard.imageHandwriting
+                    val newCards = importedFlow.cards.map { importedCard ->
+                        val cardId = nextCardId++
+                        CardItem(
+                            id = cardId,
+                            title = importedCard.title,
+                            snippet = importedCard.snippet,
+                            recognizedText = importedCard.recognizedText,
+                            textColor = importedCard.textColor,
+                            updatedAt = importedCard.updatedAt,
+                            image = importedCard.image,
+                            handwriting = importedCard.handwriting,
+                            imageHandwriting = importedCard.imageHandwriting
                     )
                 }.toMutableList()
                 val newFlow = CardFlow(
@@ -3409,6 +3792,7 @@ class MainActivity : AppCompatActivity() {
             renderFlowChips(selectedFlowIndex.coerceIn(0, flows.lastIndex))
             updateToolbarSubtitle()
             updateShuffleMenuState()
+            indexExistingImageCardText()
             saveState()
             val notesText = resources.getQuantityString(R.plurals.count_notes, insertedCards, insertedCards)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, insertedFlows, insertedFlows)
@@ -3418,6 +3802,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun readImportPayload(uri: Uri): ImportPayload {
         val createdFiles = mutableListOf<CreatedFile>()
+        val warnings = mutableListOf<String>()
+        val imageBackPayloads = mutableMapOf<String, String>()
         return try {
             val jsonText = contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { reader ->
                 reader.readText()
@@ -3437,16 +3823,45 @@ class MainActivity : AppCompatActivity() {
                     val snippet = cardObj.optString("snippet")
                     val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
                     val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
-                    val handwriting = decodeHandwritingFromExport(cardObj.optJSONObject("handwriting"), createdFiles)
-                    val image = decodeImageFromExport(cardObj.optJSONObject("image"), createdFiles)
-                    val imageHandwriting = cardObj.optJSONObject("imageHandwriting")
-                        ?.let { decodeHandwritingSideFromExport(it, createdFiles) }
-                    cards += ImportedCard(title, snippet, updatedAt, textColor, handwriting, image, imageHandwriting)
+                    val cardLabel = buildImportCardLabel(flowName, i, j, title)
+                    val handwriting = decodeHandwritingFromExport(
+                        cardObj.optJSONObject("handwriting"),
+                        createdFiles,
+                        warnings,
+                        cardLabel
+                    )
+                    val image = decodeImageFromExport(
+                        cardObj.optJSONObject("image"),
+                        createdFiles,
+                        warnings,
+                        cardLabel
+                    )
+                    val imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
+                        decodeHandwritingSideFromExport(
+                            it,
+                            createdFiles,
+                            warnings,
+                            cardLabel,
+                            isImageBack = true,
+                            duplicateTracker = imageBackPayloads
+                        )
+                    }
+                    val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
+                    cards += ImportedCard(
+                        title,
+                        snippet,
+                        updatedAt,
+                        textColor,
+                        handwriting,
+                        image,
+                        imageHandwriting,
+                        recognizedText
+                    )
                 }
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
             }
-            ImportPayload(importedFlows, totalCards)
+            ImportPayload(importedFlows, totalCards, warnings)
         } catch (e: Exception) {
             createdFiles.forEach { created ->
                 when (created) {
@@ -3460,23 +3875,59 @@ class MainActivity : AppCompatActivity() {
 
     private fun decodeHandwritingFromExport(
         handwritingObj: JSONObject?,
-        createdFiles: MutableList<CreatedFile>
+        createdFiles: MutableList<CreatedFile>,
+        warnings: MutableList<String>,
+        cardLabel: String
     ): HandwritingContent? {
         if (handwritingObj == null) return null
-        val front = decodeHandwritingSideFromExport(handwritingObj, createdFiles) ?: return null
-        val back = handwritingObj.optJSONObject("back")?.let { decodeHandwritingSideFromExport(it, createdFiles) }
+        val front = decodeHandwritingSideFromExport(handwritingObj, createdFiles, warnings, cardLabel, isImageBack = false)
+            ?: return null
+        val back = handwritingObj.optJSONObject("back")?.let {
+            decodeHandwritingSideFromExport(it, createdFiles, warnings, cardLabel, isImageBack = false)
+        }
         return HandwritingContent(front.path, front.options, back)
     }
 
     private fun decodeHandwritingSideFromExport(
         sideObj: JSONObject,
-        createdFiles: MutableList<CreatedFile>
+        createdFiles: MutableList<CreatedFile>,
+        warnings: MutableList<String>,
+        cardLabel: String,
+        isImageBack: Boolean,
+        duplicateTracker: MutableMap<String, String>? = null
     ): HandwritingSide? {
-        val data = sideObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: return null
-        val bytes = decodeBase64Payload(data) ?: return null
+        val target = if (isImageBack) getString(R.string.debug_import_image_back, cardLabel) else cardLabel
+        val data = sideObj.optString("data").takeIf { it.isNotBlank() }
+        if (data == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_missing_handwriting, target))
+            return null
+        }
+        duplicateTracker?.let { tracker ->
+            val duplicate = tracker.putIfAbsent(data, target)
+            if (duplicate != null && duplicate != target) {
+                addImportWarning(warnings, getString(R.string.debug_import_duplicate_image_back, target, duplicate))
+            }
+        }
+        val options = parseHandwritingOptionsFromExport(sideObj.optJSONObject("options")) ?: run {
+            addImportWarning(warnings, getString(R.string.debug_import_handwriting_options, target))
+            return null
+        }
+        val bytes = decodeBase64Payload(data)
+        if (bytes == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_handwriting_base64, target))
+            return null
+        }
         if (!validateHandwritingPayload(bytes, options)) {
-            throw IllegalArgumentException("Invalid handwriting payload for canvas ${'$'}{options.canvasWidth}x${'$'}{options.canvasHeight}")
+            addImportWarning(
+                warnings,
+                getString(
+                    R.string.debug_import_handwriting_dimensions,
+                    target,
+                    options.canvasWidth,
+                    options.canvasHeight
+                )
+            )
+            return null
         }
         val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
@@ -3485,6 +3936,7 @@ class MainActivity : AppCompatActivity() {
             HandwritingSide(filename, options)
         }.getOrElse {
             deleteFile(filename)
+            addImportWarning(warnings, getString(R.string.debug_import_handwriting_save, target, it.localizedMessage))
             null
         }
     }
@@ -3500,11 +3952,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun decodeImageFromExport(
         imageObj: JSONObject?,
-        createdFiles: MutableList<CreatedFile>
+        createdFiles: MutableList<CreatedFile>,
+        warnings: MutableList<String>,
+        cardLabel: String
     ): CardImage? {
         if (imageObj == null) return null
-        val data = imageObj.optString("data").takeIf { it.isNotBlank() } ?: return null
-        val bytes = decodeBase64Payload(data) ?: return null
+        val data = imageObj.optString("data").takeIf { it.isNotBlank() }
+        if (data == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_missing_image, cardLabel))
+            return null
+        }
+        val bytes = decodeBase64Payload(data)
+        if (bytes == null) {
+            addImportWarning(warnings, getString(R.string.debug_import_image_base64, cardLabel))
+            return null
+        }
         val mimeType = imageObj.optString("mimeType").takeIf { it.isNotBlank() } ?: "image/jpeg"
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?: when (mimeType.lowercase(Locale.ROOT)) {
@@ -3520,6 +3982,7 @@ class MainActivity : AppCompatActivity() {
             CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
         }.getOrElse {
             deleteFile(filename)
+            addImportWarning(warnings, getString(R.string.debug_import_image_save, cardLabel, it.localizedMessage))
             null
         }
     }
@@ -3586,12 +4049,14 @@ class MainActivity : AppCompatActivity() {
         flowControllers.forEach { (_, controller) ->
             controller.adapter.setBodyTextSize(cardFontSizeSp)
         }
+        searchResultsAdapter?.setBodyTextSize(cardFontSizeSp)
     }
 
     private fun applyCardTypefaceToAdapters() {
         flowControllers.forEach { (_, controller) ->
             controller.adapter.setBodyTypeface(cardTypeface)
         }
+        searchResultsAdapter?.setBodyTypeface(cardTypeface)
     }
 
     private fun launchFontPicker() {
@@ -3759,6 +4224,8 @@ class MainActivity : AppCompatActivity() {
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
+                                recognizedText = cardObj.optString("recognizedText")
+                                    .takeIf { it.isNotBlank() },
                                 textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE,
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
@@ -3901,6 +4368,7 @@ class MainActivity : AppCompatActivity() {
                 obj.put("id", card.id)
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
+                card.recognizedText?.let { obj.put("recognizedText", it) }
                 obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { content ->
@@ -4004,6 +4472,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        dismissSearchResultsDialog()
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
@@ -4080,9 +4549,9 @@ class MainActivity : AppCompatActivity() {
                 adapter.setBodyTypeface(cardTypeface)
                 controller.updateDisplayedCards(
                     flow = flow,
-                    query = searchQueryNormalized,
-                    shouldRestoreState = searchQueryNormalized.isEmpty(),
-                    shouldScrollToTop = searchQueryNormalized.isNotEmpty()
+                    query = flowSearchQueryNormalized,
+                    shouldRestoreState = flowSearchQueryNormalized.isEmpty(),
+                    shouldScrollToTop = flowSearchQueryNormalized.isNotEmpty()
                 )
             }
 
@@ -4277,6 +4746,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private data class SearchResultEntry(val card: CardItem, val flowId: Long, val flowName: String)
+
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
         fun syncWith(flow: CardFlow) {
             val currentIds = flow.cards.map { it.id }
@@ -4288,9 +4759,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private data class ExportPayload(val json: String, val flowCount: Int, val cardCount: Int)
+    private data class ExportPayload(
+        val json: String,
+        val flowCount: Int,
+        val cardCount: Int,
+        val warnings: List<String>
+    )
 
-    private data class ImportPayload(val flows: List<ImportedFlow>, val cardCount: Int)
+    private data class HandwritingExportPayload(val json: JSONObject, val data: String)
+
+    private data class ImportPayload(val flows: List<ImportedFlow>, val cardCount: Int, val warnings: List<String>)
 
     private data class ImportedFlow(val name: String, val cards: List<ImportedCard>)
 
@@ -4306,11 +4784,13 @@ class MainActivity : AppCompatActivity() {
         val textColor: Int,
         val handwriting: HandwritingContent?,
         val image: CardImage?,
-        val imageHandwriting: HandwritingSide?
+        val imageHandwriting: HandwritingSide?,
+        val recognizedText: String?
     )
 
 }
 
+private const val TAG = "MainActivity"
 private const val PREFS_NAME = "timescape_state"
 private const val KEY_CARDS = "cards"
 private const val KEY_IMAGES = "images"
