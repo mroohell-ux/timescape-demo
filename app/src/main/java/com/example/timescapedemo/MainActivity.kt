@@ -3567,6 +3567,7 @@ class MainActivity : AppCompatActivity() {
         val flowsArray = JSONArray()
         val warnings = mutableListOf<String>()
         val imageBackPayloads = mutableMapOf<String, String>()
+        val duplicateImageBacks = mutableMapOf<String, MutableList<String>>()
         var cardCount = 0
         flowsToExport.forEachIndexed { flowIndex, flow ->
             val flowObj = JSONObject()
@@ -3594,7 +3595,7 @@ class MainActivity : AppCompatActivity() {
                         cardObj.put("imageHandwriting", export.json)
                         val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
                         if (duplicate != null && duplicate != cardLabel) {
-                            warnings += getString(R.string.debug_export_duplicate_image_back, cardLabel, duplicate)
+                            duplicateImageBacks.getOrPut(duplicate) { mutableListOf() }.add(cardLabel)
                         }
                     }
                 }
@@ -3605,6 +3606,13 @@ class MainActivity : AppCompatActivity() {
             flowsArray.put(flowObj)
         }
         root.put("flows", flowsArray)
+        duplicateImageBacks.forEach { (original, matches) ->
+            val matchList = matches.joinToString(", ")
+            addExportWarning(
+                warnings,
+                getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
+            )
+        }
         return ExportPayload(root.toString(2), flowsToExport.size, cardCount, warnings)
     }
 

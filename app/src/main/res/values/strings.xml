@@ -214,5 +214,6 @@
     <string name="debug_export_missing_handwriting_back">Skipped back handwriting for %1$s because the file could not be read.</string>
     <string name="debug_export_missing_image_back">Skipped image back handwriting for %1$s because the file could not be read.</string>
     <string name="debug_export_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
+    <string name="debug_export_duplicate_image_back_grouped">Back handwriting for %1$s matches: %2$s.</string>
     <string name="untitled_flow_name">Flow %1$d</string>
 </resources>
