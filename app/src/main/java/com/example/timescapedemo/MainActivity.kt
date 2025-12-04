@@ -3509,16 +3509,22 @@ class MainActivity : AppCompatActivity() {
                 snackbar(getString(R.string.snackbar_export_failed))
                 return@launch
             }
-            if (payload.warnings.isNotEmpty()) {
-                showExportWarnings(payload.warnings)
-            }
             val notesText = resources.getQuantityString(R.plurals.count_notes, payload.cardCount, payload.cardCount)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
-            snackbarWithAction(
-                getString(R.string.snackbar_export_success, notesText, flowsText),
-                getString(R.string.snackbar_action_share)
-            ) {
-                shareExportPayload(payload, fileName)
+            if (payload.warnings.isNotEmpty()) {
+                showExportWarnings(payload.warnings) {
+                    shareExportPayload(payload, fileName)
+                }
+                snackbar(
+                    getString(R.string.snackbar_export_success_with_warnings, notesText, flowsText)
+                )
+            } else {
+                snackbarWithAction(
+                    getString(R.string.snackbar_export_success, notesText, flowsText),
+                    getString(R.string.snackbar_action_share)
+                ) {
+                    shareExportPayload(payload, fileName)
+                }
             }
         }
     }
@@ -3577,13 +3583,14 @@ class MainActivity : AppCompatActivity() {
                 cardObj.put("updatedAt", card.updatedAt)
                 val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
                 card.handwriting?.let { handwriting ->
-                    handwritingToJson(handwriting)?.let { cardObj.put("handwriting", it) }
+                    handwritingToJson(handwriting, warnings, cardLabel)?.let { cardObj.put("handwriting", it) }
                 }
                 card.image?.let { image ->
                     imageToExportJson(image)?.let { cardObj.put("image", it) }
                 }
                 card.imageHandwriting?.let { back ->
-                    handwritingSideToExportPayload(back)?.let { export ->
+                    val missingBackWarning = getString(R.string.debug_export_missing_image_back, cardLabel)
+                    handwritingSideToExportPayload(back, warnings, missingBackWarning)?.let { export ->
                         cardObj.put("imageHandwriting", export.json)
                         val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
                         if (duplicate != null && duplicate != cardLabel) {
@@ -3619,8 +3626,15 @@ class MainActivity : AppCompatActivity() {
         put("options", handwritingOptionsToJson(side.options))
     }
 
-    private fun handwritingSideToExportPayload(side: HandwritingSide): HandwritingExportPayload? {
-        val bytes = readHandwritingBytes(side.path) ?: return null
+    private fun handwritingSideToExportPayload(
+        side: HandwritingSide,
+        warnings: MutableList<String>,
+        missingWarning: String
+    ): HandwritingExportPayload? {
+        val bytes = readHandwritingBytes(side.path) ?: run {
+            addExportWarning(warnings, missingWarning)
+            return null
+        }
         val data = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val json = JSONObject().apply {
             put("data", data)
@@ -3635,8 +3649,15 @@ class MainActivity : AppCompatActivity() {
         put("owned", image.ownedByApp)
     }
 
-    private fun handwritingToJson(content: HandwritingContent): JSONObject? {
-        val bytes = readHandwritingBytes(content.path) ?: return null
+    private fun handwritingToJson(
+        content: HandwritingContent,
+        warnings: MutableList<String>,
+        cardLabel: String
+    ): JSONObject? {
+        val bytes = readHandwritingBytes(content.path) ?: run {
+            addExportWarning(warnings, getString(R.string.debug_export_missing_handwriting, cardLabel))
+            return null
+        }
         val optionsObj = handwritingOptionsToJson(content.options)
         val root = JSONObject().apply {
             put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
@@ -3651,6 +3672,11 @@ class MainActivity : AppCompatActivity() {
                     put("options", backOptions)
                 }
                 root.put("back", backObj)
+            } else {
+                addExportWarning(
+                    warnings,
+                    getString(R.string.debug_export_missing_handwriting_back, cardLabel)
+                )
             }
         }
         return root
@@ -3695,12 +3721,17 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showExportWarnings(warnings: List<String>) {
+    private fun showExportWarnings(warnings: List<String>, onShare: (() -> Unit)? = null) {
         val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_export_warnings_title)
             .setMessage(getString(R.string.dialog_export_warnings_message, formatted))
             .setPositiveButton(android.R.string.ok, null)
+            .apply {
+                onShare?.let { share ->
+                    setNeutralButton(R.string.snackbar_action_share) { _, _ -> share() }
+                }
+            }
             .show()
     }
 
@@ -3714,6 +3745,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addImportWarning(warnings: MutableList<String>, message: String) {
+        warnings += message
+        Log.w(TAG, message)
+    }
+
+    private fun addExportWarning(warnings: MutableList<String>, message: String) {
         warnings += message
         Log.w(TAG, message)
     }

@@ -76,6 +76,7 @@
     <string name="snackbar_import_empty">Nothing to import from that file</string>
     <string name="snackbar_export_cancelled">Export cancelled</string>
     <string name="snackbar_action_share">Share</string>
+    <string name="snackbar_export_success_with_warnings">%1$s across %2$s. Some handwriting couldnt be exported.</string>
     <string name="snackbar_share_failed">Unable to share export</string>
     <string name="snackbar_import_cancelled">Import cancelled</string>
     <string name="snackbar_export_success">%1$s across %2$s.</string>
@@ -211,6 +212,9 @@
 %1$s</string>
     <string name="debug_export_card_label_with_title">Flow %1$d (%2$s) · Card %3$d (%4$s)</string>
     <string name="debug_export_card_label">Flow %1$d (%2$s) · Card %3$d</string>
+    <string name="debug_export_missing_handwriting">Skipped handwriting for %1$s because the file could not be read.</string>
+    <string name="debug_export_missing_handwriting_back">Skipped back handwriting for %1$s because the file could not be read.</string>
+    <string name="debug_export_missing_image_back">Skipped image back handwriting for %1$s because the file could not be read.</string>
     <string name="debug_export_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
     <string name="untitled_flow_name">Flow %1$d</string>
 </resources>
