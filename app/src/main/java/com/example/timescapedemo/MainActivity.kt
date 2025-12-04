@@ -3503,6 +3503,10 @@ class MainActivity : AppCompatActivity() {
                             writer.write(exportPayload.json)
                         }
                     } ?: error("Unable to open output stream")
+                    Log.d(
+                        EXPORT_LOG_TAG,
+                        "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards"
+                    )
                     exportPayload
                 }
             }.getOrElse {
@@ -3596,6 +3600,7 @@ class MainActivity : AppCompatActivity() {
                     val missingBackWarning = getString(R.string.debug_export_missing_image_back, cardLabel)
                     handwritingSideToExportPayload(back, warnings, missingBackWarning)?.let { export ->
                         cardObj.put("imageHandwriting", export.json)
+                        logExportedImageBack(cardLabel, export.data)
                         val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
                         if (duplicate != null && duplicate != cardLabel) {
                             duplicateImageBacks.getOrPut(duplicate) { mutableListOf() }.add(cardLabel)
@@ -3616,6 +3621,7 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
             )
         }
+        logExportJson(root)
         return ExportPayload(root.toString(2), flowsToExport.size, cardCount, warnings)
     }
 
@@ -3644,6 +3650,7 @@ class MainActivity : AppCompatActivity() {
     ): HandwritingExportPayload? {
         val bytes = readHandwritingBytes(side.path) ?: run {
             addExportWarning(warnings, missingWarning)
+            Log.w(EXPORT_LOG_TAG, "Missing handwriting bytes for path=${side.path}; warning=$missingWarning")
             return null
         }
         val data = Base64.encodeToString(bytes, Base64.NO_WRAP)
@@ -3683,6 +3690,7 @@ class MainActivity : AppCompatActivity() {
                     put("options", backOptions)
                 }
                 root.put("back", backObj)
+                logExportedHandwritingBack(cardLabel, backObj)
             } else {
                 addExportWarning(
                     warnings,
@@ -3715,6 +3723,28 @@ class MainActivity : AppCompatActivity() {
 
     private fun readImageBytes(uri: Uri): ByteArray? =
         runCatching { openImageUriStream(uri)?.use { it.readBytes() } }.getOrNull()
+
+    private fun logExportedImageBack(cardLabel: String, data: String) {
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Exported image back handwriting for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
+        )
+    }
+
+    private fun logExportedHandwritingBack(cardLabel: String, backObj: JSONObject) {
+        val data = backObj.optString("data")
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Exported handwriting back for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
+        )
+    }
+
+    private fun logExportJson(root: JSONObject) {
+        val formatted = root.toString(2)
+        val truncated =
+            if (formatted.length > MAX_LOG_JSON_LENGTH) formatted.take(MAX_LOG_JSON_LENGTH) + "…" else formatted
+        Log.d(EXPORT_LOG_TAG, "Export payload JSON (${formatted.length} chars):\n$truncated")
+    }
 
     private fun decodeBase64Payload(raw: String): ByteArray? {
         val normalized = raw.filterNot(Char::isWhitespace)
@@ -4843,6 +4873,9 @@ class MainActivity : AppCompatActivity() {
 }
 
 private const val TAG = "MainActivity"
+private const val EXPORT_LOG_TAG = "Export"
+private const val LOG_DATA_PREVIEW_CHARS = 48
+private const val MAX_LOG_JSON_LENGTH = 4000
 private const val PREFS_NAME = "timescape_state"
 private const val KEY_CARDS = "cards"
 private const val KEY_IMAGES = "images"
