@@ -3515,9 +3515,12 @@ class MainActivity : AppCompatActivity() {
                 showExportWarnings(payload.warnings) {
                     shareExportPayload(payload, fileName)
                 }
-                snackbar(
-                    getString(R.string.snackbar_export_success_with_warnings, notesText, flowsText)
-                )
+                snackbarWithAction(
+                    getString(R.string.snackbar_export_success_with_warnings, notesText, flowsText),
+                    getString(R.string.snackbar_action_share)
+                ) {
+                    shareExportPayload(payload, fileName)
+                }
             } else {
                 snackbarWithAction(
                     getString(R.string.snackbar_export_success, notesText, flowsText),
@@ -3607,7 +3610,7 @@ class MainActivity : AppCompatActivity() {
         }
         root.put("flows", flowsArray)
         duplicateImageBacks.forEach { (original, matches) ->
-            val matchList = matches.joinToString(", ")
+            val matchList = matches.joinToString(separator = "\n")
             addExportWarning(
                 warnings,
                 getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
