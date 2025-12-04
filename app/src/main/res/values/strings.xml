@@ -76,6 +76,7 @@
     <string name="snackbar_import_empty">Nothing to import from that file</string>
     <string name="snackbar_export_cancelled">Export cancelled</string>
     <string name="snackbar_action_share">Share</string>
+    <string name="snackbar_export_success_with_warnings">%1$s across %2$s. Some handwriting couldnt be exported.</string>
     <string name="snackbar_share_failed">Unable to share export</string>
     <string name="snackbar_import_cancelled">Import cancelled</string>
     <string name="snackbar_export_success">%1$s across %2$s.</string>
@@ -83,8 +84,7 @@
     <string name="dialog_import_error_title">Import failed</string>
     <string name="dialog_import_error_message">We couldnt finish the import because: %1$s</string>
     <string name="dialog_import_warnings_title">Import warnings</string>
-    <string name="dialog_import_warnings_message">Some items couldnt be restored:
-%1$s</string>
+    <string name="dialog_import_warnings_message">Some items couldnt be restored:\n\n%1$s</string>
     <string name="share_export_chooser_title">Share exported notes</string>
     <string name="snackbar_tts_unavailable">Text to speech is unavailable right now.</string>
     <string name="snackbar_tts_initializing">Preparing text to speech…</string>
@@ -207,10 +207,13 @@
     <string name="debug_import_image_save">Skipped image for %1$s because it couldnt be saved: %2$s</string>
     <string name="debug_import_image_back">%1$s (image back)</string>
     <string name="dialog_export_warnings_title">Export warnings</string>
-    <string name="dialog_export_warnings_message">Some items may need attention:
-%1$s</string>
+    <string name="dialog_export_warnings_message">Some items may need attention:\n\n%1$s</string>
     <string name="debug_export_card_label_with_title">Flow %1$d (%2$s) · Card %3$d (%4$s)</string>
     <string name="debug_export_card_label">Flow %1$d (%2$s) · Card %3$d</string>
-    <string name="debug_export_duplicate_image_back">Back handwriting for %1$s matches %2$s.</string>
+    <string name="debug_export_missing_handwriting">Skipped handwriting for %1$s because the file could not be read.</string>
+    <string name="debug_export_missing_handwriting_back">Skipped back handwriting for %1$s because the file could not be read.</string>
+    <string name="debug_export_missing_image_back">Skipped image back handwriting for %1$s because the file could not be read.</string>
+    <string name="debug_export_duplicate_image_back">Back handwriting for %1$s is identical to %2$s. The export keeps one copy and reuses it for the match. If those backs should be different, update them before exporting again.</string>
+    <string name="debug_export_duplicate_image_back_grouped">Back handwriting for %1$s is identical to these cards. The export keeps one copy and reuses it for the matches. If those backs should be different, update them before exporting again:\n%2$s.</string>
     <string name="untitled_flow_name">Flow %1$d</string>
 </resources>

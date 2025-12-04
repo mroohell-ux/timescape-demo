@@ -3503,22 +3503,35 @@ class MainActivity : AppCompatActivity() {
                             writer.write(exportPayload.json)
                         }
                     } ?: error("Unable to open output stream")
+                    Log.d(
+                        EXPORT_LOG_TAG,
+                        "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards"
+                    )
                     exportPayload
                 }
             }.getOrElse {
                 snackbar(getString(R.string.snackbar_export_failed))
                 return@launch
             }
-            if (payload.warnings.isNotEmpty()) {
-                showExportWarnings(payload.warnings)
-            }
             val notesText = resources.getQuantityString(R.plurals.count_notes, payload.cardCount, payload.cardCount)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
-            snackbarWithAction(
-                getString(R.string.snackbar_export_success, notesText, flowsText),
-                getString(R.string.snackbar_action_share)
-            ) {
-                shareExportPayload(payload, fileName)
+            if (payload.warnings.isNotEmpty()) {
+                showExportWarnings(payload.warnings) {
+                    shareExportPayload(payload, fileName)
+                }
+                snackbarWithAction(
+                    getString(R.string.snackbar_export_success_with_warnings, notesText, flowsText),
+                    getString(R.string.snackbar_action_share)
+                ) {
+                    shareExportPayload(payload, fileName)
+                }
+            } else {
+                snackbarWithAction(
+                    getString(R.string.snackbar_export_success, notesText, flowsText),
+                    getString(R.string.snackbar_action_share)
+                ) {
+                    shareExportPayload(payload, fileName)
+                }
             }
         }
     }
@@ -3561,6 +3574,7 @@ class MainActivity : AppCompatActivity() {
         val flowsArray = JSONArray()
         val warnings = mutableListOf<String>()
         val imageBackPayloads = mutableMapOf<String, String>()
+        val duplicateImageBacks = mutableMapOf<String, MutableList<String>>()
         var cardCount = 0
         flowsToExport.forEachIndexed { flowIndex, flow ->
             val flowObj = JSONObject()
@@ -3577,17 +3591,19 @@ class MainActivity : AppCompatActivity() {
                 cardObj.put("updatedAt", card.updatedAt)
                 val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
                 card.handwriting?.let { handwriting ->
-                    handwritingToJson(handwriting)?.let { cardObj.put("handwriting", it) }
+                    handwritingToJson(handwriting, warnings, cardLabel)?.let { cardObj.put("handwriting", it) }
                 }
                 card.image?.let { image ->
                     imageToExportJson(image)?.let { cardObj.put("image", it) }
                 }
                 card.imageHandwriting?.let { back ->
-                    handwritingSideToExportPayload(back)?.let { export ->
+                    val missingBackWarning = getString(R.string.debug_export_missing_image_back, cardLabel)
+                    handwritingSideToExportPayload(back, warnings, missingBackWarning)?.let { export ->
                         cardObj.put("imageHandwriting", export.json)
+                        logExportedImageBack(cardLabel, export.data)
                         val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
                         if (duplicate != null && duplicate != cardLabel) {
-                            warnings += getString(R.string.debug_export_duplicate_image_back, cardLabel, duplicate)
+                            duplicateImageBacks.getOrPut(duplicate) { mutableListOf() }.add(cardLabel)
                         }
                     }
                 }
@@ -3598,6 +3614,14 @@ class MainActivity : AppCompatActivity() {
             flowsArray.put(flowObj)
         }
         root.put("flows", flowsArray)
+        duplicateImageBacks.forEach { (original, matches) ->
+            val matchList = matches.joinToString(separator = "\n")
+            addExportWarning(
+                warnings,
+                getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
+            )
+        }
+        logExportJson(root)
         return ExportPayload(root.toString(2), flowsToExport.size, cardCount, warnings)
     }
 
@@ -3619,8 +3643,16 @@ class MainActivity : AppCompatActivity() {
         put("options", handwritingOptionsToJson(side.options))
     }
 
-    private fun handwritingSideToExportPayload(side: HandwritingSide): HandwritingExportPayload? {
-        val bytes = readHandwritingBytes(side.path) ?: return null
+    private fun handwritingSideToExportPayload(
+        side: HandwritingSide,
+        warnings: MutableList<String>,
+        missingWarning: String
+    ): HandwritingExportPayload? {
+        val bytes = readHandwritingBytes(side.path) ?: run {
+            addExportWarning(warnings, missingWarning)
+            Log.w(EXPORT_LOG_TAG, "Missing handwriting bytes for path=${side.path}; warning=$missingWarning")
+            return null
+        }
         val data = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val json = JSONObject().apply {
             put("data", data)
@@ -3635,8 +3667,15 @@ class MainActivity : AppCompatActivity() {
         put("owned", image.ownedByApp)
     }
 
-    private fun handwritingToJson(content: HandwritingContent): JSONObject? {
-        val bytes = readHandwritingBytes(content.path) ?: return null
+    private fun handwritingToJson(
+        content: HandwritingContent,
+        warnings: MutableList<String>,
+        cardLabel: String
+    ): JSONObject? {
+        val bytes = readHandwritingBytes(content.path) ?: run {
+            addExportWarning(warnings, getString(R.string.debug_export_missing_handwriting, cardLabel))
+            return null
+        }
         val optionsObj = handwritingOptionsToJson(content.options)
         val root = JSONObject().apply {
             put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
@@ -3651,6 +3690,12 @@ class MainActivity : AppCompatActivity() {
                     put("options", backOptions)
                 }
                 root.put("back", backObj)
+                logExportedHandwritingBack(cardLabel, backObj)
+            } else {
+                addExportWarning(
+                    warnings,
+                    getString(R.string.debug_export_missing_handwriting_back, cardLabel)
+                )
             }
         }
         return root
@@ -3679,6 +3724,55 @@ class MainActivity : AppCompatActivity() {
     private fun readImageBytes(uri: Uri): ByteArray? =
         runCatching { openImageUriStream(uri)?.use { it.readBytes() } }.getOrNull()
 
+    private fun logExportedImageBack(cardLabel: String, data: String) {
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Exported image back handwriting for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
+        )
+    }
+
+    private fun logExportedHandwritingBack(cardLabel: String, backObj: JSONObject) {
+        val data = backObj.optString("data")
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Exported handwriting back for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
+        )
+    }
+
+    private fun logImportedHandwriting(
+        target: String,
+        data: String,
+        options: HandwritingOptions,
+        isImageBack: Boolean
+    ) {
+        val typeLabel = if (isImageBack) "image back handwriting" else "handwriting"
+        Log.d(
+            IMPORT_LOG_TAG,
+            "Imported $typeLabel for $target (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)}, canvas=${options.canvasWidth}x${options.canvasHeight})"
+        )
+    }
+
+    private fun logImportedImage(cardLabel: String, data: String, mimeType: String) {
+        Log.d(
+            IMPORT_LOG_TAG,
+            "Imported image for $cardLabel (mimeType=$mimeType, base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
+        )
+    }
+
+    private fun logExportJson(root: JSONObject) {
+        val formatted = root.toString(2)
+        val truncated =
+            if (formatted.length > MAX_LOG_JSON_LENGTH) formatted.take(MAX_LOG_JSON_LENGTH) + "…" else formatted
+        Log.d(EXPORT_LOG_TAG, "Export payload JSON (${formatted.length} chars):\n$truncated")
+    }
+
+    private fun logImportJson(root: JSONObject) {
+        val formatted = root.toString(2)
+        val truncated =
+            if (formatted.length > MAX_LOG_JSON_LENGTH) formatted.take(MAX_LOG_JSON_LENGTH) + "…" else formatted
+        Log.d(IMPORT_LOG_TAG, "Import payload JSON (${formatted.length} chars):\n$truncated")
+    }
+
     private fun decodeBase64Payload(raw: String): ByteArray? {
         val normalized = raw.filterNot(Char::isWhitespace)
         return runCatching { Base64.decode(normalized, Base64.DEFAULT) }.getOrElse {
@@ -3687,7 +3781,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showImportWarnings(warnings: List<String>) {
-        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+        val formatted = formatWarningsForDialog(warnings)
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_import_warnings_title)
             .setMessage(getString(R.string.dialog_import_warnings_message, formatted))
@@ -3695,13 +3789,23 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showExportWarnings(warnings: List<String>) {
-        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+    private fun showExportWarnings(warnings: List<String>, onShare: (() -> Unit)? = null) {
+        val formatted = formatWarningsForDialog(warnings)
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_export_warnings_title)
             .setMessage(getString(R.string.dialog_export_warnings_message, formatted))
             .setPositiveButton(android.R.string.ok, null)
+            .apply {
+                onShare?.let { share ->
+                    setNeutralButton(R.string.snackbar_action_share) { _, _ -> share() }
+                }
+            }
             .show()
+    }
+
+    private fun formatWarningsForDialog(warnings: List<String>): String {
+        val uniqueWarnings = warnings.distinct()
+        return uniqueWarnings.joinToString(separator = "\n• ", prefix = "• ")
     }
 
     private fun showImportErrorDialog(error: Throwable) {
@@ -3714,6 +3818,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addImportWarning(warnings: MutableList<String>, message: String) {
+        warnings += message
+        Log.w(TAG, message)
+    }
+
+    private fun addExportWarning(warnings: MutableList<String>, message: String) {
         warnings += message
         Log.w(TAG, message)
     }
@@ -3809,6 +3918,7 @@ class MainActivity : AppCompatActivity() {
                 reader.readText()
             } ?: throw IllegalStateException("Unable to open input stream")
             val root = JSONObject(jsonText)
+            logImportJson(root)
             val flowsArray = root.optJSONArray("flows") ?: JSONArray()
             val importedFlows = mutableListOf<ImportedFlow>()
             var totalCards = 0
@@ -3861,6 +3971,10 @@ class MainActivity : AppCompatActivity() {
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
             }
+            Log.d(
+                IMPORT_LOG_TAG,
+                "Parsed import payload with ${importedFlows.size} flows and $totalCards cards"
+            )
             ImportPayload(importedFlows, totalCards, warnings)
         } catch (e: Exception) {
             createdFiles.forEach { created ->
@@ -3929,10 +4043,12 @@ class MainActivity : AppCompatActivity() {
             )
             return null
         }
-        val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
+        val filename = "handwriting_${System.currentTimeMillis()}_${UUID.randomUUID()}.${options.format.extension}"
+        //val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Handwriting(filename)
+            logImportedHandwriting(target, data, options, isImageBack)
             HandwritingSide(filename, options)
         }.getOrElse {
             deleteFile(filename)
@@ -3979,6 +4095,7 @@ class MainActivity : AppCompatActivity() {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Image(filename)
             val file = File(filesDir, filename)
+            logImportedImage(cardLabel, data, mimeType)
             CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
         }.getOrElse {
             deleteFile(filename)
@@ -4791,6 +4908,10 @@ class MainActivity : AppCompatActivity() {
 }
 
 private const val TAG = "MainActivity"
+private const val EXPORT_LOG_TAG = "Export"
+private const val IMPORT_LOG_TAG = "Import"
+private const val LOG_DATA_PREVIEW_CHARS = 48
+private const val MAX_LOG_JSON_LENGTH = 4000
 private const val PREFS_NAME = "timescape_state"
 private const val KEY_CARDS = "cards"
 private const val KEY_IMAGES = "images"
