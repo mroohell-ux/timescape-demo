@@ -3739,11 +3739,38 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun logImportedHandwriting(
+        target: String,
+        data: String,
+        options: HandwritingOptions,
+        isImageBack: Boolean
+    ) {
+        val typeLabel = if (isImageBack) "image back handwriting" else "handwriting"
+        Log.d(
+            IMPORT_LOG_TAG,
+            "Imported $typeLabel for $target (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)}, canvas=${options.canvasWidth}x${options.canvasHeight})"
+        )
+    }
+
+    private fun logImportedImage(cardLabel: String, data: String, mimeType: String) {
+        Log.d(
+            IMPORT_LOG_TAG,
+            "Imported image for $cardLabel (mimeType=$mimeType, base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
+        )
+    }
+
     private fun logExportJson(root: JSONObject) {
         val formatted = root.toString(2)
         val truncated =
             if (formatted.length > MAX_LOG_JSON_LENGTH) formatted.take(MAX_LOG_JSON_LENGTH) + "…" else formatted
         Log.d(EXPORT_LOG_TAG, "Export payload JSON (${formatted.length} chars):\n$truncated")
+    }
+
+    private fun logImportJson(root: JSONObject) {
+        val formatted = root.toString(2)
+        val truncated =
+            if (formatted.length > MAX_LOG_JSON_LENGTH) formatted.take(MAX_LOG_JSON_LENGTH) + "…" else formatted
+        Log.d(IMPORT_LOG_TAG, "Import payload JSON (${formatted.length} chars):\n$truncated")
     }
 
     private fun decodeBase64Payload(raw: String): ByteArray? {
@@ -3891,6 +3918,7 @@ class MainActivity : AppCompatActivity() {
                 reader.readText()
             } ?: throw IllegalStateException("Unable to open input stream")
             val root = JSONObject(jsonText)
+            logImportJson(root)
             val flowsArray = root.optJSONArray("flows") ?: JSONArray()
             val importedFlows = mutableListOf<ImportedFlow>()
             var totalCards = 0
@@ -3943,6 +3971,10 @@ class MainActivity : AppCompatActivity() {
                 totalCards += cards.size
                 importedFlows += ImportedFlow(flowName, cards)
             }
+            Log.d(
+                IMPORT_LOG_TAG,
+                "Parsed import payload with ${importedFlows.size} flows and $totalCards cards"
+            )
             ImportPayload(importedFlows, totalCards, warnings)
         } catch (e: Exception) {
             createdFiles.forEach { created ->
@@ -4015,6 +4047,7 @@ class MainActivity : AppCompatActivity() {
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Handwriting(filename)
+            logImportedHandwriting(target, data, options, isImageBack)
             HandwritingSide(filename, options)
         }.getOrElse {
             deleteFile(filename)
@@ -4061,6 +4094,7 @@ class MainActivity : AppCompatActivity() {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Image(filename)
             val file = File(filesDir, filename)
+            logImportedImage(cardLabel, data, mimeType)
             CardImage(Uri.fromFile(file), mimeType, ownedByApp = true)
         }.getOrElse {
             deleteFile(filename)
@@ -4874,6 +4908,7 @@ class MainActivity : AppCompatActivity() {
 
 private const val TAG = "MainActivity"
 private const val EXPORT_LOG_TAG = "Export"
+private const val IMPORT_LOG_TAG = "Import"
 private const val LOG_DATA_PREVIEW_CHARS = 48
 private const val MAX_LOG_JSON_LENGTH = 4000
 private const val PREFS_NAME = "timescape_state"
