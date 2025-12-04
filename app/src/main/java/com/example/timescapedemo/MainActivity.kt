@@ -3713,7 +3713,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showImportWarnings(warnings: List<String>) {
-        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+        val formatted = formatWarningsForDialog(warnings)
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_import_warnings_title)
             .setMessage(getString(R.string.dialog_import_warnings_message, formatted))
@@ -3722,7 +3722,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showExportWarnings(warnings: List<String>, onShare: (() -> Unit)? = null) {
-        val formatted = warnings.joinToString(separator = "\n• ", prefix = "• ")
+        val formatted = formatWarningsForDialog(warnings)
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_export_warnings_title)
             .setMessage(getString(R.string.dialog_export_warnings_message, formatted))
@@ -3733,6 +3733,11 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .show()
+    }
+
+    private fun formatWarningsForDialog(warnings: List<String>): String {
+        val uniqueWarnings = warnings.distinct()
+        return uniqueWarnings.joinToString(separator = "\n• ", prefix = "• ")
     }
 
     private fun showImportErrorDialog(error: Throwable) {

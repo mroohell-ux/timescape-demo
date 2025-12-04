@@ -84,8 +84,7 @@
     <string name="dialog_import_error_title">Import failed</string>
     <string name="dialog_import_error_message">We couldnt finish the import because: %1$s</string>
     <string name="dialog_import_warnings_title">Import warnings</string>
-    <string name="dialog_import_warnings_message">Some items couldnt be restored:
-%1$s</string>
+    <string name="dialog_import_warnings_message">Some items couldnt be restored:\n\n%1$s</string>
     <string name="share_export_chooser_title">Share exported notes</string>
     <string name="snackbar_tts_unavailable">Text to speech is unavailable right now.</string>
     <string name="snackbar_tts_initializing">Preparing text to speech…</string>
@@ -208,8 +207,7 @@
     <string name="debug_import_image_save">Skipped image for %1$s because it couldnt be saved: %2$s</string>
     <string name="debug_import_image_back">%1$s (image back)</string>
     <string name="dialog_export_warnings_title">Export warnings</string>
-    <string name="dialog_export_warnings_message">Some items may need attention:
-%1$s</string>
+    <string name="dialog_export_warnings_message">Some items may need attention:\n\n%1$s</string>
     <string name="debug_export_card_label_with_title">Flow %1$d (%2$s) · Card %3$d (%4$s)</string>
     <string name="debug_export_card_label">Flow %1$d (%2$s) · Card %3$d</string>
     <string name="debug_export_missing_handwriting">Skipped handwriting for %1$s because the file could not be read.</string>
