@@ -38,6 +38,30 @@
             android:background="@color/flow_bar_stroke"/>
 
         <TextView
+            android:id="@+id/labelBigBang"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/drawer_big_bang_label"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerBigBang"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_big_bang_button"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:background="@color/flow_bar_stroke"/>
+
+        <TextView
             android:id="@+id/labelNotes"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

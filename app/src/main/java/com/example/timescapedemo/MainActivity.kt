@@ -10,6 +10,7 @@ import android.content.res.ColorStateList
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -128,6 +129,7 @@ class MainActivity : AppCompatActivity() {
     private var searchResultsEmpty: TextView? = null
     private var searchResultEntries: List<SearchResultEntry> = emptyList()
 
+    private lateinit var drawerBigBangButton: MaterialButton
     private lateinit var drawerRecyclerImages: RecyclerView
     private lateinit var drawerAddImagesButton: MaterialButton
     private lateinit var drawerClearImagesButton: MaterialButton
@@ -378,6 +380,7 @@ class MainActivity : AppCompatActivity() {
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
+        drawerBigBangButton = header.findViewById(R.id.buttonDrawerBigBang)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -401,6 +404,11 @@ class MainActivity : AppCompatActivity() {
 
         drawerGlobalSearchButton.setOnClickListener {
             showGlobalSearchDialog(focusSearchInput = true)
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+
+        drawerBigBangButton.setOnClickListener {
+            showBigBangDialog()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
 
@@ -888,6 +896,104 @@ class MainActivity : AppCompatActivity() {
             flowControllers[flowId]?.restoreState(flow)
         }
         searchResultsDialog?.dismiss()
+    }
+
+    private fun showBigBangDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_big_bang, null)
+        val scene = dialogView.findViewById<FrameLayout>(R.id.bigBangScene)
+        val closeButton = dialogView.findViewById<MaterialButton>(R.id.buttonCloseBigBang)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+
+        closeButton.setOnClickListener { dialog.dismiss() }
+
+        scene.post { renderBigBangScene(scene) }
+
+        dialog.show()
+    }
+
+    private fun renderBigBangScene(scene: FrameLayout) {
+        val width = scene.width - scene.paddingStart - scene.paddingEnd
+        val height = scene.height - scene.paddingTop - scene.paddingBottom
+        if (width <= 0 || height <= 0) return
+
+        val density = resources.displayMetrics.density
+        val random = Random(SystemClock.uptimeMillis())
+
+        scene.removeAllViews()
+
+        fun randomWithin(max: Int): Int = random.nextInt(max.coerceAtLeast(1))
+
+        repeat(18) {
+            val particleSize = (4 + random.nextInt(10)) * density
+            val particle = View(this).apply {
+                val glow = GradientDrawable()
+                val gold = ColorUtils.setAlphaComponent(Color.parseColor("#FFC76F"), 210)
+                val teal = ColorUtils.setAlphaComponent(Color.parseColor("#4CF0E4"), 200)
+                val color = if (random.nextBoolean()) gold else teal
+                glow.shape = GradientDrawable.OVAL
+                glow.gradientType = GradientDrawable.RADIAL_GRADIENT
+                glow.gradientRadius = particleSize * 2
+                glow.colors = intArrayOf(color, Color.TRANSPARENT)
+                background = glow
+                alpha = 0.75f + random.nextFloat() * 0.2f
+            }
+            val params = FrameLayout.LayoutParams(
+                (particleSize * (1.5f + random.nextFloat())).roundToInt(),
+                (particleSize * (1.5f + random.nextFloat())).roundToInt()
+            )
+            params.leftMargin = randomWithin(width)
+            params.topMargin = randomWithin(height)
+            scene.addView(particle, params)
+        }
+
+        repeat(9) {
+            val cardWidth = (120 + random.nextInt(80)) * density
+            val cardHeight = (80 + random.nextInt(70)) * density
+            val card = MaterialCardView(this).apply {
+                radius = 14f * density
+                cardElevation = (6 + random.nextInt(8)) * density
+                strokeWidth = (1 * density).roundToInt()
+                strokeColor = ColorUtils.setAlphaComponent(Color.WHITE, 90)
+                setCardBackgroundColor(ColorUtils.blendARGB(
+                    Color.parseColor("#112033"),
+                    Color.parseColor("#163B5C"),
+                    random.nextFloat()
+                ))
+                rotationX = -10f + random.nextFloat() * 20f
+                rotationY = -12f + random.nextFloat() * 24f
+                rotation = -8f + random.nextFloat() * 16f
+                alpha = 0.88f
+
+                val title = TextView(this@MainActivity).apply {
+                    text = getString(R.string.app_name)
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    alpha = 0.95f
+                    setPadding(
+                        (12 * density).roundToInt(),
+                        (10 * density).roundToInt(),
+                        (12 * density).roundToInt(),
+                        (10 * density).roundToInt()
+                    )
+                }
+                addView(title, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+            }
+            val params = FrameLayout.LayoutParams(
+                cardWidth.roundToInt(),
+                cardHeight.roundToInt()
+            )
+            params.leftMargin = randomWithin((width - cardWidth).roundToInt())
+            params.topMargin = randomWithin((height - cardHeight).roundToInt())
+            params.gravity = Gravity.TOP or Gravity.START
+            card.translationZ = (-12 + random.nextInt(24)) * density
+            scene.addView(card, params)
+        }
     }
 
     private fun updateToolbarSubtitle() {
