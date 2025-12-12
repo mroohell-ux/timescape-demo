@@ -69,6 +69,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -78,6 +79,7 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
@@ -87,6 +89,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -102,10 +106,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
+import kotlin.coroutines.resume
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 class MainActivity : AppCompatActivity() {
 
@@ -160,6 +166,7 @@ class MainActivity : AppCompatActivity() {
     private var chatSendButton: MaterialButton? = null
     private var chatStreamingJob: Job? = null
     private var chatModelLoaded: Boolean = false
+    private var chatModelDownloadDialog: AlertDialog? = null
     private val mlcEngine: MLCEngine by lazy { MLCEngine() }
 
     private val selectedImages: MutableList<BgImage> = mutableListOf()
@@ -594,6 +601,7 @@ class MainActivity : AppCompatActivity() {
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
                 updateMenuVisibilityForPage(isChatPage)
+                updateFlowBarVisibility(isChatPage)
             }
         })
         flowPager.setOnDragListener { _, event ->
@@ -750,6 +758,7 @@ class MainActivity : AppCompatActivity() {
         if (isChatPage) {
             searchMenuItem?.collapseActionView()
         }
+        updateFlowBarVisibility(isChatPage)
     }
 
     private fun updateFlowSearchResults(restoreStateWhenCleared: Boolean) {
@@ -1097,8 +1106,8 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(safeIndex)
     }
 
-    private fun updateFlowBarVisibility() {
-        flowBar.isVisible = flows.size > 1
+    private fun updateFlowBarVisibility(isChatPage: Boolean = isChatPage(flowPager.currentItem)) {
+        flowBar.isVisible = !isChatPage && flows.size > 1
     }
 
     private fun resetFlowChipDragState() {
@@ -4926,22 +4935,144 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun ensureChatModelLoaded(): Boolean {
         if (chatModelLoaded) return true
+        val config = readChatModelConfig() ?: return false
+        val modelPath = ensureChatModelAvailable(config.first) ?: return false
         return withContext(Dispatchers.IO) {
-            try {
-                val configText = assets.open("mlc-app-config.json").bufferedReader().use { it.readText() }
-                val root = JSONObject(configText)
-                val model = root.optJSONArray("model_list")?.optJSONObject(0)
-                val modelUrl = model?.optString("model_url").orEmpty()
-                val modelLib = model?.optString("model_lib").orEmpty()
-                if (modelUrl.isBlank() || modelLib.isBlank()) return@withContext false
-                mlcEngine.reload(modelUrl, modelLib)
+            runCatching {
+                mlcEngine.reload(modelPath, config.second)
                 chatModelLoaded = true
                 true
-            } catch (e: Exception) {
-                Log.e("Chat", "Unable to load model", e)
-                false
-            }
+            }.onFailure { Log.e("Chat", "Unable to load model", it) }.getOrDefault(false)
         }
+    }
+
+    private fun readChatModelConfig(): Pair<String, String>? {
+        return runCatching {
+            val configText = assets.open("mlc-app-config.json").bufferedReader().use { it.readText() }
+            val root = JSONObject(configText)
+            val model = root.optJSONArray("model_list")?.optJSONObject(0)
+            val modelUrl = model?.optString("model_url").orEmpty()
+            val modelLib = model?.optString("model_lib").orEmpty()
+            if (modelUrl.isBlank() || modelLib.isBlank()) null else modelUrl to modelLib
+        }.getOrNull()
+    }
+
+    private suspend fun ensureChatModelAvailable(modelUrl: String): String? {
+        val uri = Uri.parse(modelUrl)
+        if (uri.scheme.isNullOrBlank() || uri.scheme.equals("file", true)) {
+            return modelUrl
+        }
+        if (uri.scheme?.startsWith("http") == true) {
+            val targetDir = File(getExternalFilesDir(null) ?: filesDir, "mlc/models")
+            val fileName = uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "mlc-model.bin"
+            val targetFile = File(targetDir, fileName)
+            if (targetFile.exists()) return targetFile.absolutePath
+            return promptForModelDownload(modelUrl, targetFile)
+        }
+        return modelUrl
+    }
+
+    private suspend fun promptForModelDownload(modelUrl: String, targetFile: File): String? {
+        return suspendCancellableCoroutine { continuation ->
+            val dialogView = layoutInflater.inflate(R.layout.dialog_model_download, null)
+            val description = dialogView.findViewById<TextView>(R.id.modelDownloadDescription)
+            val progress = dialogView.findViewById<LinearProgressIndicator>(R.id.modelDownloadProgress)
+            val status = dialogView.findViewById<TextView>(R.id.modelDownloadStatus)
+            val confirm = dialogView.findViewById<MaterialButton>(R.id.modelDownloadConfirm)
+            val cancel = dialogView.findViewById<MaterialButton>(R.id.modelDownloadCancel)
+
+            description.text = getString(R.string.chat_model_download_description, modelUrl)
+            progress.isIndeterminate = true
+            progress.progress = 0
+            status.text = getString(R.string.chat_model_download_pending)
+
+            var resolved = false
+            var downloadJob: Job? = null
+
+            fun resolve(path: String?) {
+                if (resolved) return
+                resolved = true
+                if (continuation.isActive) continuation.resume(path) {}
+            }
+
+            fun startDownload() {
+                confirm.isEnabled = false
+                cancel.isEnabled = false
+                status.text = getString(R.string.chat_model_download_progress)
+                progress.isIndeterminate = true
+                progress.progress = 0
+                downloadJob = lifecycleScope.launch(Dispatchers.IO) {
+                    val success = downloadModel(modelUrl, targetFile) { downloaded, total ->
+                        val percent = if (total > 0) ((downloaded.toDouble() / total) * 100).toInt() else null
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            if (percent != null) {
+                                progress.isIndeterminate = false
+                                progress.setProgressCompat(percent.coerceIn(0, 100), true)
+                                status.text = getString(R.string.chat_model_download_percent, percent)
+                            } else {
+                                progress.isIndeterminate = true
+                                status.text = getString(R.string.chat_model_download_progress)
+                            }
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        resolve(if (success) targetFile.absolutePath else null)
+                        chatModelDownloadDialog?.dismiss()
+                    }
+                }
+                continuation.invokeOnCancellation {
+                    downloadJob?.cancel()
+                    chatModelDownloadDialog?.dismiss()
+                }
+            }
+
+            chatModelDownloadDialog = MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.chat_model_download_title)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create()
+                .also { dialog ->
+                    dialog.setOnDismissListener {
+                        chatModelDownloadDialog = null
+                        if (!resolved) resolve(null)
+                    }
+                    confirm.setOnClickListener { startDownload() }
+                    cancel.setOnClickListener {
+                        dialog.dismiss()
+                        resolve(null)
+                    }
+                    dialog.show()
+                }
+        }
+    }
+
+    private suspend fun downloadModel(url: String, target: File, onProgress: (downloaded: Long, total: Long) -> Unit): Boolean {
+        return runCatching {
+            target.parentFile?.mkdirs()
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 15000
+            connection.readTimeout = 20000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+            val total = connection.contentLengthLong.takeIf { it > 0 } ?: -1L
+            connection.inputStream.use { input ->
+                FileOutputStream(target).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var downloaded = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        onProgress(downloaded, total)
+                    }
+                }
+            }
+            true
+        }.onFailure {
+            Log.e("Chat", "Model download failed", it)
+            target.delete()
+        }.getOrDefault(false)
     }
 
     private fun clearChatHistory() {
