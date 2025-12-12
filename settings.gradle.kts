@@ -21,3 +21,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "TimescapeDemo"
 include(":app")
+include(":mlc4j")                         // ← add this
+
+project(":mlc4j").projectDir = file("mlc4j")  // ← and this

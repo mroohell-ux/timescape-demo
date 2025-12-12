@@ -41,6 +41,7 @@ android {
 
 
 dependencies {
+    implementation(project(":mlc4j"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
