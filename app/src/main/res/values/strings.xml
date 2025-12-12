@@ -5,6 +5,12 @@
     <string name="dialog_save">Save</string>
     <string name="dialog_title_hint">Title (optional)</string>
     <string name="dialog_snippet_hint">Details</string>
+    <string name="chat_title">Local chat</string>
+    <string name="chat_input_hint">Message the local model</string>
+    <string name="chat_action_send">Send</string>
+    <string name="menu_close_chat">Close chat</string>
+    <string name="snackbar_chat_cleared">Chat history cleared.</string>
+    <string name="snackbar_chat_model_error">Couldnt start the chat right now.</string>
     <string name="dialog_text_color_label">Text color</string>
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
