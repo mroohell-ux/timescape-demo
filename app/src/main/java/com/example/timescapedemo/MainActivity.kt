@@ -4815,10 +4815,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        companion object {
-            private const val VIEW_TYPE_CHAT = 0
-            private const val VIEW_TYPE_FLOW = 1
-        }
     }
 
     private fun setupChatPage(
@@ -5186,6 +5182,8 @@ private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
 private const val CHAT_PAGE_INDEX = 0
+private const val VIEW_TYPE_CHAT = 0
+private const val VIEW_TYPE_FLOW = 1
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
