@@ -5001,17 +5001,33 @@ class MainActivity : AppCompatActivity() {
                 status.text = getString(R.string.chat_model_download_progress)
                 progress.isIndeterminate = true
                 progress.progress = 0
+                val startTime = SystemClock.elapsedRealtime()
                 downloadJob = lifecycleScope.launch(Dispatchers.IO) {
                     val success = downloadModel(modelUrl, targetFile) { downloaded, total ->
                         val percent = if (total > 0) ((downloaded.toDouble() / total) * 100).toInt() else null
+                        val elapsedMs = (SystemClock.elapsedRealtime() - startTime).coerceAtLeast(1)
+                        val speedPerSec = downloaded * 1000 / elapsedMs
+                        val downloadedText = formatBytes(downloaded)
+                        val totalText = if (total > 0) formatBytes(total) else getString(R.string.chat_model_download_total_unknown)
+                        val speedText = formatBytes(speedPerSec) + "/s"
                         lifecycleScope.launch(Dispatchers.Main) {
                             if (percent != null) {
                                 progress.isIndeterminate = false
                                 progress.setProgressCompat(percent.coerceIn(0, 100), true)
-                                status.text = getString(R.string.chat_model_download_percent, percent)
+                                status.text = getString(
+                                    R.string.chat_model_download_percent_with_stats,
+                                    percent,
+                                    downloadedText,
+                                    totalText,
+                                    speedText
+                                )
                             } else {
                                 progress.isIndeterminate = true
-                                status.text = getString(R.string.chat_model_download_progress)
+                                status.text = getString(
+                                    R.string.chat_model_download_progress_with_stats,
+                                    downloadedText,
+                                    speedText
+                                )
                             }
                         }
                     }
@@ -5073,6 +5089,14 @@ class MainActivity : AppCompatActivity() {
             Log.e("Chat", "Model download failed", it)
             target.delete()
         }.getOrDefault(false)
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt()
+        val value = bytes / Math.pow(1024.0, digitGroups.toDouble())
+        return String.format(Locale.getDefault(), "%.1f %s", value, units[digitGroups])
     }
 
     private fun clearChatHistory() {

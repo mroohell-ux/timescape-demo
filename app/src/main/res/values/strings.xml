@@ -15,7 +15,9 @@
     <string name="chat_model_download_description">Download the local model from %1$s?</string>
     <string name="chat_model_download_pending">Waiting for your confirmation…</string>
     <string name="chat_model_download_progress">Preparing download…</string>
-    <string name="chat_model_download_percent">Downloading: %1$d%%</string>
+    <string name="chat_model_download_percent_with_stats">Downloading: %1$d%% (%2$s / %3$s, %4$s)</string>
+    <string name="chat_model_download_progress_with_stats">Downloading: %1$s (%2$s)</string>
+    <string name="chat_model_download_total_unknown">Unknown size</string>
     <string name="chat_model_download_confirm">Download</string>
     <string name="chat_model_download_cancel">Cancel</string>
     <string name="dialog_text_color_label">Text color</string>
