@@ -4936,6 +4936,10 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun ensureChatModelLoaded(): Boolean {
         if (chatModelLoaded) return true
+        if (!deviceSupportsOpenCl()) {
+            snackbar(getString(R.string.snackbar_chat_model_no_opencl))
+            return false
+        }
         val config = readChatModelConfig() ?: return false
         val modelPath = ensureChatModelAvailable(config.first) ?: return false
         return withContext(Dispatchers.IO) {
@@ -4944,6 +4948,20 @@ class MainActivity : AppCompatActivity() {
                 chatModelLoaded = true
                 true
             }.onFailure { Log.e("Chat", "Unable to load model", it) }.getOrDefault(false)
+        }
+    }
+
+    private val openClSupport by lazy { detectOpenClSupport() }
+
+    private fun deviceSupportsOpenCl(): Boolean = openClSupport
+
+    private fun detectOpenClSupport(): Boolean {
+        return runCatching {
+            System.loadLibrary("OpenCL")
+            true
+        }.getOrElse {
+            Log.w("Chat", "OpenCL runtime not available; skipping GPU model load", it)
+            false
         }
     }
 

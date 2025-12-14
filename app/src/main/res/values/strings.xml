@@ -11,6 +11,7 @@
     <string name="menu_close_chat">Close chat</string>
     <string name="snackbar_chat_cleared">Chat history cleared.</string>
     <string name="snackbar_chat_model_error">Couldnt start the chat right now.</string>
+    <string name="snackbar_chat_model_no_opencl">Device lacks OpenCL support required by this model.</string>
     <string name="chat_model_download_title">Download local model</string>
     <string name="chat_model_download_description">Download the local model from %1$s?</string>
     <string name="chat_model_download_pending">Waiting for your confirmation…</string>
