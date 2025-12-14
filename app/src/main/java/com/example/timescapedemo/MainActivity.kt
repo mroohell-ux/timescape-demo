@@ -4964,10 +4964,21 @@ class MainActivity : AppCompatActivity() {
         }
         if (uri.scheme?.startsWith("http") == true) {
             val targetDir = File(getExternalFilesDir(null) ?: filesDir, "mlc/models")
-            val fileName = uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "mlc-model.bin"
-            val targetFile = File(targetDir, fileName)
+            val likelyRepoName = uri.lastPathSegment?.takeIf { it.isNotBlank() }
+            val hasExplicitFile = likelyRepoName?.contains('.') == true
+            val resolvedUrl = if (hasExplicitFile) {
+                modelUrl
+            } else {
+                modelUrl.trimEnd('/') + "/resolve/main/mlc-chat-config.json"
+            }
+            val targetFile = if (hasExplicitFile) {
+                File(targetDir, likelyRepoName ?: "mlc-model.bin")
+            } else {
+                val repoDir = File(targetDir, likelyRepoName ?: "mlc-model")
+                File(repoDir, "mlc-chat-config.json")
+            }
             if (targetFile.exists()) return targetFile.absolutePath
-            return promptForModelDownload(modelUrl, targetFile)
+            return promptForModelDownload(resolvedUrl, targetFile)
         }
         return modelUrl
     }
