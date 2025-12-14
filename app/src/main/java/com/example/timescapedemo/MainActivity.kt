@@ -5091,6 +5091,10 @@ class MainActivity : AppCompatActivity() {
             connection.readTimeout = 20000
             connection.instanceFollowRedirects = true
             connection.connect()
+            val responseCode = runCatching { connection.responseCode }.getOrNull() ?: -1
+            if (responseCode !in 200..299) {
+                throw IOException("HTTP $responseCode for $url")
+            }
             val total = connection.contentLengthLong.takeIf { it > 0 } ?: -1L
             connection.inputStream.use { input ->
                 FileOutputStream(target).use { output ->
@@ -5105,10 +5109,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+            if (!target.exists() || target.length() == 0L) {
+                throw IOException("Empty download for $url")
+            }
             true
         }.onFailure {
             Log.e("Chat", "Model download failed", it)
             target.delete()
+            false
         }.getOrDefault(false)
     }
 
