@@ -5013,6 +5013,7 @@ class MainActivity : AppCompatActivity() {
             if (targetFile.exists() && targetFile.isFile && targetFile.length() > 0) {
                 if (!hasExplicitFile) {
                     if (!ensureTensorCache(modelUrl, repoDir!!)) return null
+                    if (!ensureRepoAssetsFromConfig(modelUrl, repoDir, targetFile)) return null
                 }
                 return resolvedPath
             }
@@ -5021,7 +5022,9 @@ class MainActivity : AppCompatActivity() {
             }
             if (promptForModelDownload(resolvedUrl, targetFile) == null) return null
             if (!hasExplicitFile) {
-                if (!ensureTensorCache(modelUrl, repoDir ?: targetDir)) return null
+                val repoRoot = repoDir ?: targetDir
+                if (!ensureTensorCache(modelUrl, repoRoot)) return null
+                if (!ensureRepoAssetsFromConfig(modelUrl, repoRoot, targetFile)) return null
             }
             return resolvedPath
         }
@@ -5052,6 +5055,42 @@ class MainActivity : AppCompatActivity() {
         repoDir.mkdirs()
         val cacheUrl = repoUrl.trimEnd('/') + "/resolve/main/tensor-cache.json"
         return promptForModelDownload(cacheUrl, tensorCache) != null
+    }
+
+    private suspend fun ensureRepoAssetsFromConfig(repoUrl: String, repoDir: File, configFile: File): Boolean {
+        if (!configFile.exists() || !configFile.isFile || configFile.length() == 0L) return false
+        val relativeAssets = runCatching {
+            val text = configFile.readText()
+            val json = JSONObject(text)
+            collectRelativeAssets(json)
+        }.getOrElse { emptySet() }
+        if (relativeAssets.isEmpty()) return true
+        val baseUrl = repoUrl.trimEnd('/') + "/resolve/main/"
+        for (asset in relativeAssets) {
+            val target = File(repoDir, asset)
+            if (target.exists() && target.length() > 0) continue
+            if (target.exists()) target.delete()
+            target.parentFile?.mkdirs()
+            val url = baseUrl + asset
+            if (promptForModelDownload(url, target) == null) return false
+        }
+        return true
+    }
+
+    private fun collectRelativeAssets(value: Any?): Set<String> {
+        return when (value) {
+            is JSONObject -> value.keys().asSequence().flatMap { collectRelativeAssets(value.opt(it)).asSequence() }.toSet()
+            is JSONArray -> (0 until value.length()).asSequence().flatMap { collectRelativeAssets(value.opt(it)).asSequence() }.toSet()
+            is String -> {
+                val v = value.trim()
+                if (v.isEmpty()) emptySet() else {
+                    val looksRemote = v.contains("://")
+                    val isAbsolute = v.startsWith("/")
+                    if (looksRemote || isAbsolute) emptySet() else setOf(v.removePrefix("./"))
+                }
+            }
+            else -> emptySet()
+        }
     }
 
     private suspend fun promptForModelDownload(modelUrl: String, targetFile: File): String? {
