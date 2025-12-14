@@ -5090,6 +5090,8 @@ class MainActivity : AppCompatActivity() {
         return ensureJsonReferencedAssets(repoUrl, repoDir, configFile)
     }
 
+    private fun repoDownloadMarker(repoDir: File): File = File(repoDir, ".download_complete")
+
     private suspend fun ensureJsonReferencedAssets(repoUrl: String, repoDir: File, jsonFile: File): Boolean {
         if (!jsonFile.exists() || !jsonFile.isFile || jsonFile.length() == 0L) return false
         val relativeAssets = runCatching {
@@ -5099,26 +5101,42 @@ class MainActivity : AppCompatActivity() {
         }.getOrElse { emptySet() }
         if (relativeAssets.isEmpty()) return true
         val baseUrl = repoUrl.trimEnd('/') + "/resolve/main/"
-        val missingAssets = findMissingRepoAssets(relativeAssets, baseUrl, repoDir)
-        if (missingAssets.isEmpty()) return true
-        return promptForRepoAssetsDownload(baseUrl, repoDir, missingAssets)
+        val marker = repoDownloadMarker(repoDir)
+        val missingAssets = findMissingRepoAssets(relativeAssets, baseUrl, repoDir, marker.exists())
+        if (missingAssets.isEmpty()) {
+            if (!marker.exists()) marker.writeText("ok")
+            return true
+        }
+        val downloaded = promptForRepoAssetsDownload(baseUrl, repoDir, missingAssets)
+        if (downloaded) {
+            if (!marker.exists()) marker.writeText("ok")
+        }
+        return downloaded
     }
 
-    private fun findMissingRepoAssets(relativeAssets: Set<String>, baseUrl: String, repoDir: File): List<String> {
+    private fun findMissingRepoAssets(
+        relativeAssets: Set<String>,
+        baseUrl: String,
+        repoDir: File,
+        skipRemoteChecks: Boolean
+    ): List<String> {
         if (relativeAssets.isEmpty()) return emptyList()
         return relativeAssets.mapNotNull { asset ->
             val target = File(repoDir, asset)
             when {
-                target.exists() && target.length() > 0 -> {
-                    val remoteSize = remoteContentLength(baseUrl + asset)
-                    if (remoteSize != null && remoteSize != target.length()) {
-                        Log.w("Chat", "Asset size mismatch for $asset; expected $remoteSize, found ${target.length()}. Redownloading.")
-                        target.delete()
-                        asset
-                    } else {
+                target.exists() && target.length() > 0 ->
+                    if (skipRemoteChecks) {
                         null
+                    } else {
+                        val remoteSize = remoteContentLength(baseUrl + asset)
+                        if (remoteSize != null && remoteSize != target.length()) {
+                            Log.w("Chat", "Asset size mismatch for $asset; expected $remoteSize, found ${target.length()}. Redownloading.")
+                            target.delete()
+                            asset
+                        } else {
+                            null
+                        }
                     }
-                }
                 else -> {
                     if (target.exists()) target.delete()
                     target.parentFile?.mkdirs()
