@@ -4952,6 +4952,7 @@ class MainActivity : AppCompatActivity() {
         return withContext(Dispatchers.IO) {
             runCatching {
                 mlcEngine.reload(modelPath, config.second)
+                Log.i("Chat", "MLC engine loaded with GPU backend (OpenCL); modelPath=$modelPath, modelLib=${config.second}")
                 chatModelLoaded = true
                 true
             }.onFailure { Log.e("Chat", "Unable to load model", it) }.getOrDefault(false)
@@ -4965,6 +4966,7 @@ class MainActivity : AppCompatActivity() {
     private fun detectOpenClSupport(): Boolean {
         return runCatching {
             System.loadLibrary("OpenCL")
+            Log.i("Chat", "OpenCL runtime detected; attempting GPU-backed chat model")
             true
         }.getOrElse {
             Log.w("Chat", "OpenCL runtime not available; skipping GPU model load", it)
@@ -4979,6 +4981,7 @@ class MainActivity : AppCompatActivity() {
             val model = root.optJSONArray("model_list")?.optJSONObject(0)
             val modelUrl = model?.optString("model_url").orEmpty()
             val modelLib = model?.optString("model_lib").orEmpty()
+            Log.i("Chat", "Chat model config loaded; backend=OpenCL, modelUrl=$modelUrl, modelLib=$modelLib")
             if (modelUrl.isBlank() || modelLib.isBlank()) null else modelUrl to modelLib
         }.getOrNull()
     }
