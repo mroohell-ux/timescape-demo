@@ -4936,10 +4936,10 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun ensureChatModelLoaded(): Boolean {
         if (chatModelLoaded) return true
-        if (!deviceSupportsOpenCl()) {
-            snackbar(getString(R.string.snackbar_chat_model_no_opencl))
-            return false
-        }
+//        if (!deviceSupportsOpenCl()) {
+//            snackbar(getString(R.string.snackbar_chat_model_no_opencl))
+//            return false
+//        }
         val config = readChatModelConfig() ?: return false
         val modelPath = ensureChatModelAvailable(config.first) ?: return false
         return withContext(Dispatchers.IO) {
