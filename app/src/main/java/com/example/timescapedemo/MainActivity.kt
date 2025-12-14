@@ -4977,7 +4977,17 @@ class MainActivity : AppCompatActivity() {
                 val repoDir = File(targetDir, likelyRepoName ?: "mlc-model")
                 File(repoDir, "mlc-chat-config.json")
             }
-            if (targetFile.exists()) return targetFile.absolutePath
+            // If a previous attempt created a conflicting file where a directory should be, clean it up.
+            targetFile.parentFile?.let { parent ->
+                if (parent.exists() && parent.isFile) {
+                    parent.delete()
+                }
+                parent.mkdirs()
+            }
+            if (targetFile.exists() && targetFile.isFile && targetFile.length() > 0) return targetFile.absolutePath
+            if (targetFile.exists()) {
+                if (targetFile.isDirectory) targetFile.deleteRecursively() else targetFile.delete()
+            }
             return promptForModelDownload(resolvedUrl, targetFile)
         }
         return modelUrl
