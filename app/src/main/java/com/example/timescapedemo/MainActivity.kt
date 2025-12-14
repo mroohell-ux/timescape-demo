@@ -1,5 +1,9 @@
 package com.example.timescapedemo
 
+import ai.mlc.mlcllm.MLCEngine
+import ai.mlc.mlcllm.OpenAIProtocol.ChatCompletionMessage
+import ai.mlc.mlcllm.OpenAIProtocol.ChatCompletionRole
+import ai.mlc.mlcllm.OpenAIProtocol.StreamOptions
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipDescription
@@ -15,9 +19,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -57,10 +64,12 @@ import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
 import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -70,15 +79,19 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
-import java.io.FileNotFoundException
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -90,14 +103,16 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
-import android.util.Log
+import kotlin.coroutines.resume
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 class MainActivity : AppCompatActivity() {
 
@@ -144,6 +159,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var imagesAdapter: SelectedImagesAdapter
     private lateinit var flowAdapter: FlowPagerAdapter
+
+    private val chatMessages: MutableList<ChatMessage> = mutableListOf()
+    private var chatAdapter: ChatMessageAdapter? = null
+    private var chatRecycler: RecyclerView? = null
+    private var chatInput: EditText? = null
+    private var chatSendButton: MaterialButton? = null
+    private var chatStreamingJob: Job? = null
+    private var chatModelLoaded: Boolean = false
+    private var chatModelDownloadDialog: AlertDialog? = null
+    private val mlcEngine: MLCEngine by lazy { MLCEngine() }
 
     private val selectedImages: MutableList<BgImage> = mutableListOf()
     private val flows: MutableList<CardFlow> = mutableListOf()
@@ -487,14 +512,16 @@ class MainActivity : AppCompatActivity() {
         applyAppBackground()
 
         flowAdapter.notifyDataSetChanged()
-        val initialIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
-        if (flowPager.currentItem != initialIndex) {
-            flowPager.setCurrentItem(initialIndex, false)
+        val initialFlowIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
+        val initialPagerIndex = if (flows.isEmpty()) CHAT_PAGE_INDEX else flowIndexToPagerPosition(initialFlowIndex)
+        if (flowPager.currentItem != initialPagerIndex) {
+            flowPager.setCurrentItem(initialPagerIndex, false)
         }
-        selectedFlowIndex = initialIndex
-        renderFlowChips(initialIndex)
-        updateChipSelection(initialIndex)
+        selectedFlowIndex = initialFlowIndex
+        renderFlowChips(initialFlowIndex)
+        updateChipSelection(if (flows.isEmpty()) -1 else initialFlowIndex)
         updateToolbarSubtitle()
+        updateMenuVisibilityForPage(isChatPage(initialPagerIndex))
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -538,6 +565,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun flowIndexToPagerPosition(flowIndex: Int): Int = flowIndex + 1
+
+    private fun pagerPositionToFlowIndex(position: Int): Int = position - 1
+
+    private fun isChatPage(position: Int): Boolean = position == CHAT_PAGE_INDEX
+
     private fun setupFlowPager() {
         val density = resources.displayMetrics.density
         flowPager.adapter = flowAdapter
@@ -557,11 +590,19 @@ class MainActivity : AppCompatActivity() {
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
-                selectedFlowIndex = position
-                prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, position).apply()
-                updateChipSelection(position)
+                val isChatPage = isChatPage(position)
+                if (isChatPage) {
+                    updateChipSelection(-1)
+                } else {
+                    val flowIndex = pagerPositionToFlowIndex(position).coerceIn(0, max(0, flows.lastIndex))
+                    selectedFlowIndex = flowIndex
+                    prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, flowIndex).apply()
+                    updateChipSelection(flowIndex)
+                }
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
+                updateMenuVisibilityForPage(isChatPage)
+                updateFlowBarVisibility(isChatPage)
             }
         })
         flowPager.setOnDragListener { _, event ->
@@ -574,6 +615,7 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
         setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
+        updateMenuVisibilityForPage(isChatPage(flowPager.currentItem))
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
@@ -582,6 +624,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_image_card -> { showAddImageCardDialog(); true }
                 R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
+                R.id.action_close_chat -> { clearChatHistory(); true }
                 else -> false
             }
         }
@@ -698,6 +741,27 @@ class MainActivity : AppCompatActivity() {
         searchResultEntries = emptyList()
     }
 
+    private fun updateMenuVisibilityForPage(isChatPage: Boolean = isChatPage(flowPager.currentItem)) {
+        val flowMenuItems = listOf(
+            R.id.action_search_cards,
+            R.id.action_shuffle_cards,
+            R.id.action_export_flow,
+            R.id.action_add_card,
+            R.id.action_add_image_card,
+            R.id.action_add_handwriting,
+            R.id.action_add_flow,
+        )
+        val closeItem = toolbar.menu.findItem(R.id.action_close_chat)
+        closeItem?.isVisible = isChatPage
+        flowMenuItems.forEach { id ->
+            toolbar.menu.findItem(id)?.isVisible = !isChatPage
+        }
+        if (isChatPage) {
+            searchMenuItem?.collapseActionView()
+        }
+        updateFlowBarVisibility(isChatPage)
+    }
+
     private fun updateFlowSearchResults(restoreStateWhenCleared: Boolean) {
         val normalized = flowSearchQueryNormalized
         val flow = currentFlow() ?: return
@@ -713,7 +777,7 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
-            if (index >= 0) flowAdapter.notifyItemChanged(index)
+            if (index >= 0) flowAdapter.notifyItemChanged(flowIndexToPagerPosition(index))
         }
     }
 
@@ -871,7 +935,7 @@ class MainActivity : AppCompatActivity() {
         flow.lastViewedCardIndex = cardIndex
         flow.lastViewedCardId = cardId
         flow.lastViewedCardFocused = true
-        flowPager.setCurrentItem(flowIndex, false)
+        flowPager.setCurrentItem(flowIndexToPagerPosition(flowIndex), false)
         val controller = flowControllers[flowId]
         if (controller != null) {
             controller.updateDisplayedCards(
@@ -882,7 +946,7 @@ class MainActivity : AppCompatActivity() {
             )
             controller.restoreState(flow)
         } else {
-            flowAdapter.notifyItemChanged(flowIndex)
+            flowAdapter.notifyItemChanged(flowIndexToPagerPosition(flowIndex))
         }
         flowPager.post {
             flowControllers[flowId]?.restoreState(flow)
@@ -891,7 +955,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateToolbarSubtitle() {
-        toolbar.subtitle = ""
+        toolbar.subtitle = if (isChatPage(flowPager.currentItem)) {
+            getString(R.string.chat_title)
+        } else {
+            ""
+        }
     }
 
     private fun expandSearchViewToToolbarWidth(view: SearchView) {
@@ -934,6 +1002,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateShuffleMenuState() {
         val menuItem = toolbar.menu.findItem(R.id.action_shuffle_cards) ?: return
+        val onChatPage = isChatPage(flowPager.currentItem)
+        menuItem.isVisible = !onChatPage
+        if (onChatPage) return
         val flow = currentFlow()
         val isShuffled = flow?.let { flowShuffleStates.containsKey(it.id) } == true
         menuItem.isCheckable = true
@@ -948,7 +1019,9 @@ class MainActivity : AppCompatActivity() {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
             chip.isChecked = i == position
         }
-        centerSelectedChip(position)
+        if (position >= 0) {
+            centerSelectedChip(position)
+        }
     }
 
     private fun handleFlowChipTap(flowId: Long, index: Int) {
@@ -961,7 +1034,7 @@ class MainActivity : AppCompatActivity() {
             val targetIndex = flows.indexOfFirst { it.id == flowId }
             if (targetIndex >= 0) showFlowActionsDialog(targetIndex)
         } else {
-            flowPager.setCurrentItem(index, true)
+            flowPager.setCurrentItem(flowIndexToPagerPosition(index), true)
         }
     }
 
@@ -1034,8 +1107,8 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(safeIndex)
     }
 
-    private fun updateFlowBarVisibility() {
-        flowBar.isVisible = flows.size > 1
+    private fun updateFlowBarVisibility(isChatPage: Boolean = isChatPage(flowPager.currentItem)) {
+        flowBar.isVisible = !isChatPage && flows.size > 1
     }
 
     private fun resetFlowChipDragState() {
@@ -1126,11 +1199,12 @@ class MainActivity : AppCompatActivity() {
         if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
         val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
         val currentIndex = flowPager.currentItem
+        val maxPagerIndex = flowIndexToPagerPosition(flows.lastIndex)
         val targetIndex = when {
-            positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
-            positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
+            positionX > width - edgeThreshold && currentIndex < maxPagerIndex -> currentIndex + 1
+            positionX < edgeThreshold && currentIndex > flowIndexToPagerPosition(0) -> currentIndex - 1
             else -> null
-        } ?: return
+        }?.takeIf { it != CHAT_PAGE_INDEX } ?: return
         flowPager.setCurrentItem(targetIndex, true)
         lastCardMovePagerSwitchTime = now
     }
@@ -1164,13 +1238,13 @@ class MainActivity : AppCompatActivity() {
         flowControllers.remove(sourceId)?.dispose()
         flows.removeAt(sourceIndex)
         updateFlowBarVisibility()
-        flowAdapter.notifyItemRemoved(sourceIndex)
+        flowAdapter.notifyItemRemoved(flowIndexToPagerPosition(sourceIndex))
         val newTargetIndex = flows.indexOfFirst { it.id == targetId }.coerceAtLeast(0)
-        flowAdapter.notifyItemChanged(newTargetIndex)
+        flowAdapter.notifyItemChanged(flowIndexToPagerPosition(newTargetIndex))
         refreshFlow(targetFlow)
         selectedFlowIndex = newTargetIndex
         renderFlowChips(newTargetIndex)
-        flowPager.setCurrentItem(newTargetIndex, false)
+        flowPager.setCurrentItem(flowIndexToPagerPosition(newTargetIndex), false)
         updateToolbarSubtitle()
         updateShuffleMenuState()
         saveState()
@@ -1252,7 +1326,7 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
-            if (index >= 0) flowAdapter.notifyItemChanged(index)
+            if (index >= 0) flowAdapter.notifyItemChanged(flowIndexToPagerPosition(index))
         }
 
         updateShuffleMenuState()
@@ -1308,10 +1382,10 @@ class MainActivity : AppCompatActivity() {
         val flow = CardFlow(id = nextFlowId++, name = name)
         flows += flow
         updateFlowBarVisibility()
-        flowAdapter.notifyItemInserted(flows.lastIndex)
+        flowAdapter.notifyItemInserted(flowIndexToPagerPosition(flows.lastIndex))
         selectedFlowIndex = flows.lastIndex
         renderFlowChips(selectedFlowIndex)
-        flowPager.setCurrentItem(flows.lastIndex, true)
+        flowPager.setCurrentItem(flowIndexToPagerPosition(flows.lastIndex), true)
         updateToolbarSubtitle()
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
@@ -1392,13 +1466,14 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_cannot_delete_last_flow))
             return
         }
-        val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
+        val currentItem = pagerPositionToFlowIndex(flowPager.currentItem)
+            .coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
         updateFlowBarVisibility()
         flowShuffleStates.remove(removed.id)
         removed.cards.forEach(::disposeCardResources)
         flowControllers.remove(removed.id)
-        flowAdapter.notifyItemRemoved(index)
+        flowAdapter.notifyItemRemoved(flowIndexToPagerPosition(index))
         val remainingLastIndex = flows.lastIndex
         if (remainingLastIndex < 0) {
             selectedFlowIndex = 0
@@ -1416,14 +1491,14 @@ class MainActivity : AppCompatActivity() {
         val safeTarget = target.coerceIn(0, remainingLastIndex)
         selectedFlowIndex = safeTarget
         renderFlowChips(safeTarget)
-        flowPager.setCurrentItem(safeTarget, false)
+        flowPager.setCurrentItem(flowIndexToPagerPosition(safeTarget), false)
         updateToolbarSubtitle()
         updateShuffleMenuState()
         saveState()
         snackbar(getString(R.string.snackbar_deleted_flow, removed.name))
     }
 
-    private fun currentFlow(): CardFlow? = flows.getOrNull(flowPager.currentItem)
+    private fun currentFlow(): CardFlow? = flows.getOrNull(pagerPositionToFlowIndex(flowPager.currentItem))
 
     private fun currentController(): FlowPageController? {
         val flow = currentFlow() ?: return null
@@ -1483,7 +1558,7 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
-            if (index >= 0) flowAdapter.notifyItemChanged(index)
+            if (index >= 0) flowAdapter.notifyItemChanged(flowIndexToPagerPosition(index))
         }
         if (flow == currentFlow()) {
             updateShuffleMenuState()
@@ -3897,7 +3972,7 @@ class MainActivity : AppCompatActivity() {
                 flows += newFlow
             }
             val insertedFlows = payload.flows.size
-            flowAdapter.notifyItemRangeInserted(baseIndex, insertedFlows)
+            flowAdapter.notifyItemRangeInserted(flowIndexToPagerPosition(baseIndex), insertedFlows)
             renderFlowChips(selectedFlowIndex.coerceIn(0, flows.lastIndex))
             updateToolbarSubtitle()
             updateShuffleMenuState()
@@ -4564,7 +4639,7 @@ class MainActivity : AppCompatActivity() {
             else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
-            val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
+            val currentIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
@@ -4604,45 +4679,78 @@ class MainActivity : AppCompatActivity() {
         return getString(R.string.default_flow_name, baseName)
     }
 
-    private inner class FlowPagerAdapter : RecyclerView.Adapter<FlowPagerAdapter.FlowVH>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
-            val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
-            val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
-            val layoutManager = createLayoutManager()
-            recycler.layoutManager = layoutManager
-            recycler.setHasFixedSize(true)
-            recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+    private inner class FlowPagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-            lateinit var holder: FlowVH
-            val adapter = CardsAdapter(
-                cardTint,
-                onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
-                    holder.onCardDoubleTapped(card, index) },
-                onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
-                onTitleSpeakClick = { card -> speakCardTitle(card) }
-            )
-            adapter.setBodyTextSize(cardFontSizeSp)
-            adapter.setBodyTypeface(cardTypeface)
-            recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
-            return holder
+        override fun getItemViewType(position: Int): Int {
+            return if (isChatPage(position)) VIEW_TYPE_CHAT else VIEW_TYPE_FLOW
         }
 
-        override fun onBindViewHolder(holder: FlowVH, position: Int) {
-            val flow = flows[position]
-            holder.bind(flow)
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            return if (viewType == VIEW_TYPE_CHAT) {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.page_chat_llm, parent, false)
+                val recycler = view.findViewById<RecyclerView>(R.id.recyclerChat)
+                val input = view.findViewById<EditText>(R.id.chatInput)
+                val sendButton = view.findViewById<MaterialButton>(R.id.chatSendButton)
+                setupChatPage(recycler, input, sendButton)
+                ChatVH(view)
+            } else {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.page_card_flow, parent, false)
+                val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
+                val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+                val layoutManager = createLayoutManager()
+                recycler.layoutManager = layoutManager
+                recycler.setHasFixedSize(true)
+                recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+
+                lateinit var holder: FlowVH
+                val adapter = CardsAdapter(
+                    cardTint,
+                    onItemClick = { index -> holder.onCardTapped(index) },
+                    onItemDoubleClick = { card, index ->
+                        Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
+                        holder.onCardDoubleTapped(card, index)
+                    },
+                    onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
+                    onTitleSpeakClick = { card -> speakCardTitle(card) }
+                )
+                adapter.setBodyTextSize(cardFontSizeSp)
+                adapter.setBodyTypeface(cardTypeface)
+                recycler.adapter = adapter
+                holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+                holder
+            }
         }
 
-        override fun getItemCount(): Int = flows.size
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            when (holder) {
+                is ChatVH -> holder.bind()
+                is FlowVH -> {
+                    val flowIndex = pagerPositionToFlowIndex(position)
+                    val flow = flows[flowIndex]
+                    holder.bind(flow)
+                }
+            }
+        }
 
-        override fun onViewRecycled(holder: FlowVH) {
-            holder.boundFlowId?.let {
-                persistControllerState(it)
-                flowControllers.remove(it)?.dispose()
+        override fun getItemCount(): Int = flows.size + 1
+
+        override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+            if (holder is FlowVH) {
+                holder.boundFlowId?.let {
+                    persistControllerState(it)
+                    flowControllers.remove(it)?.dispose()
+                }
             }
             super.onViewRecycled(holder)
+        }
+
+        inner class ChatVH(view: View) : RecyclerView.ViewHolder(view) {
+            fun bind() {
+                chatAdapter?.refresh()
+                scrollChatToBottom()
+            }
         }
 
         inner class FlowVH(
@@ -4694,7 +4802,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             fun onCardDoubleTapped(card: CardItem, index: Int) {
-                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val flowIndex = pagerPositionToFlowIndex(bindingAdapterPosition)
+                val flow = flows.getOrNull(flowIndex) ?: return
                 val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
                 if (cardIndex == -1) return
                 val targetCard = flow.cards[cardIndex]
@@ -4709,11 +4818,362 @@ class MainActivity : AppCompatActivity() {
             fun onCardLongPressed(index: Int, cardView: View): Boolean {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return false
                 if (!layoutManager.isFocused(index)) return false
-                val flow = flows.getOrNull(bindingAdapterPosition) ?: return false
+                val flowIndex = pagerPositionToFlowIndex(bindingAdapterPosition)
+                val flow = flows.getOrNull(flowIndex) ?: return false
                 val card = adapter.getItemAt(index) ?: return false
                 return startCardMoveDrag(cardView, flow, card)
             }
         }
+
+    }
+
+    private fun setupChatPage(
+        recycler: RecyclerView,
+        input: EditText,
+        sendButton: MaterialButton,
+    ) {
+        chatRecycler = recycler
+        chatInput = input
+        chatSendButton = sendButton
+        if (chatAdapter == null) {
+            chatAdapter = ChatMessageAdapter(chatMessages)
+        }
+        val layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        recycler.layoutManager = layoutManager
+        recycler.adapter = chatAdapter
+        recycler.itemAnimator = null
+        input.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                refreshSendButtonState()
+            }
+
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        })
+        sendButton.setOnClickListener { sendChatFromInput() }
+        refreshSendButtonState()
+        scrollChatToBottom()
+    }
+
+    private fun refreshSendButtonState() {
+        val readyToSend = chatInput?.text?.isNotBlank() == true
+        val streaming = chatStreamingJob?.isActive == true
+        chatSendButton?.isEnabled = readyToSend && !streaming
+    }
+
+    private fun scrollChatToBottom() {
+        val recycler = chatRecycler ?: return
+        if (chatMessages.isEmpty()) return
+        recycler.post { recycler.scrollToPosition(chatMessages.lastIndex) }
+    }
+
+    private fun sendChatFromInput() {
+        val message = chatInput?.text?.toString()?.trim().orEmpty()
+        if (message.isBlank()) return
+        chatInput?.setText("")
+        appendChatMessage(ChatRole.USER, message)
+        streamAssistantResponse()
+    }
+
+    private fun appendChatMessage(role: ChatRole, content: String): ChatMessage {
+        val message = ChatMessage(role, content)
+        chatMessages.add(message)
+        chatAdapter?.refresh()
+        scrollChatToBottom()
+        return message
+    }
+
+    private fun streamAssistantResponse() {
+        chatStreamingJob?.cancel()
+        val assistantMessage = appendChatMessage(ChatRole.ASSISTANT, "")
+        chatStreamingJob = lifecycleScope.launch {
+            refreshSendButtonState()
+            val loaded = ensureChatModelLoaded()
+            if (!loaded) {
+                assistantMessage.content = getString(R.string.snackbar_chat_model_error)
+                chatAdapter?.refresh()
+                scrollChatToBottom()
+                chatStreamingJob = null
+                refreshSendButtonState()
+                return@launch
+            }
+            try {
+                val messages = chatMessages.map { message ->
+                    ChatCompletionMessage(
+                        role = if (message.role == ChatRole.USER) {
+                            ChatCompletionRole.user
+                        } else {
+                            ChatCompletionRole.assistant
+                        },
+                        content = message.content
+                    )
+                }
+                val channel = mlcEngine.chat.completions.create(
+                    messages = messages,
+                    stream = true,
+                    stream_options = StreamOptions()
+                )
+                for (chunk in channel) {
+                    val delta = chunk.choices.firstOrNull()?.delta?.content?.asText().orEmpty()
+                    if (delta.isNotEmpty()) {
+                        assistantMessage.content += delta
+                        chatAdapter?.refresh()
+                        scrollChatToBottom()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Chat", "Failed to stream response", e)
+                assistantMessage.content = getString(R.string.snackbar_chat_model_error)
+                chatAdapter?.refresh()
+            } finally {
+                chatStreamingJob = null
+                refreshSendButtonState()
+            }
+        }
+        refreshSendButtonState()
+    }
+
+    private suspend fun ensureChatModelLoaded(): Boolean {
+        if (chatModelLoaded) return true
+//        if (!deviceSupportsOpenCl()) {
+//            snackbar(getString(R.string.snackbar_chat_model_no_opencl))
+//            return false
+//        }
+        val config = readChatModelConfig() ?: return false
+        val modelPath = ensureChatModelAvailable(config.first) ?: return false
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                mlcEngine.reload(modelPath, config.second)
+                chatModelLoaded = true
+                true
+            }.onFailure { Log.e("Chat", "Unable to load model", it) }.getOrDefault(false)
+        }
+    }
+
+    private val openClSupport by lazy { detectOpenClSupport() }
+
+    private fun deviceSupportsOpenCl(): Boolean = openClSupport
+
+    private fun detectOpenClSupport(): Boolean {
+        return runCatching {
+            System.loadLibrary("OpenCL")
+            true
+        }.getOrElse {
+            Log.w("Chat", "OpenCL runtime not available; skipping GPU model load", it)
+            false
+        }
+    }
+
+    private fun readChatModelConfig(): Pair<String, String>? {
+        return runCatching {
+            val configText = assets.open("mlc-app-config.json").bufferedReader().use { it.readText() }
+            val root = JSONObject(configText)
+            val model = root.optJSONArray("model_list")?.optJSONObject(0)
+            val modelUrl = model?.optString("model_url").orEmpty()
+            val modelLib = model?.optString("model_lib").orEmpty()
+            if (modelUrl.isBlank() || modelLib.isBlank()) null else modelUrl to modelLib
+        }.getOrNull()
+    }
+
+    private suspend fun ensureChatModelAvailable(modelUrl: String): String? {
+        val uri = Uri.parse(modelUrl)
+        if (uri.scheme.isNullOrBlank() || uri.scheme.equals("file", true)) {
+            return modelUrl
+        }
+        if (uri.scheme?.startsWith("http") == true) {
+            val targetDir = File(getExternalFilesDir(null) ?: filesDir, "mlc/models")
+            val likelyRepoName = uri.lastPathSegment?.takeIf { it.isNotBlank() }
+            val hasExplicitFile = likelyRepoName?.contains('.') == true
+            val resolvedUrl = if (hasExplicitFile) {
+                modelUrl
+            } else {
+                modelUrl.trimEnd('/') + "/resolve/main/mlc-chat-config.json"
+            }
+            val targetFile = if (hasExplicitFile) {
+                File(targetDir, likelyRepoName ?: "mlc-model.bin")
+            } else {
+                val repoDir = File(targetDir, likelyRepoName ?: "mlc-model")
+                File(repoDir, "mlc-chat-config.json")
+            }
+            // If a previous attempt created a conflicting file where a directory should be, clean it up.
+            targetFile.parentFile?.let { parent ->
+                if (parent.exists() && parent.isFile) {
+                    parent.delete()
+                }
+                parent.mkdirs()
+            }
+            val resolvedPath = if (hasExplicitFile) {
+                targetFile.absolutePath
+            } else {
+                targetFile.parentFile?.absolutePath ?: targetFile.absolutePath
+            }
+
+            if (targetFile.exists() && targetFile.isFile && targetFile.length() > 0) return resolvedPath
+            if (targetFile.exists()) {
+                if (targetFile.isDirectory) targetFile.deleteRecursively() else targetFile.delete()
+            }
+            if (promptForModelDownload(resolvedUrl, targetFile) == null) return null
+            if (!hasExplicitFile) {
+                if (!ensureTensorCache(modelUrl, targetFile.parentFile ?: targetDir)) return null
+            }
+            return resolvedPath
+        }
+        return modelUrl
+    }
+
+    private suspend fun ensureTensorCache(repoUrl: String, repoDir: File): Boolean {
+        val tensorCache = File(repoDir, "tensor-cache.json")
+        if (tensorCache.exists() && tensorCache.length() > 0) return true
+        if (tensorCache.exists()) tensorCache.delete()
+        repoDir.mkdirs()
+        val cacheUrl = repoUrl.trimEnd('/') + "/resolve/main/tensor-cache.json"
+        return promptForModelDownload(cacheUrl, tensorCache) != null
+    }
+
+    private suspend fun promptForModelDownload(modelUrl: String, targetFile: File): String? {
+        return suspendCancellableCoroutine { continuation ->
+            val dialogView = layoutInflater.inflate(R.layout.dialog_model_download, null)
+            val description = dialogView.findViewById<TextView>(R.id.modelDownloadDescription)
+            val progress = dialogView.findViewById<LinearProgressIndicator>(R.id.modelDownloadProgress)
+            val status = dialogView.findViewById<TextView>(R.id.modelDownloadStatus)
+            val confirm = dialogView.findViewById<MaterialButton>(R.id.modelDownloadConfirm)
+            val cancel = dialogView.findViewById<MaterialButton>(R.id.modelDownloadCancel)
+
+            description.text = getString(R.string.chat_model_download_description, modelUrl)
+            progress.isIndeterminate = true
+            progress.progress = 0
+            status.text = getString(R.string.chat_model_download_pending)
+
+            var resolved = false
+            var downloadJob: Job? = null
+
+            fun resolve(path: String?) {
+                if (resolved) return
+                resolved = true
+                if (continuation.isActive) continuation.resume(path) {}
+            }
+
+            fun startDownload() {
+                confirm.isEnabled = false
+                cancel.isEnabled = false
+                status.text = getString(R.string.chat_model_download_progress)
+                progress.isIndeterminate = true
+                progress.progress = 0
+                val startTime = SystemClock.elapsedRealtime()
+                downloadJob = lifecycleScope.launch(Dispatchers.IO) {
+                    val success = downloadModel(modelUrl, targetFile) { downloaded, total ->
+                        val percent = if (total > 0) ((downloaded.toDouble() / total) * 100).toInt() else null
+                        val elapsedMs = (SystemClock.elapsedRealtime() - startTime).coerceAtLeast(1)
+                        val speedPerSec = downloaded * 1000 / elapsedMs
+                        val downloadedText = formatBytes(downloaded)
+                        val totalText = if (total > 0) formatBytes(total) else getString(R.string.chat_model_download_total_unknown)
+                        val speedText = formatBytes(speedPerSec) + "/s"
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            if (percent != null) {
+                                progress.isIndeterminate = false
+                                progress.setProgressCompat(percent.coerceIn(0, 100), true)
+                                status.text = getString(
+                                    R.string.chat_model_download_percent_with_stats,
+                                    percent,
+                                    downloadedText,
+                                    totalText,
+                                    speedText
+                                )
+                            } else {
+                                progress.isIndeterminate = true
+                                status.text = getString(
+                                    R.string.chat_model_download_progress_with_stats,
+                                    downloadedText,
+                                    speedText
+                                )
+                            }
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        resolve(if (success) targetFile.absolutePath else null)
+                        chatModelDownloadDialog?.dismiss()
+                    }
+                }
+                continuation.invokeOnCancellation {
+                    downloadJob?.cancel()
+                    chatModelDownloadDialog?.dismiss()
+                }
+            }
+
+            chatModelDownloadDialog = MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.chat_model_download_title)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create()
+                .also { dialog ->
+                    dialog.setOnDismissListener {
+                        chatModelDownloadDialog = null
+                        if (!resolved) resolve(null)
+                    }
+                    confirm.setOnClickListener { startDownload() }
+                    cancel.setOnClickListener {
+                        dialog.dismiss()
+                        resolve(null)
+                    }
+                    dialog.show()
+                }
+        }
+    }
+
+    private suspend fun downloadModel(url: String, target: File, onProgress: (downloaded: Long, total: Long) -> Unit): Boolean {
+        return runCatching {
+            target.parentFile?.mkdirs()
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 15000
+            connection.readTimeout = 20000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+            val responseCode = runCatching { connection.responseCode }.getOrNull() ?: -1
+            if (responseCode !in 200..299) {
+                throw IOException("HTTP $responseCode for $url")
+            }
+            val total = connection.contentLengthLong.takeIf { it > 0 } ?: -1L
+            connection.inputStream.use { input ->
+                FileOutputStream(target).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var downloaded = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        onProgress(downloaded, total)
+                    }
+                }
+            }
+            if (!target.exists() || target.length() == 0L) {
+                throw IOException("Empty download for $url")
+            }
+            true
+        }.onFailure {
+            Log.e("Chat", "Model download failed", it)
+            target.delete()
+            false
+        }.getOrDefault(false)
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt()
+        val value = bytes / Math.pow(1024.0, digitGroups.toDouble())
+        return String.format(Locale.getDefault(), "%.1f %s", value, units[digitGroups])
+    }
+
+    private fun clearChatHistory() {
+        chatStreamingJob?.cancel()
+        chatStreamingJob = null
+        chatMessages.clear()
+        chatAdapter?.refresh()
+        chatInput?.setText("")
+        refreshSendButtonState()
+        snackbar(getString(R.string.snackbar_chat_cleared))
     }
 
     private inner class FlowPageController(
@@ -4943,6 +5403,9 @@ private const val STATE_IMAGE_CARD_REQUEST_FLOW_ID = "state/image_card/flow_id"
 private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
+private const val CHAT_PAGE_INDEX = 0
+private const val VIEW_TYPE_CHAT = 0
+private const val VIEW_TYPE_FLOW = 1
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f

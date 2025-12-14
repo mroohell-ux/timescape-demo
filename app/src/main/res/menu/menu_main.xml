@@ -46,4 +46,10 @@
         android:icon="@drawable/ic_add"
         app:showAsAction="always"/>
 
+    <item
+        android:id="@+id/action_close_chat"
+        android:title="@string/menu_close_chat"
+        android:icon="@drawable/ic_close"
+        app:showAsAction="always"/>
+
 </menu>

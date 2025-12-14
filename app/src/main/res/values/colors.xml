@@ -4,4 +4,6 @@
     <color name="white">#FFFFFFFF</color>
     <color name="flow_bar_surface">#CCFFFFFF</color>
     <color name="flow_bar_stroke">#33FFFFFF</color>
+    <color name="chat_assistant_bg">#F2F4F7</color>
+    <color name="chat_user_bg">#1E88E5</color>
 </resources>
