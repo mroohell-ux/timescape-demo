@@ -19,6 +19,10 @@
     <string name="chat_model_download_percent_with_stats">Downloading: %1$d%% (%2$s / %3$s, %4$s)</string>
     <string name="chat_model_download_progress_with_stats">Downloading: %1$s (%2$s)</string>
     <string name="chat_model_download_total_unknown">Unknown size</string>
+    <string name="chat_model_assets_download_description">Download %1$d required model files?</string>
+    <string name="chat_model_asset_percent_with_stats">Downloading %1$s (%2$d/%3$d): %4$d%% • %5$s of %6$s @ %7$s</string>
+    <string name="chat_model_asset_progress_with_stats">Downloading %1$s (%2$d/%3$d): %4$s @ %5$s</string>
+    <string name="chat_model_asset_progress_pending">Preparing %1$s (%2$d/%3$d)…</string>
     <string name="chat_model_download_confirm">Download</string>
     <string name="chat_model_download_cancel">Cancel</string>
     <string name="dialog_text_color_label">Text color</string>

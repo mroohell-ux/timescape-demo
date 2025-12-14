@@ -5066,15 +5066,141 @@ class MainActivity : AppCompatActivity() {
         }.getOrElse { emptySet() }
         if (relativeAssets.isEmpty()) return true
         val baseUrl = repoUrl.trimEnd('/') + "/resolve/main/"
-        for (asset in relativeAssets) {
+        val missingAssets = relativeAssets.mapNotNull { asset ->
             val target = File(repoDir, asset)
-            if (target.exists() && target.length() > 0) continue
-            if (target.exists()) target.delete()
-            target.parentFile?.mkdirs()
-            val url = baseUrl + asset
-            if (promptForModelDownload(url, target) == null) return false
+            when {
+                target.exists() && target.length() > 0 -> null
+                else -> {
+                    if (target.exists()) target.delete()
+                    target.parentFile?.mkdirs()
+                    asset
+                }
+            }
         }
-        return true
+        if (missingAssets.isEmpty()) return true
+        return promptForRepoAssetsDownload(baseUrl, repoDir, missingAssets)
+    }
+
+    private suspend fun promptForRepoAssetsDownload(
+        baseUrl: String,
+        repoDir: File,
+        assets: List<String>
+    ): Boolean {
+        if (assets.isEmpty()) return true
+        return suspendCancellableCoroutine { continuation ->
+            val dialogView = layoutInflater.inflate(R.layout.dialog_model_download, null)
+            val description = dialogView.findViewById<TextView>(R.id.modelDownloadDescription)
+            val progress = dialogView.findViewById<LinearProgressIndicator>(R.id.modelDownloadProgress)
+            val status = dialogView.findViewById<TextView>(R.id.modelDownloadStatus)
+            val confirm = dialogView.findViewById<MaterialButton>(R.id.modelDownloadConfirm)
+            val cancel = dialogView.findViewById<MaterialButton>(R.id.modelDownloadCancel)
+
+            description.text = getString(R.string.chat_model_assets_download_description, assets.size)
+            progress.isIndeterminate = true
+            progress.progress = 0
+            status.text = getString(R.string.chat_model_download_pending)
+
+            var resolved = false
+            var downloadJob: Job? = null
+
+            fun resolve(success: Boolean) {
+                if (resolved) return
+                resolved = true
+                if (continuation.isActive) continuation.resume(success) {}
+            }
+
+            fun downloadAsset(index: Int) {
+                if (index >= assets.size) {
+                    resolve(true)
+                    chatModelDownloadDialog?.dismiss()
+                    return
+                }
+                val asset = assets[index]
+                val url = baseUrl + asset
+                val target = File(repoDir, asset)
+                val startTime = SystemClock.elapsedRealtime()
+                lifecycleScope.launch(Dispatchers.Main) {
+                    progress.isIndeterminate = true
+                    progress.progress = 0
+                    status.text = getString(
+                        R.string.chat_model_asset_progress_pending,
+                        asset,
+                        index + 1,
+                        assets.size
+                    )
+                }
+                downloadJob = lifecycleScope.launch(Dispatchers.IO) {
+                    val success = downloadModel(url, target) { downloaded, total ->
+                        val percent = if (total > 0) ((downloaded.toDouble() / total) * 100).toInt() else null
+                        val elapsedMs = (SystemClock.elapsedRealtime() - startTime).coerceAtLeast(1)
+                        val speedPerSec = downloaded * 1000 / elapsedMs
+                        val downloadedText = formatBytes(downloaded)
+                        val totalText = if (total > 0) formatBytes(total) else getString(R.string.chat_model_download_total_unknown)
+                        val speedText = formatBytes(speedPerSec) + "/s"
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            if (percent != null) {
+                                progress.isIndeterminate = false
+                                progress.setProgressCompat(percent.coerceIn(0, 100), true)
+                                status.text = getString(
+                                    R.string.chat_model_asset_percent_with_stats,
+                                    asset,
+                                    index + 1,
+                                    assets.size,
+                                    percent,
+                                    downloadedText,
+                                    totalText,
+                                    speedText
+                                )
+                            } else {
+                                progress.isIndeterminate = true
+                                status.text = getString(
+                                    R.string.chat_model_asset_progress_with_stats,
+                                    asset,
+                                    index + 1,
+                                    assets.size,
+                                    downloadedText,
+                                    speedText
+                                )
+                            }
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        if (success) {
+                            downloadAsset(index + 1)
+                        } else {
+                            resolve(false)
+                            chatModelDownloadDialog?.dismiss()
+                        }
+                    }
+                }
+                continuation.invokeOnCancellation {
+                    downloadJob?.cancel()
+                    chatModelDownloadDialog?.dismiss()
+                }
+            }
+
+            chatModelDownloadDialog = MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.chat_model_download_title)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create()
+                .also { dialog ->
+                    dialog.setOnDismissListener {
+                        chatModelDownloadDialog = null
+                        if (!resolved) resolve(false)
+                    }
+                    confirm.setOnClickListener {
+                        confirm.isEnabled = false
+                        cancel.isEnabled = false
+                        downloadAsset(0)
+                    }
+                    cancel.setOnClickListener {
+                        dialog.dismiss()
+                        resolve(false)
+                    }
+                    dialog.show()
+                }
+        }
     }
 
     private fun collectRelativeAssets(value: Any?): Set<String> {
