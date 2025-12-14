@@ -4900,27 +4900,31 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             try {
-                val messages = chatMessages.map { message ->
-                    ChatCompletionMessage(
-                        role = if (message.role == ChatRole.USER) {
-                            ChatCompletionRole.user
-                        } else {
-                            ChatCompletionRole.assistant
-                        },
-                        content = message.content
+                withContext(Dispatchers.IO) {
+                    val messages = chatMessages.map { message ->
+                        ChatCompletionMessage(
+                            role = if (message.role == ChatRole.USER) {
+                                ChatCompletionRole.user
+                            } else {
+                                ChatCompletionRole.assistant
+                            },
+                            content = message.content
+                        )
+                    }
+                    val channel = mlcEngine.chat.completions.create(
+                        messages = messages,
+                        stream = true,
+                        stream_options = StreamOptions()
                     )
-                }
-                val channel = mlcEngine.chat.completions.create(
-                    messages = messages,
-                    stream = true,
-                    stream_options = StreamOptions()
-                )
-                for (chunk in channel) {
-                    val delta = chunk.choices.firstOrNull()?.delta?.content?.asText().orEmpty()
-                    if (delta.isNotEmpty()) {
-                        assistantMessage.content += delta
-                        chatAdapter?.refresh()
-                        scrollChatToBottom()
+                    for (chunk in channel) {
+                        val delta = chunk.choices.firstOrNull()?.delta?.content?.asText().orEmpty()
+                        if (delta.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                assistantMessage.content += delta
+                                chatAdapter?.refresh()
+                                scrollChatToBottom()
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
