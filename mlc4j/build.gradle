@@ -1,7 +1,8 @@
 plugins {
     id 'com.android.library'
     id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.serialization' version '1.8.0'
+    // Align the serialization plugin with the app's Kotlin version so generated serializers are available at runtime
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.0.21'
 }
 
 android {
@@ -12,11 +13,11 @@ android {
         minSdk 22
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '17'
     }
     sourceSets {
         main {
@@ -30,5 +31,6 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.9.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.10.0'
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3'
+    // Keep serialization runtime in sync with the plugin version
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
 }
