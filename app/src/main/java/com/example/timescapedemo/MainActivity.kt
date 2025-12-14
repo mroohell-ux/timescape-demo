@@ -5396,6 +5396,9 @@ class MainActivity : AppCompatActivity() {
                             downloaded += read
                             onProgress(downloaded, total)
                         }
+                        if (total > 0 && downloaded != total) {
+                            throw IOException("Incomplete download for $url: expected $total bytes, got $downloaded")
+                        }
                     }
                 }
                 if (!target.exists() || target.length() == 0L) {
