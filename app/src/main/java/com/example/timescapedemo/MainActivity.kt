@@ -109,6 +109,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
 import kotlin.coroutines.resume
+import kotlin.coroutines.coroutineContext
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -4843,6 +4844,7 @@ class MainActivity : AppCompatActivity() {
         recycler.layoutManager = layoutManager
         recycler.adapter = chatAdapter
         recycler.itemAnimator = null
+        startChatModelWarmup()
         input.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) {
                 refreshSendButtonState()
@@ -4861,6 +4863,16 @@ class MainActivity : AppCompatActivity() {
         val readyToSend = chatInput?.text?.isNotBlank() == true
         val streaming = chatStreamingJob?.isActive == true
         chatSendButton?.isEnabled = readyToSend && !streaming
+    }
+
+    private var chatModelWarmupJob: Job? = null
+
+    private fun startChatModelWarmup() {
+        if (chatModelLoaded) return
+        if (chatModelWarmupJob?.isActive == true) return
+        chatModelWarmupJob = lifecycleScope.launch {
+            ensureChatModelLoaded()
+        }
     }
 
     private fun scrollChatToBottom() {
@@ -4940,6 +4952,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun ensureChatModelLoaded(): Boolean {
+        chatModelWarmupJob?.let { job ->
+            val current = coroutineContext[Job]
+            if (job.isActive && job != current) {
+                job.join()
+            }
+        }
         if (chatModelLoaded) return true
         if (!deviceSupportsOpenCl()) {
             snackbar(getString(R.string.snackbar_chat_model_no_opencl))
