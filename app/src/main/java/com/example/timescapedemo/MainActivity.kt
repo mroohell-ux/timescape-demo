@@ -4985,11 +4985,17 @@ class MainActivity : AppCompatActivity() {
                 }
                 parent.mkdirs()
             }
-            if (targetFile.exists() && targetFile.isFile && targetFile.length() > 0) return targetFile.absolutePath
+            val resolvedPath = if (hasExplicitFile) {
+                targetFile.absolutePath
+            } else {
+                targetFile.parentFile?.absolutePath ?: targetFile.absolutePath
+            }
+
+            if (targetFile.exists() && targetFile.isFile && targetFile.length() > 0) return resolvedPath
             if (targetFile.exists()) {
                 if (targetFile.isDirectory) targetFile.deleteRecursively() else targetFile.delete()
             }
-            return promptForModelDownload(resolvedUrl, targetFile)
+            return promptForModelDownload(resolvedUrl, targetFile)?.let { resolvedPath }
         }
         return modelUrl
     }
