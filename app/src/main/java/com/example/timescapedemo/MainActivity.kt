@@ -104,6 +104,7 @@ import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
@@ -5326,40 +5327,50 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun downloadModel(url: String, target: File, onProgress: (downloaded: Long, total: Long) -> Unit): Boolean {
-        return runCatching {
-            target.parentFile?.mkdirs()
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.connectTimeout = 15000
-            connection.readTimeout = 20000
-            connection.instanceFollowRedirects = true
-            connection.connect()
-            val responseCode = runCatching { connection.responseCode }.getOrNull() ?: -1
-            if (responseCode !in 200..299) {
-                throw IOException("HTTP $responseCode for $url")
-            }
-            val total = connection.contentLengthLong.takeIf { it > 0 } ?: -1L
-            connection.inputStream.use { input ->
-                FileOutputStream(target).use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var downloaded = 0L
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read <= 0) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        onProgress(downloaded, total)
+        val maxAttempts = 3
+        val backoffMs = 1500L
+        repeat(maxAttempts) { attemptIndex ->
+            val attemptNumber = attemptIndex + 1
+            val success = runCatching {
+                target.parentFile?.mkdirs()
+                val connection = URL(url).openConnection() as HttpURLConnection
+                connection.connectTimeout = 15000
+                connection.readTimeout = 20000
+                connection.instanceFollowRedirects = true
+                connection.connect()
+                val responseCode = runCatching { connection.responseCode }.getOrNull() ?: -1
+                if (responseCode !in 200..299) {
+                    throw IOException("HTTP $responseCode for $url")
+                }
+                val total = connection.contentLengthLong.takeIf { it > 0 } ?: -1L
+                connection.inputStream.use { input ->
+                    FileOutputStream(target).use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var downloaded = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            onProgress(downloaded, total)
+                        }
                     }
                 }
+                if (!target.exists() || target.length() == 0L) {
+                    throw IOException("Empty download for $url")
+                }
+                true
+            }.onFailure {
+                Log.e("Chat", "Model download failed (attempt $attemptNumber/$maxAttempts)", it)
+                target.delete()
+            }.getOrDefault(false)
+
+            if (success) return true
+            if (attemptNumber < maxAttempts) {
+                delay(backoffMs * attemptNumber)
             }
-            if (!target.exists() || target.length() == 0L) {
-                throw IOException("Empty download for $url")
-            }
-            true
-        }.onFailure {
-            Log.e("Chat", "Model download failed", it)
-            target.delete()
-            false
-        }.getOrDefault(false)
+        }
+        return false
     }
 
     private fun formatBytes(bytes: Long): String {
