@@ -5166,6 +5166,11 @@ class MainActivity : AppCompatActivity() {
                 if (continuation.isActive) continuation.resume(success) {}
             }
 
+            continuation.invokeOnCancellation {
+                downloadJob?.cancel()
+                chatModelDownloadDialog?.dismiss()
+            }
+
             fun downloadAsset(index: Int) {
                 if (index >= assets.size) {
                     resolve(true)
@@ -5229,10 +5234,6 @@ class MainActivity : AppCompatActivity() {
                             chatModelDownloadDialog?.dismiss()
                         }
                     }
-                }
-                continuation.invokeOnCancellation {
-                    downloadJob?.cancel()
-                    chatModelDownloadDialog?.dismiss()
                 }
             }
 
