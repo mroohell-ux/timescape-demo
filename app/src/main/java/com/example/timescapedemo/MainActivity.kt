@@ -5013,9 +5013,22 @@ class MainActivity : AppCompatActivity() {
             if (targetFile.exists()) {
                 if (targetFile.isDirectory) targetFile.deleteRecursively() else targetFile.delete()
             }
-            return promptForModelDownload(resolvedUrl, targetFile)?.let { resolvedPath }
+            if (promptForModelDownload(resolvedUrl, targetFile) == null) return null
+            if (!hasExplicitFile) {
+                if (!ensureTensorCache(modelUrl, targetFile.parentFile ?: targetDir)) return null
+            }
+            return resolvedPath
         }
         return modelUrl
+    }
+
+    private suspend fun ensureTensorCache(repoUrl: String, repoDir: File): Boolean {
+        val tensorCache = File(repoDir, "tensor-cache.json")
+        if (tensorCache.exists() && tensorCache.length() > 0) return true
+        if (tensorCache.exists()) tensorCache.delete()
+        repoDir.mkdirs()
+        val cacheUrl = repoUrl.trimEnd('/') + "/resolve/main/tensor-cache.json"
+        return promptForModelDownload(cacheUrl, tensorCache) != null
     }
 
     private suspend fun promptForModelDownload(modelUrl: String, targetFile: File): String? {
