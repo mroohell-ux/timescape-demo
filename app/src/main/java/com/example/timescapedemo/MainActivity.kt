@@ -4952,26 +4952,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun ensureChatModelLoaded(): Boolean {
+        val overallStart = SystemClock.elapsedRealtime()
+        var lastMark = overallStart
+        fun logStep(step: String) {
+            val now = SystemClock.elapsedRealtime()
+            Log.i(
+                "ChatTiming",
+                "$step took ${now - lastMark}ms (total ${now - overallStart}ms)"
+            )
+            lastMark = now
+        }
+        Log.i("ChatTiming", "ensureChatModelLoaded() start")
         chatModelWarmupJob?.let { job ->
             val current = coroutineContext[Job]
             if (job.isActive && job != current) {
                 job.join()
+                logStep("warmup-join")
             }
         }
-        if (chatModelLoaded) return true
+        if (chatModelLoaded) {
+            logStep("already-loaded")
+            return true
+        }
         if (!deviceSupportsOpenCl()) {
             snackbar(getString(R.string.snackbar_chat_model_no_opencl))
+            logStep("opencl-check-failed")
             return false
         }
         val config = readChatModelConfig() ?: return false
+        logStep("read-config")
         val modelPath = ensureChatModelAvailable(config.first) ?: return false
+        logStep("ensure-model-available")
         if (!reverifyTensorCacheIfNeeded(config.first, modelPath)) return false
+        logStep("reverify-tensor-cache")
         if (!reverifyRepoAssetsIfNeeded(config.first, modelPath)) return false
+        logStep("reverify-repo-assets")
         return withContext(Dispatchers.IO) {
             runCatching {
                 mlcEngine.reload(modelPath, config.second)
                 Log.i("Chat", "MLC engine loaded with GPU backend (OpenCL); modelPath=$modelPath, modelLib=${config.second}")
                 chatModelLoaded = true
+                logStep("reload")
                 true
             }.onFailure { Log.e("Chat", "Unable to load model", it) }.getOrDefault(false)
         }
