@@ -5078,6 +5078,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun collectRelativeAssets(value: Any?): Set<String> {
+        val allowedExtensions = setOf(
+            "bin",
+            "json",
+            "model",
+            "txt",
+            "vocab",
+            "gguf",
+            "params",
+            "binpack"
+        )
         return when (value) {
             is JSONObject -> value.keys().asSequence().flatMap { collectRelativeAssets(value.opt(it)).asSequence() }.toSet()
             is JSONArray -> (0 until value.length()).asSequence().flatMap { collectRelativeAssets(value.opt(it)).asSequence() }.toSet()
@@ -5086,7 +5096,13 @@ class MainActivity : AppCompatActivity() {
                 if (v.isEmpty()) emptySet() else {
                     val looksRemote = v.contains("://")
                     val isAbsolute = v.startsWith("/")
-                    if (looksRemote || isAbsolute) emptySet() else setOf(v.removePrefix("./"))
+                    if (looksRemote || isAbsolute) return emptySet()
+                    val normalized = v.removePrefix("./")
+                    val leaf = normalized.substringAfterLast('/')
+                    val ext = leaf.substringAfterLast('.', missingDelimiterValue = "").lowercase(Locale.getDefault())
+                    val hasKnownExt = ext.isNotEmpty() && allowedExtensions.contains(ext)
+                    val hasPath = normalized.contains('/')
+                    if (hasKnownExt || hasPath) setOf(normalized) else emptySet()
                 }
             }
             else -> emptySet()
