@@ -5089,7 +5089,16 @@ class MainActivity : AppCompatActivity() {
         val missingAssets = relativeAssets.mapNotNull { asset ->
             val target = File(repoDir, asset)
             when {
-                target.exists() && target.length() > 0 -> null
+                target.exists() && target.length() > 0 -> {
+                    val remoteSize = remoteContentLength(baseUrl + asset)
+                    if (remoteSize != null && remoteSize != target.length()) {
+                        Log.w("Chat", "Asset size mismatch for $asset; expected $remoteSize, found ${target.length()}. Redownloading.")
+                        target.delete()
+                        asset
+                    } else {
+                        null
+                    }
+                }
                 else -> {
                     if (target.exists()) target.delete()
                     target.parentFile?.mkdirs()
@@ -5099,6 +5108,20 @@ class MainActivity : AppCompatActivity() {
         }
         if (missingAssets.isEmpty()) return true
         return promptForRepoAssetsDownload(baseUrl, repoDir, missingAssets)
+    }
+
+    private fun remoteContentLength(url: String): Long? {
+        return runCatching {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = "HEAD"
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+            val responseCode = runCatching { connection.responseCode }.getOrNull() ?: -1
+            if (responseCode !in 200..299) return null
+            connection.contentLengthLong.takeIf { it > 0 }
+        }.getOrNull()
     }
 
     private suspend fun promptForRepoAssetsDownload(
