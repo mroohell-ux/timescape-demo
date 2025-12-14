@@ -4944,6 +4944,7 @@ class MainActivity : AppCompatActivity() {
         val config = readChatModelConfig() ?: return false
         val modelPath = ensureChatModelAvailable(config.first) ?: return false
         if (!reverifyTensorCacheIfNeeded(config.first, modelPath)) return false
+        if (!reverifyRepoAssetsIfNeeded(config.first, modelPath)) return false
         return withContext(Dispatchers.IO) {
             runCatching {
                 mlcEngine.reload(modelPath, config.second)
@@ -5045,6 +5046,24 @@ class MainActivity : AppCompatActivity() {
         }
         if (repoDir != null) {
             return ensureTensorCache(modelUrl, repoDir)
+        }
+        return true
+    }
+
+    private suspend fun reverifyRepoAssetsIfNeeded(modelUrl: String, modelPath: String): Boolean {
+        val uri = Uri.parse(modelUrl)
+        val isHttp = uri.scheme?.startsWith("http") == true
+        val hasExplicitFile = uri.lastPathSegment?.takeIf { it.isNotBlank() }?.contains('.') == true
+        val modelPathFile = File(modelPath)
+        val repoDir = when {
+            !isHttp || hasExplicitFile -> null
+            modelPathFile.isDirectory -> modelPathFile
+            modelPathFile.isFile -> modelPathFile.parentFile
+            else -> null
+        }
+        val configFile = repoDir?.let { File(it, "mlc-chat-config.json") }
+        if (repoDir != null && configFile != null && configFile.exists()) {
+            return ensureRepoAssetsFromConfig(modelUrl, repoDir, configFile)
         }
         return true
     }
