@@ -5070,23 +5070,39 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun ensureTensorCache(repoUrl: String, repoDir: File): Boolean {
         val tensorCache = File(repoDir, "tensor-cache.json")
-        if (tensorCache.exists() && tensorCache.length() > 0) return true
+        if (tensorCache.exists() && tensorCache.length() > 0) {
+            return ensureJsonReferencedAssets(repoUrl, repoDir, tensorCache)
+        }
         if (tensorCache.exists()) tensorCache.delete()
         repoDir.mkdirs()
         val cacheUrl = repoUrl.trimEnd('/') + "/resolve/main/tensor-cache.json"
-        return promptForModelDownload(cacheUrl, tensorCache) != null
+        val downloaded = promptForModelDownload(cacheUrl, tensorCache) != null
+        if (!downloaded) return false
+        return ensureJsonReferencedAssets(repoUrl, repoDir, tensorCache)
     }
 
     private suspend fun ensureRepoAssetsFromConfig(repoUrl: String, repoDir: File, configFile: File): Boolean {
         if (!configFile.exists() || !configFile.isFile || configFile.length() == 0L) return false
+        return ensureJsonReferencedAssets(repoUrl, repoDir, configFile)
+    }
+
+    private suspend fun ensureJsonReferencedAssets(repoUrl: String, repoDir: File, jsonFile: File): Boolean {
+        if (!jsonFile.exists() || !jsonFile.isFile || jsonFile.length() == 0L) return false
         val relativeAssets = runCatching {
-            val text = configFile.readText()
+            val text = jsonFile.readText()
             val json = JSONObject(text)
             collectRelativeAssets(json)
         }.getOrElse { emptySet() }
         if (relativeAssets.isEmpty()) return true
         val baseUrl = repoUrl.trimEnd('/') + "/resolve/main/"
-        val missingAssets = relativeAssets.mapNotNull { asset ->
+        val missingAssets = findMissingRepoAssets(relativeAssets, baseUrl, repoDir)
+        if (missingAssets.isEmpty()) return true
+        return promptForRepoAssetsDownload(baseUrl, repoDir, missingAssets)
+    }
+
+    private fun findMissingRepoAssets(relativeAssets: Set<String>, baseUrl: String, repoDir: File): List<String> {
+        if (relativeAssets.isEmpty()) return emptyList()
+        return relativeAssets.mapNotNull { asset ->
             val target = File(repoDir, asset)
             when {
                 target.exists() && target.length() > 0 -> {
@@ -5106,8 +5122,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        if (missingAssets.isEmpty()) return true
-        return promptForRepoAssetsDownload(baseUrl, repoDir, missingAssets)
     }
 
     private fun remoteContentLength(url: String): Long? {
