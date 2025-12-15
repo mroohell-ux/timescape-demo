@@ -174,6 +174,7 @@ class MainActivity : AppCompatActivity() {
     private var chatModelDownloadDialog: AlertDialog? = null
     private val mlcEngine: MLCEngine by lazy { MLCEngine() }
     private var cardAiJob: Job? = null
+    private var cardAiOpenClNoticeShown: Boolean = false
     private val cardAiInFlight: MutableSet<Long> = mutableSetOf()
 
     private val selectedImages: MutableList<BgImage> = mutableListOf()
@@ -5045,6 +5046,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scheduleCardAiJob() {
+        if (!deviceSupportsOpenCl()) {
+            if (!cardAiOpenClNoticeShown) {
+                snackbar(getString(R.string.snackbar_chat_model_no_opencl))
+                cardAiOpenClNoticeShown = true
+            }
+            cardAiJob?.cancel()
+            cardAiJob = null
+            return
+        }
         if (cardAiJob?.isActive == true) return
         cardAiInFlight.clear()
         cardAiJob = lifecycleScope.launch(Dispatchers.IO) {
