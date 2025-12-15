@@ -5053,7 +5053,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun runCardAiJob() {
-        while (isActive) {
+        while (coroutineContext.isActive) {
             val target = withContext(Dispatchers.Main) { findNextCardNeedingAi() } ?: break
             val (flow, card) = target
             val cardText = cardTextForAi(card)
