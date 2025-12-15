@@ -25,6 +25,7 @@
     <string name="chat_model_asset_progress_pending">Preparing %1$s (%2$d/%3$d)…</string>
     <string name="chat_model_download_confirm">Download</string>
     <string name="chat_model_download_cancel">Cancel</string>
+    <string name="card_ai_progress_content_description">%1$d of %2$d cards have AI responses</string>
     <string name="dialog_text_color_label">Text color</string>
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>

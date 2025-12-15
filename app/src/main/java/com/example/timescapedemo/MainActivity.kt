@@ -38,6 +38,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.PopupWindow
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -4724,7 +4725,9 @@ class MainActivity : AppCompatActivity() {
                 val view = LayoutInflater.from(parent.context)
                     .inflate(R.layout.page_card_flow, parent, false)
                 val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
+                val cardCountContainer = view.findViewById<View>(R.id.cardCountContainer)
                 val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+                val cardAiProgress = view.findViewById<ProgressBar>(R.id.cardAiProgress)
                 val layoutManager = createLayoutManager()
                 recycler.layoutManager = layoutManager
                 recycler.setHasFixedSize(true)
@@ -4745,7 +4748,15 @@ class MainActivity : AppCompatActivity() {
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
                 recycler.adapter = adapter
-                holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+                holder = FlowVH(
+                    view,
+                    recycler,
+                    layoutManager,
+                    adapter,
+                    cardCountContainer,
+                    cardCountView,
+                    cardAiProgress
+                )
                 holder
             }
         }
@@ -4785,7 +4796,9 @@ class MainActivity : AppCompatActivity() {
             val recycler: RecyclerView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter,
-            val cardCountView: TextView
+            val cardCountContainer: View,
+            val cardCountView: TextView,
+            val cardAiProgress: ProgressBar
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
 
@@ -4795,7 +4808,15 @@ class MainActivity : AppCompatActivity() {
                     flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
-                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView)
+                val controller = FlowPageController(
+                    flow.id,
+                    recycler,
+                    layoutManager,
+                    adapter,
+                    cardCountContainer,
+                    cardCountView,
+                    cardAiProgress
+                )
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
@@ -5642,10 +5663,13 @@ class MainActivity : AppCompatActivity() {
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
         val adapter: CardsAdapter,
-        val cardCountView: TextView
+        val cardCountContainer: View,
+        val cardCountView: TextView,
+        val cardAiProgress: ProgressBar
     ) {
         private var activeQuery: String = ""
         private var indicatorTotal: Int = 0
+        private var indicatorGenerated: Int = 0
         private val selectionCallback: (Int?) -> Unit = { index -> updateCardCounter(index) }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
@@ -5660,7 +5684,7 @@ class MainActivity : AppCompatActivity() {
         init {
             recycler.addOnScrollListener(scrollListener)
             layoutManager.selectionListener = selectionCallback
-            cardCountView.isVisible = false
+            cardCountContainer.isVisible = false
         }
 
         fun updateDisplayedCards(
@@ -5672,9 +5696,12 @@ class MainActivity : AppCompatActivity() {
             activeQuery = query
             val displayed = filterCardsForSearch(flow.cards, query)
             indicatorTotal = displayed.size
+            indicatorGenerated = displayed.count { !it.aiResponse.isNullOrBlank() }
             if (indicatorTotal == 0) {
-                cardCountView.isVisible = false
+                cardCountContainer.isVisible = false
                 cardCountView.text = ""
+                cardAiProgress.progress = 0
+                cardAiProgress.max = 1
             }
             adapter.submitList(displayed) {
                 handleListCommitted(flow, displayed, shouldRestoreState, shouldScrollToTop)
@@ -5738,7 +5765,7 @@ class MainActivity : AppCompatActivity() {
             if (displayed.isEmpty()) {
                 layoutManager.clearFocus()
                 layoutManager.restoreState(0, false)
-                cardCountView.isVisible = false
+                cardCountContainer.isVisible = false
                 cardCountView.text = ""
                 return
             }
@@ -5772,15 +5799,24 @@ class MainActivity : AppCompatActivity() {
 
         private fun updateCardCounter(selectionIndex: Int?) {
             if (indicatorTotal <= 0) {
-                cardCountView.isVisible = false
+                cardCountContainer.isVisible = false
                 cardCountView.text = ""
+                cardAiProgress.progress = 0
                 return
             }
             val safeIndex = (
                 selectionIndex ?: layoutManager.nearestIndex()
             ).coerceIn(0, indicatorTotal - 1)
             cardCountView.text = "${safeIndex + 1}/$indicatorTotal"
-            cardCountView.isVisible = true
+            val clampedGenerated = indicatorGenerated.coerceIn(0, indicatorTotal)
+            cardAiProgress.max = indicatorTotal
+            cardAiProgress.progress = clampedGenerated
+            cardAiProgress.contentDescription = getString(
+                R.string.card_ai_progress_content_description,
+                clampedGenerated,
+                indicatorTotal
+            )
+            cardCountContainer.isVisible = true
         }
     }
 
