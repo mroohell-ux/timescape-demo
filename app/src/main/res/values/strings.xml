@@ -205,6 +205,8 @@
     <string name="image_card_annotation_failed">Couldnt save that edit.</string>
     <string name="image_card_annotation_load_failed">Couldnt open that photo.</string>
     <string name="card_title_speak_content_desc">Speak "%1$s"</string>
+    <string name="card_ai_badge_content_desc">Show AI response</string>
+    <string name="ai_response_dialog_title">AI response</string>
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>

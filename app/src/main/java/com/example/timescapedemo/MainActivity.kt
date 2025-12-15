@@ -105,6 +105,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
@@ -171,6 +172,8 @@ class MainActivity : AppCompatActivity() {
     private var chatModelLoaded: Boolean = false
     private var chatModelDownloadDialog: AlertDialog? = null
     private val mlcEngine: MLCEngine by lazy { MLCEngine() }
+    private var cardAiJob: Job? = null
+    private val cardAiInFlight: MutableSet<Long> = mutableSetOf()
 
     private val selectedImages: MutableList<BgImage> = mutableListOf()
     private val flows: MutableList<CardFlow> = mutableListOf()
@@ -829,7 +832,8 @@ class MainActivity : AppCompatActivity() {
             onItemClick = { index -> handleSearchResultTap(index) },
             onItemDoubleClick = { card, _ -> handleSearchResultCardOpen(card) },
             onItemLongPress = { _, _ -> false },
-            onTitleSpeakClick = { card -> speakCardTitle(card) }
+            onTitleSpeakClick = { card -> speakCardTitle(card) },
+            onAiResponseClick = { card -> showAiResponseDialog(card) }
         )
         adapter.setBodyTextSize(cardFontSizeSp)
         adapter.setBodyTypeface(cardTypeface)
@@ -1667,8 +1671,18 @@ class MainActivity : AppCompatActivity() {
                 refreshFlow(flow, scrollToTop = true)
                 saveState()
                 snackbar("Added card")
+                scheduleCardAiJob()
             }
         )
+    }
+
+    private fun showAiResponseDialog(card: CardItem) {
+        val response = card.aiResponse?.takeIf { it.isNotBlank() } ?: return
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.ai_response_dialog_title))
+            .setMessage(response)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun showAddImageCardDialog() {
@@ -3664,6 +3678,7 @@ class MainActivity : AppCompatActivity() {
                 cardObj.put("title", card.title)
                 cardObj.put("snippet", card.snippet)
                 card.recognizedText?.let { cardObj.put("recognizedText", it) }
+                card.aiResponse?.let { cardObj.put("aiResponse", it) }
                 cardObj.put("textColor", colorToString(card.textColor))
                 cardObj.put("updatedAt", card.updatedAt)
                 val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
@@ -3954,6 +3969,7 @@ class MainActivity : AppCompatActivity() {
                             title = importedCard.title,
                             snippet = importedCard.snippet,
                             recognizedText = importedCard.recognizedText,
+                            aiResponse = importedCard.aiResponse,
                             textColor = importedCard.textColor,
                             updatedAt = importedCard.updatedAt,
                             image = importedCard.image,
@@ -3980,6 +3996,7 @@ class MainActivity : AppCompatActivity() {
             updateShuffleMenuState()
             indexExistingImageCardText()
             saveState()
+            scheduleCardAiJob()
             val notesText = resources.getQuantityString(R.plurals.count_notes, insertedCards, insertedCards)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, insertedFlows, insertedFlows)
             snackbar(getString(R.string.snackbar_import_success, notesText, flowsText))
@@ -4034,6 +4051,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                     val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
+                    val aiResponse = cardObj.optString("aiResponse").takeIf { it.isNotBlank() }
                     cards += ImportedCard(
                         title,
                         snippet,
@@ -4042,7 +4060,8 @@ class MainActivity : AppCompatActivity() {
                         handwriting,
                         image,
                         imageHandwriting,
-                        recognizedText
+                        recognizedText,
+                        aiResponse
                     )
                 }
                 totalCards += cards.size
@@ -4420,6 +4439,7 @@ class MainActivity : AppCompatActivity() {
                                 snippet = cardObj.optString("snippet"),
                                 recognizedText = cardObj.optString("recognizedText")
                                     .takeIf { it.isNotBlank() },
+                                aiResponse = cardObj.optString("aiResponse").takeIf { it.isNotBlank() },
                                 textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE,
                                 updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis()),
                                 image = parseCardImage(cardObj.optJSONObject("image")),
@@ -4460,6 +4480,7 @@ class MainActivity : AppCompatActivity() {
                             id = if (id >= 0) id else ++highestCardId,
                             title = obj.optString("title"),
                             snippet = obj.optString("snippet"),
+                            aiResponse = obj.optString("aiResponse").takeIf { it.isNotBlank() },
                             textColor = parseColorString(obj.optString("textColor")) ?: Color.WHITE,
                             updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
                             handwriting = null
@@ -4489,6 +4510,7 @@ class MainActivity : AppCompatActivity() {
         val seeded = ensureSeedCards(flows.first())
         flows.forEach { prepareFlowCards(it) }
         if (seeded) saveState()
+        scheduleCardAiJob()
 
         val imagesJson = prefs.getString(KEY_IMAGES, null)
         if (!imagesJson.isNullOrBlank()) {
@@ -4563,6 +4585,7 @@ class MainActivity : AppCompatActivity() {
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
                 card.recognizedText?.let { obj.put("recognizedText", it) }
+                card.aiResponse?.let { obj.put("aiResponse", it) }
                 obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
                 card.handwriting?.let { content ->
@@ -4673,6 +4696,7 @@ class MainActivity : AppCompatActivity() {
         textToSpeechReady = false
         textToSpeechInitializing = false
         pendingTextToSpeechRequests.clear()
+        cardAiJob?.cancel()
         super.onDestroy()
     }
 
@@ -4715,7 +4739,8 @@ class MainActivity : AppCompatActivity() {
                         holder.onCardDoubleTapped(card, index)
                     },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
-                    onTitleSpeakClick = { card -> speakCardTitle(card) }
+                    onTitleSpeakClick = { card -> speakCardTitle(card) },
+                    onAiResponseClick = { card -> showAiResponseDialog(card) }
                 )
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
@@ -4996,6 +5021,99 @@ class MainActivity : AppCompatActivity() {
                 true
             }.onFailure { Log.e("Chat", "Unable to load model", it) }.getOrDefault(false)
         }
+    }
+
+    private fun scheduleCardAiJob() {
+        if (cardAiJob?.isActive == true) return
+        cardAiInFlight.clear()
+        cardAiJob = lifecycleScope.launch(Dispatchers.IO) {
+            runCardAiJob()
+        }
+    }
+
+    private suspend fun runCardAiJob() {
+        while (isActive) {
+            val target = withContext(Dispatchers.Main) { findNextCardNeedingAi() } ?: break
+            val (flow, card) = target
+            val cardText = cardTextForAi(card)
+            if (cardText.isNullOrBlank()) {
+                withContext(Dispatchers.Main) { cardAiInFlight.remove(card.id) }
+                continue
+            }
+            val response = generateCardAiResponse(cardText)
+            withContext(Dispatchers.Main) {
+                cardAiInFlight.remove(card.id)
+                if (!response.isNullOrBlank()) {
+                    attachAiResponse(flow, card.id, response)
+                }
+            }
+        }
+    }
+
+    private suspend fun generateCardAiResponse(cardText: String): String? {
+        val loaded = withContext(Dispatchers.Main) { ensureChatModelLoaded() }
+        if (!loaded) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val messages = listOf(
+                    ChatCompletionMessage(
+                        role = ChatCompletionRole.system,
+                        content = "You add concise notes to cards. Reply with the final answer only; remove any <think> sections."
+                    ),
+                    ChatCompletionMessage(
+                        role = ChatCompletionRole.user,
+                        content = "hi\n\nCard text:\n$cardText"
+                    )
+                )
+                val channel = mlcEngine.chat.completions.create(
+                    messages = messages,
+                    stream = true,
+                    stream_options = StreamOptions()
+                )
+                val builder = StringBuilder()
+                for (chunk in channel) {
+                    val delta = chunk.choices.firstOrNull()?.delta?.content?.asText().orEmpty()
+                    if (delta.isNotEmpty()) builder.append(delta)
+                }
+                stripThinking(builder.toString()).trim().ifEmpty { null }
+            }.getOrNull()
+        }
+    }
+
+    private fun findNextCardNeedingAi(): Pair<CardFlow, CardItem>? {
+        flows.forEach { flow ->
+            val candidate = flow.cards.firstOrNull { card ->
+                !cardAiInFlight.contains(card.id) &&
+                    card.aiResponse.isNullOrBlank() &&
+                    card.handwriting == null &&
+                    card.image == null &&
+                    !cardTextForAi(card).isNullOrBlank()
+            }
+            if (candidate != null) {
+                cardAiInFlight += candidate.id
+                return flow to candidate
+            }
+        }
+        return null
+    }
+
+    private fun cardTextForAi(card: CardItem): String? {
+        val parts = listOf(card.title, card.snippet, card.recognizedText)
+            .mapNotNull { it?.trim() }
+            .filter { it.isNotEmpty() }
+        return parts.joinToString("\n").takeIf { it.isNotBlank() }
+    }
+
+    private fun stripThinking(raw: String): String {
+        return raw.replace(Regex("(?is)<think>.*?</think>"), "").trim()
+    }
+
+    private fun attachAiResponse(flow: CardFlow, cardId: Long, response: String) {
+        val card = flow.cards.firstOrNull { it.id == cardId } ?: return
+        card.aiResponse = response
+        card.updatedAt = System.currentTimeMillis()
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
     }
 
     private val openClSupport by lazy { detectOpenClSupport() }
@@ -5705,7 +5823,8 @@ class MainActivity : AppCompatActivity() {
         val handwriting: HandwritingContent?,
         val image: CardImage?,
         val imageHandwriting: HandwritingSide?,
-        val recognizedText: String?
+        val recognizedText: String?,
+        val aiResponse: String?
     )
 
 }
