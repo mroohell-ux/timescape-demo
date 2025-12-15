@@ -129,6 +129,19 @@
                 android:ellipsize="end"/>
         </com.example.timescapedemo.MaxHeightLinearLayout>
 
+        <ImageButton
+            android:id="@+id/aiBadge"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_margin="10dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="6dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_ai_badge"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/card_content"
+            app:layout_constraintEnd_toEndOf="@id/card_content" />
+
         <FrameLayout
             android:id="@+id/handwritingContainer"
             android:layout_width="0dp"

@@ -83,6 +83,7 @@ data class CardItem(
     var handwriting: HandwritingContent? = null,
     var imageHandwriting: HandwritingSide? = null,
     var recognizedText: String? = null,
+    var aiResponse: String? = null,
     var relativeTimeText: CharSequence? = null
 )
 
@@ -108,6 +109,7 @@ class CardsAdapter(
     private val onItemDoubleClick: (card: CardItem, index: Int) -> Unit,
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
+    private val onAiResponseClick: (CardItem) -> Unit,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
@@ -124,6 +126,7 @@ class CardsAdapter(
         val cardContent: View = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
+        val aiBadge: View = v.findViewById(R.id.aiBadge)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -281,6 +284,16 @@ class CardsAdapter(
         holder.snippet.setTextColor(textColor)
         holder.time.setTextColor(timeColor)
         holder.titleSpeakButton.imageTintList = ColorStateList.valueOf(textColor)
+
+        val showAiBadge = handwritingContent == null && imageContent == null &&
+            item.aiResponse?.isNotBlank() == true
+        holder.aiBadge.isVisible = showAiBadge
+        holder.aiBadge.setOnClickListener(
+            if (showAiBadge) { { onAiResponseClick(item) } } else null
+        )
+        holder.aiBadge.contentDescription = holder.itemView.context.getString(
+            R.string.card_ai_badge_content_desc
+        )
 
         // ---- Bind background image (drawable or Uri) ----
         val shouldDisplayBackground = handwritingContent == null && imageContent == null
@@ -1069,5 +1082,6 @@ private fun CardItem.deepCopy(): CardItem = copy(
         )
     },
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
+    aiResponse = aiResponse,
     relativeTimeText = relativeTimeText
 )
