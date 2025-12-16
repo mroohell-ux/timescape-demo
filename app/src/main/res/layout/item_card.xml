@@ -157,8 +157,8 @@
             android:contentDescription="@string/card_sticky_notes_content_desc"
             android:padding="8dp"
             android:scaleType="centerInside"
-            android:src="@drawable/ic_sticky_note"
-            android:tint="#FFFFFFFF"
+            android:src="@drawable/ic_sticky_note_colored"
+            android:tint="@color/sticky_note_icon_empty_tint"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>

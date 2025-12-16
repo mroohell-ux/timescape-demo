@@ -44,6 +44,38 @@
             android:text="@string/drawer_notes_tools"
             android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/labelNotificationFrequency"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/drawer_notification_frequency"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"/>
+
+            <TextView
+                android:id="@+id/textNotificationFrequencyValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textStyle="bold"/>
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderNotificationFrequency"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:valueFrom="0"
+            android:valueTo="60"
+            android:stepSize="1"/>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerExportNotes"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"

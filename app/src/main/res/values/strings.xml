@@ -30,6 +30,8 @@
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
     <string name="drawer_import_notes">Import notes</string>
+    <string name="drawer_notification_frequency">Notification frequency</string>
+    <string name="drawer_notification_frequency_value">%1$d pushes/hr</string>
     <string name="drawer_app_background">App background</string>
     <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
     <string name="drawer_pick_app_background">Choose app background</string>
@@ -205,6 +207,10 @@
     <string name="dialog_sticky_new_title">Add sticky note</string>
     <string name="dialog_sticky_delete">Delete note</string>
     <string name="dialog_sticky_save">Save note</string>
+    <string name="sticky_note_notification_channel_name">Sticky notes</string>
+    <string name="sticky_note_notification_channel_description">Surface sticky notes from your cards.</string>
+    <string name="sticky_note_notification_title">Sticky note reminder</string>
+    <string name="sticky_note_notification_empty_front">(No front text)</string>
     <string name="debug_import_flow_label">Flow %1$d (%2$s)</string>
     <string name="debug_import_card_label_with_title">%1$s · Card %2$d (%3$s)</string>
     <string name="debug_import_card_label">%1$s · Card %2$d</string>

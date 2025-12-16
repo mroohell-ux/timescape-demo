@@ -28,6 +28,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.ColorInt
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
 import androidx.recyclerview.widget.DiffUtil
@@ -240,6 +241,15 @@ class CardsAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
+
+        val stickyIconTint = if (item.stickyNotes.isEmpty()) {
+            ColorStateList.valueOf(
+                ContextCompat.getColor(holder.itemView.context, R.color.sticky_note_icon_empty_tint)
+            )
+        } else {
+            null
+        }
+        holder.stickyNotesButton.imageTintList = stickyIconTint
 
         // ---- Bind text ----
         holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(

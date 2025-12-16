@@ -1,16 +1,21 @@
 package com.example.timescapedemo
 
+import android.Manifest
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Dialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
@@ -27,6 +32,7 @@ import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -48,6 +54,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.GestureDetectorCompat
 import androidx.core.view.doOnLayout
 import androidx.core.content.ContextCompat
@@ -99,6 +108,9 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
@@ -145,6 +157,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
+    private lateinit var notificationFrequencySlider: Slider
+    private lateinit var notificationFrequencyValue: TextView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
     private lateinit var drawerPickFontButton: MaterialButton
@@ -166,6 +180,7 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+    private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var cardTypeface: Typeface? = null
     private var cardFontPath: String? = null
@@ -186,6 +201,11 @@ class MainActivity : AppCompatActivity() {
         Color.parseColor("#D7E8FF"),
         Color.parseColor("#FFE4F3")
     )
+
+    private var pendingStickyNoteNotificationTarget: StickyNoteTarget? = null
+    private var hasDispatchedStartupStickyNote = false
+    private var stickyNoteNotificationJob: Job? = null
+    private var stickyNoteNotificationSequence = 0
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -241,6 +261,13 @@ class MainActivity : AppCompatActivity() {
     )
 
     private data class FontLoadSuccess(val path: String, val displayName: String?)
+
+    private data class StickyNoteTarget(
+        val flowId: Long,
+        val cardId: Long,
+        val noteId: Long,
+        val frontText: String
+    )
 
     private var isCardMovePagerDragActive: Boolean = false
     private var lastCardMovePagerSwitchTime: Long = 0L
@@ -351,7 +378,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        hasDispatchedStartupStickyNote =
+            savedInstanceState?.getBoolean(STATE_HAS_SENT_STARTUP_STICKY_NOTE, false) ?: false
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        notificationFrequencyPerHour =
+            prefs.getInt(KEY_NOTIFICATION_FREQUENCY_PER_HOUR, DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR)
         cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
@@ -400,11 +431,22 @@ class MainActivity : AppCompatActivity() {
         drawerPickAppBackgroundButton = header.findViewById(R.id.buttonDrawerPickAppBackground)
         drawerResetAppBackgroundButton = header.findViewById(R.id.buttonDrawerResetAppBackground)
         appBackgroundPreview = header.findViewById(R.id.imageAppBackgroundPreview)
+        notificationFrequencySlider = header.findViewById(R.id.sliderNotificationFrequency)
+        notificationFrequencyValue = header.findViewById(R.id.textNotificationFrequencyValue)
         cardFontSizeSlider = header.findViewById(R.id.sliderCardFontSize)
         cardFontSizeValue = header.findViewById(R.id.textCardFontSizeValue)
         drawerPickFontButton = header.findViewById(R.id.buttonDrawerPickFont)
         drawerResetFontButton = header.findViewById(R.id.buttonDrawerResetFont)
         cardFontNameView = header.findViewById(R.id.textCardFontName)
+        val frequencyMin = notificationFrequencySlider.valueFrom
+        val frequencyMax = notificationFrequencySlider.valueTo
+        val initialFrequencyValue =
+            notificationFrequencyPerHour.toFloat().coerceIn(frequencyMin, frequencyMax)
+        notificationFrequencySlider.value = initialFrequencyValue
+        updateNotificationFrequency(initialFrequencyValue, fromUser = false)
+        notificationFrequencySlider.addOnChangeListener { _, value, fromUser ->
+            updateNotificationFrequency(value, fromUser)
+        }
         val sliderMin = cardFontSizeSlider.valueFrom
         val sliderMax = cardFontSizeSlider.valueTo
         val initialSliderValue = cardFontSizeSp.coerceIn(sliderMin, sliderMax)
@@ -552,6 +594,15 @@ class MainActivity : AppCompatActivity() {
                 onBackPressedDispatcher.onBackPressed()
             }
         }
+
+        handleStickyNoteIntent(intent)
+        maybeDispatchStartupStickyNoteNotification()
+        restartStickyNoteNotificationSchedule()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        restartStickyNoteNotificationSchedule()
     }
 
     private fun setupFlowPager() {
@@ -912,6 +963,55 @@ class MainActivity : AppCompatActivity() {
             flowControllers[flowId]?.restoreState(flow)
         }
         searchResultsDialog?.dismiss()
+    }
+
+    private fun handleStickyNoteIntent(intent: Intent?) {
+        if (intent == null) return
+        val flowId = intent.getLongExtra(EXTRA_TARGET_FLOW_ID, Long.MIN_VALUE)
+        val cardId = intent.getLongExtra(EXTRA_TARGET_CARD_ID, Long.MIN_VALUE)
+        val noteId = intent.getLongExtra(EXTRA_TARGET_STICKY_NOTE_ID, Long.MIN_VALUE)
+        val showBack = intent.getBooleanExtra(EXTRA_TARGET_STICKY_NOTE_SHOW_BACK, false)
+        if (flowId == Long.MIN_VALUE || cardId == Long.MIN_VALUE || noteId == Long.MIN_VALUE) return
+        openCardFromNotification(flowId, cardId, noteId, showBack)
+    }
+
+    private fun openCardFromNotification(
+        flowId: Long,
+        cardId: Long,
+        noteId: Long,
+        showBack: Boolean
+    ) {
+        val flowIndex = flows.indexOfFirst { it.id == flowId }
+        if (flowIndex < 0) return
+        val flow = flows.getOrNull(flowIndex) ?: return
+        val cardIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex < 0) return
+        flow.lastViewedCardIndex = cardIndex
+        flow.lastViewedCardId = cardId
+        flow.lastViewedCardFocused = true
+        flowPager.setCurrentItem(flowIndex, false)
+        val controller = flowControllers[flowId]
+        if (controller != null) {
+            controller.updateDisplayedCards(
+                flow = flow,
+                query = flowSearchQueryNormalized,
+                shouldRestoreState = true,
+                shouldScrollToTop = false
+            )
+            controller.restoreState(flow)
+        } else {
+            flowAdapter.notifyItemChanged(flowIndex)
+        }
+        flowPager.post {
+            val targetFlow = flows.getOrNull(flowIndex) ?: return@post
+            val targetCard = targetFlow.cards.firstOrNull { it.id == cardId } ?: return@post
+            showStickyNotesDialog(
+                targetFlow,
+                targetCard,
+                focusedNoteId = noteId,
+                showBackOfFocused = showBack
+            )
+        }
     }
 
     private fun updateToolbarSubtitle() {
@@ -1879,7 +1979,119 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_deleted_card))
     }
 
-    private fun showStickyNotesDialog(flow: CardFlow, card: CardItem) {
+    private fun maybeDispatchStartupStickyNoteNotification() {
+        if (hasDispatchedStartupStickyNote) return
+        val target = chooseRandomStickyNoteTarget() ?: return
+        dispatchStickyNoteNotification(target)
+    }
+
+    private fun dispatchStickyNoteNotification(target: StickyNoteTarget) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingStickyNoteNotificationTarget = target
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_CODE_POST_NOTIFICATIONS
+            )
+            return
+        }
+        showStickyNoteNotification(target)
+        hasDispatchedStartupStickyNote = true
+        pendingStickyNoteNotificationTarget = null
+    }
+
+    private fun restartStickyNoteNotificationSchedule() {
+        stickyNoteNotificationJob?.cancel()
+        stickyNoteNotificationJob = null
+        val perHour = notificationFrequencyPerHour
+        if (perHour <= 0) return
+        val intervalMillis = max(1_000L, 3_600_000L / perHour)
+        stickyNoteNotificationJob = lifecycleScope.launch {
+            while (isActive) {
+                chooseRandomStickyNoteTarget()?.let { dispatchStickyNoteNotification(it) }
+                delay(intervalMillis)
+            }
+        }
+    }
+
+    private fun chooseRandomStickyNoteTarget(): StickyNoteTarget? {
+        val targets = flows.flatMap { flow ->
+            flow.cards.flatMap { card ->
+                card.stickyNotes.map { note ->
+                    StickyNoteTarget(
+                        flowId = flow.id,
+                        cardId = card.id,
+                        noteId = note.id,
+                        frontText = note.frontText.ifBlank {
+                            getString(R.string.sticky_note_notification_empty_front)
+                        }
+                    )
+                }
+            }
+        }
+        if (targets.isEmpty()) return null
+        return targets.random()
+    }
+
+    private fun showStickyNoteNotification(target: StickyNoteTarget) {
+        createStickyNoteChannel()
+        val contentText = target.frontText.ifBlank {
+            getString(R.string.sticky_note_notification_empty_front)
+        }
+        val clickIntent = Intent(this, MainActivity::class.java).apply {
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_TARGET_FLOW_ID, target.flowId)
+            putExtra(EXTRA_TARGET_CARD_ID, target.cardId)
+            putExtra(EXTRA_TARGET_STICKY_NOTE_ID, target.noteId)
+            putExtra(EXTRA_TARGET_STICKY_NOTE_SHOW_BACK, true)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            target.noteId.hashCode(),
+            clickIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, STICKY_NOTE_NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_sticky_note)
+            .setContentTitle(getString(R.string.sticky_note_notification_title))
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
+            .build()
+        NotificationManagerCompat.from(this).notify(nextStickyNoteNotificationId(), notification)
+    }
+
+    private fun nextStickyNoteNotificationId(): Int {
+        val maxIncrement = Int.MAX_VALUE - STICKY_NOTE_NOTIFICATION_BASE_ID
+        stickyNoteNotificationSequence =
+            if (stickyNoteNotificationSequence >= maxIncrement) 0 else stickyNoteNotificationSequence + 1
+        return STICKY_NOTE_NOTIFICATION_BASE_ID + stickyNoteNotificationSequence
+    }
+
+    private fun createStickyNoteChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            STICKY_NOTE_NOTIFICATION_CHANNEL_ID,
+            getString(R.string.sticky_note_notification_channel_name),
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = getString(R.string.sticky_note_notification_channel_description)
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannel(channel)
+    }
+
+    private fun showStickyNotesDialog(
+        flow: CardFlow,
+        card: CardItem,
+        focusedNoteId: Long? = null,
+        showBackOfFocused: Boolean = false
+    ) {
         val view = layoutInflater.inflate(R.layout.dialog_sticky_notes, null)
         val stack = view.findViewById<FrameLayout>(R.id.stickyNoteStack)
         val empty = view.findViewById<TextView>(R.id.stickyEmptyState)
@@ -1897,7 +2109,14 @@ class MainActivity : AppCompatActivity() {
             val targetWidth = (resources.displayMetrics.widthPixels * 0.9f).toInt()
             dialog.window?.setLayout(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        val controller = StickyNoteBoardController(card, stack, wallpaper, empty)
+        val controller = StickyNoteBoardController(
+            card,
+            stack,
+            wallpaper,
+            empty,
+            focusedNoteId,
+            showBackOfFocused
+        )
         controller.render()
         addButton.setOnClickListener { controller.showEditor() }
         closeButton.setOnClickListener { dialog.dismiss() }
@@ -1970,18 +2189,35 @@ class MainActivity : AppCompatActivity() {
         private val card: CardItem,
         private val stack: FrameLayout,
         private val wallpaper: FrameLayout,
-        private val emptyView: TextView
+        private val emptyView: TextView,
+        private val initialTopNoteId: Long? = null,
+        private val showInitialBack: Boolean = false
     ) {
         private val showingBack = mutableSetOf<Long>()
+        private var hasAppliedInitialFocus = false
 
         fun render() {
             stack.removeAllViews()
             emptyView.isVisible = card.stickyNotes.isEmpty()
             val total = card.stickyNotes.size
+            applyInitialFocusIfNeeded()
             card.stickyNotes.asReversed().forEachIndexed { depth, note ->
                 val noteView = createNoteView(note, total - depth - 1)
                 stack.addView(noteView)
             }
+        }
+
+        private fun applyInitialFocusIfNeeded() {
+            if (hasAppliedInitialFocus || initialTopNoteId == null) return
+            val target = card.stickyNotes.firstOrNull { it.id == initialTopNoteId }
+            if (target != null) {
+                card.stickyNotes.remove(target)
+                card.stickyNotes.add(0, target)
+                if (showInitialBack) {
+                    showingBack.add(target.id)
+                }
+            }
+            hasAppliedInitialFocus = true
         }
 
         fun showEditor(note: StickyNote? = null) {
@@ -2130,6 +2366,7 @@ class MainActivity : AppCompatActivity() {
             baseRotation: Float = note.rotation
         ) {
             if (card.stickyNotes.size <= 1) return
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             val travel = (stack.width.takeIf { it > 0 } ?: view.width).coerceAtLeast(1)
             view.animate()
                 .translationX(travel * direction)
@@ -2149,6 +2386,8 @@ class MainActivity : AppCompatActivity() {
         }
         private fun toggleFace(note: StickyNote, textView: TextView, card: MaterialCardView) {
             val toBack = !showingBack.contains(note.id)
+
+            card.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
 
             // 让旋转围绕中心
             card.pivotX = card.width / 2f
@@ -4609,6 +4848,33 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun updateNotificationFrequency(value: Float, fromUser: Boolean) {
+        val min = notificationFrequencySlider.valueFrom
+        val max = notificationFrequencySlider.valueTo
+        val clamped = value.coerceIn(min, max)
+        val rounded = clamped.roundToInt().coerceIn(min.toInt(), max.toInt())
+        val changed = notificationFrequencyPerHour != rounded
+        notificationFrequencyPerHour = rounded
+        updateNotificationFrequencyLabel()
+        if (changed) {
+            prefs.edit().putInt(KEY_NOTIFICATION_FREQUENCY_PER_HOUR, notificationFrequencyPerHour)
+                .apply()
+            restartStickyNoteNotificationSchedule()
+        }
+        if (!fromUser && notificationFrequencySlider.value != rounded.toFloat()) {
+            notificationFrequencySlider.value = rounded.toFloat()
+        }
+    }
+
+    private fun updateNotificationFrequencyLabel() {
+        if (::notificationFrequencyValue.isInitialized) {
+            notificationFrequencyValue.text = getString(
+                R.string.drawer_notification_frequency_value,
+                notificationFrequencyPerHour
+            )
+        }
+    }
+
     private fun updateCardFontSize(value: Float, fromUser: Boolean) {
         val clamped = value.coerceIn(cardFontSizeSlider.valueFrom, cardFontSizeSlider.valueTo)
         val changed = abs(cardFontSizeSp - clamped) >= 0.01f
@@ -5073,7 +5339,33 @@ class MainActivity : AppCompatActivity() {
         pendingImageCardRequest?.toBundle()?.let { bundle ->
             outState.putBundle(STATE_PENDING_IMAGE_CARD_REQUEST, bundle)
         }
+        outState.putBoolean(STATE_HAS_SENT_STARTUP_STICKY_NOTE, hasDispatchedStartupStickyNote)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleStickyNoteIntent(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_CODE_POST_NOTIFICATIONS) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                pendingStickyNoteNotificationTarget?.let {
+                    showStickyNoteNotification(it)
+                    hasDispatchedStartupStickyNote = true
+                }
+            }
+            pendingStickyNoteNotificationTarget = null
+        }
     }
 
     override fun onStop() {
@@ -5083,6 +5375,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         dismissSearchResultsDialog()
+        stickyNoteNotificationJob?.cancel()
+        stickyNoteNotificationJob = null
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
@@ -5421,6 +5715,7 @@ private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
 private const val KEY_APP_BACKGROUND = "app_background"
 private const val KEY_NEXT_CARD_ID = "next_card_id"
 private const val KEY_NEXT_FLOW_ID = "next_flow_id"
+private const val KEY_NOTIFICATION_FREQUENCY_PER_HOUR = "notification_frequency_per_hour"
 private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
@@ -5444,11 +5739,20 @@ private const val STATE_IMAGE_CARD_REQUEST_FLOW_ID = "state/image_card/flow_id"
 private const val STATE_IMAGE_CARD_REQUEST_CARD_ID = "state/image_card/card_id"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_CREATE = "create"
 private const val STATE_IMAGE_CARD_REQUEST_TYPE_REPLACE = "replace"
+private const val STATE_HAS_SENT_STARTUP_STICKY_NOTE = "state/has_sent_startup_sticky_note"
+private const val EXTRA_TARGET_FLOW_ID = "extra/target_flow_id"
+private const val EXTRA_TARGET_CARD_ID = "extra/target_card_id"
+private const val EXTRA_TARGET_STICKY_NOTE_ID = "extra/target_sticky_note_id"
+private const val EXTRA_TARGET_STICKY_NOTE_SHOW_BACK = "extra/target_sticky_note_show_back"
+private const val STICKY_NOTE_NOTIFICATION_CHANNEL_ID = "sticky_notes"
+private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
+private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
+private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
 private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
