@@ -1,5 +1,10 @@
 package com.example.timescapedemo
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipDescription
@@ -2003,11 +2008,12 @@ class MainActivity : AppCompatActivity() {
             noteCard.rotation = note.rotation
             noteCard.translationY = index * resources.displayMetrics.density * 4
             noteCard.translationX = index * resources.displayMetrics.density * 2
+            noteCard.cameraDistance = resources.displayMetrics.density * 8000
             val textView = noteCard.findViewById<TextView>(R.id.stickyText)
             textView.text = currentTextFor(note)
             val gestureDetector = GestureDetectorCompat(this@MainActivity, object : GestureDetector.SimpleOnGestureListener() {
                 override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                    toggleFace(note, textView)
+                    toggleFace(note, textView, noteCard)
                     return true
                 }
 
@@ -2018,7 +2024,8 @@ class MainActivity : AppCompatActivity() {
                     velocityY: Float
                 ): Boolean {
                     if (abs(velocityX) > abs(velocityY) && abs(velocityX) > 400) {
-                        advanceStack()
+                        val direction = if (velocityX >= 0) 1f else -1f
+                        advanceStack(note, noteCard, direction)
                         return true
                     }
                     return false
@@ -2036,20 +2043,44 @@ class MainActivity : AppCompatActivity() {
             return noteCard
         }
 
-        private fun advanceStack() {
+        private fun advanceStack(note: StickyNote, view: View, direction: Float = 1f) {
             if (card.stickyNotes.size <= 1) return
-            val first = card.stickyNotes.removeAt(0)
-            card.stickyNotes += first
-            render()
+            val travel = (stack.width.takeIf { it > 0 } ?: view.width).coerceAtLeast(1)
+            view.animate()
+                .translationX(travel * direction)
+                .rotationBy(6f * direction)
+                .alpha(0.5f)
+                .setDuration(220)
+                .withEndAction {
+                    view.translationX = 0f
+                    view.rotation = note.rotation
+                    view.alpha = 1f
+                    card.stickyNotes.remove(note)
+                    card.stickyNotes.add(note)
+                    render()
+                }
+                .start()
         }
 
-        private fun toggleFace(note: StickyNote, textView: TextView) {
-            if (showingBack.remove(note.id)) {
-                textView.text = note.frontText
-            } else {
-                showingBack.add(note.id)
-                textView.text = note.backText
-            }
+        private fun toggleFace(note: StickyNote, textView: TextView, container: View) {
+            val flippingToBack = !showingBack.contains(note.id)
+            val flipOut = ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).setDuration(120)
+            val flipIn = ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).setDuration(120)
+            flipOut.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (flippingToBack) {
+                        showingBack.add(note.id)
+                        textView.text = note.backText
+                    } else {
+                        showingBack.remove(note.id)
+                        textView.text = note.frontText
+                    }
+                    flipIn.start()
+                }
+            })
+            AnimatorSet().apply {
+                play(flipOut)
+            }.start()
             if (card.stickyNotes.isNotEmpty() && card.stickyNotes.first().id != note.id) {
                 card.stickyNotes.remove(note)
                 card.stickyNotes.add(0, note)
