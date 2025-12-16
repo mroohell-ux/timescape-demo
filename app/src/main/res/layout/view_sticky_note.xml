@@ -15,6 +15,7 @@
         android:id="@+id/stickyText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:padding="8dp"
         android:textColor="#FF161616"
         android:textSize="16sp"
         android:lineSpacingExtra="4dp"

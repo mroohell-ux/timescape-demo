@@ -2006,12 +2006,18 @@ class MainActivity : AppCompatActivity() {
             val maxWidth = (resources.displayMetrics.widthPixels * 0.75f).toInt()
             noteCard.layoutParams = FrameLayout.LayoutParams(maxWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
             noteCard.setCardBackgroundColor(ColorStateList.valueOf(note.color))
-            noteCard.rotation = note.rotation
-            noteCard.translationY = index * resources.displayMetrics.density * 4
-            noteCard.translationX = index * resources.displayMetrics.density * 2
+            val baseRotation = if (index == 0) 0f else note.rotation
+            noteCard.rotation = baseRotation
+            val baseTranslationY = index * resources.displayMetrics.density * 4
+            val baseTranslationX = index * resources.displayMetrics.density * 2
+            noteCard.translationY = baseTranslationY
+            noteCard.translationX = baseTranslationX
             noteCard.cameraDistance = resources.displayMetrics.density * 8000
             val textView = noteCard.findViewById<TextView>(R.id.stickyText)
             textView.text = currentTextFor(note)
+            var swiped = false
+            var downRawX = 0f
+            var downRawY = 0f
             val gestureDetector = GestureDetectorCompat(this@MainActivity, object : GestureDetector.SimpleOnGestureListener() {
                 override fun onDown(e: MotionEvent): Boolean = true
 
@@ -2028,7 +2034,8 @@ class MainActivity : AppCompatActivity() {
                 ): Boolean {
                     if (abs(velocityX) > abs(velocityY) && abs(velocityX) > 400) {
                         val direction = if (velocityX >= 0) 1f else -1f
-                        advanceStack(note, noteCard, direction)
+                        swiped = true
+                        advanceStack(note, noteCard, direction, baseTranslationX, baseTranslationY, baseRotation)
                         return true
                     }
                     return false
@@ -2039,14 +2046,51 @@ class MainActivity : AppCompatActivity() {
                 }
             })
             noteCard.setOnTouchListener { v, event ->
-                val handled = gestureDetector.onTouchEvent(event)
-                if (!handled && event.action == MotionEvent.ACTION_UP) v.performClick()
+                gestureDetector.onTouchEvent(event)
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downRawX = event.rawX
+                        downRawY = event.rawY
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - downRawX
+                        val dy = event.rawY - downRawY
+                        noteCard.translationX = baseTranslationX + dx
+                        noteCard.translationY = baseTranslationY + dy
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        if (swiped) {
+                            swiped = false
+                            return@setOnTouchListener true
+                        }
+                        val dx = noteCard.translationX - baseTranslationX
+                        val threshold = (stack.width.takeIf { it > 0 } ?: v.width) * 0.25f
+                        if (abs(dx) > threshold) {
+                            val direction = if (dx >= 0) 1f else -1f
+                            advanceStack(note, noteCard, direction, baseTranslationX, baseTranslationY, baseRotation)
+                        } else {
+                            noteCard.animate()
+                                .translationX(baseTranslationX)
+                                .translationY(baseTranslationY)
+                                .rotation(baseRotation)
+                                .setDuration(180)
+                                .start()
+                        }
+                    }
+                }
                 true
             }
             return noteCard
         }
 
-        private fun advanceStack(note: StickyNote, view: View, direction: Float = 1f) {
+        private fun advanceStack(
+            note: StickyNote,
+            view: View,
+            direction: Float = 1f,
+            baseTranslationX: Float = 0f,
+            baseTranslationY: Float = 0f,
+            baseRotation: Float = note.rotation
+        ) {
             if (card.stickyNotes.size <= 1) return
             val travel = (stack.width.takeIf { it > 0 } ?: view.width).coerceAtLeast(1)
             view.animate()
@@ -2055,8 +2099,9 @@ class MainActivity : AppCompatActivity() {
                 .alpha(0.5f)
                 .setDuration(220)
                 .withEndAction {
-                    view.translationX = 0f
-                    view.rotation = note.rotation
+                    view.translationX = baseTranslationX
+                    view.translationY = baseTranslationY
+                    view.rotation = baseRotation
                     view.alpha = 1f
                     card.stickyNotes.remove(note)
                     card.stickyNotes.add(note)
