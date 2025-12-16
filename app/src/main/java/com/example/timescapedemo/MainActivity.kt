@@ -49,6 +49,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GestureDetectorCompat
+import androidx.core.view.doOnLayout
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.graphics.ColorUtils
@@ -1882,6 +1883,7 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.dialog_sticky_notes, null)
         val stack = view.findViewById<FrameLayout>(R.id.stickyNoteStack)
         val empty = view.findViewById<TextView>(R.id.stickyEmptyState)
+        val wallpaper = view.findViewById<FrameLayout>(R.id.stickyWallpaper)
         val addButton = view.findViewById<MaterialButton>(R.id.buttonAddSticky)
         val closeButton = view.findViewById<MaterialButton>(R.id.buttonCloseSticky)
         val dialog = Dialog(
@@ -1895,7 +1897,7 @@ class MainActivity : AppCompatActivity() {
             val targetWidth = (resources.displayMetrics.widthPixels * 0.9f).toInt()
             dialog.window?.setLayout(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        val controller = StickyNoteBoardController(card, stack, empty)
+        val controller = StickyNoteBoardController(card, stack, wallpaper, empty)
         controller.render()
         addButton.setOnClickListener { controller.showEditor() }
         closeButton.setOnClickListener { dialog.dismiss() }
@@ -1967,6 +1969,7 @@ class MainActivity : AppCompatActivity() {
     private inner class StickyNoteBoardController(
         private val card: CardItem,
         private val stack: FrameLayout,
+        private val wallpaper: FrameLayout,
         private val emptyView: TextView
     ) {
         private val showingBack = mutableSetOf<Long>()
@@ -2015,6 +2018,18 @@ class MainActivity : AppCompatActivity() {
             noteCard.cameraDistance = resources.displayMetrics.density * 8000
             val textView = noteCard.findViewById<TextView>(R.id.stickyText)
             textView.text = currentTextFor(note)
+            noteCard.doOnLayout {
+                val contentWidth = (noteCard.width - noteCard.paddingLeft - noteCard.paddingRight)
+                    .coerceAtLeast(0)
+                val frontHeight = measureNoteHeight(textView, note.frontText, contentWidth)
+                val backHeight = measureNoteHeight(textView, note.backText, contentWidth)
+                val targetHeight = max(frontHeight, backHeight)
+                textView.minHeight = targetHeight
+                if (textView.height < targetHeight) {
+                    textView.layoutParams = textView.layoutParams.apply { height = targetHeight }
+                    textView.requestLayout()
+                }
+            }
             var swiped = false
             var downRawX = 0f
             var downRawY = 0f
@@ -2055,8 +2070,9 @@ class MainActivity : AppCompatActivity() {
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.rawX - downRawX
                         val dy = event.rawY - downRawY
-                        noteCard.translationX = baseTranslationX + dx
-                        noteCard.translationY = baseTranslationY + dy
+                        val (limitX, limitY) = wallpaperBounds(noteCard)
+                        noteCard.translationX = (baseTranslationX + dx).coerceIn(-limitX, limitX)
+                        noteCard.translationY = (baseTranslationY + dy).coerceIn(-limitY, limitY)
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (swiped) {
@@ -2138,6 +2154,30 @@ class MainActivity : AppCompatActivity() {
 
         private fun currentTextFor(note: StickyNote): String =
             if (showingBack.contains(note.id)) note.backText else note.frontText
+
+        private fun wallpaperBounds(noteCard: View): Pair<Float, Float> {
+            val availableWidth = (wallpaper.width - wallpaper.paddingLeft - wallpaper.paddingRight).coerceAtLeast(noteCard.width)
+            val availableHeight = (wallpaper.height - wallpaper.paddingTop - wallpaper.paddingBottom).coerceAtLeast(noteCard.height)
+            val limitX = max(0f, (availableWidth - noteCard.width) / 2f)
+            val limitY = max(0f, (availableHeight - noteCard.height) / 2f)
+            return limitX to limitY
+        }
+
+        private fun measureNoteHeight(template: TextView, text: String, availableWidth: Int): Int {
+            val clone = TextView(template.context)
+            clone.layoutParams = template.layoutParams
+            clone.typeface = template.typeface
+            clone.textSize = template.textSize / template.resources.displayMetrics.scaledDensity
+            clone.setPadding(template.paddingLeft, template.paddingTop, template.paddingRight, template.paddingBottom)
+            clone.setLineSpacing(template.lineSpacingExtra, template.lineSpacingMultiplier)
+            clone.text = text
+            clone.setTextColor(template.currentTextColor)
+            clone.maxLines = template.maxLines
+            val widthSpec = View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.EXACTLY)
+            val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            clone.measure(widthSpec, heightSpec)
+            return clone.measuredHeight
+        }
     }
 
     private fun loadEditableCardBitmap(image: CardImage): Bitmap? = try {
