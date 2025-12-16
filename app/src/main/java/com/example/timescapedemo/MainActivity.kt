@@ -1974,8 +1974,9 @@ class MainActivity : AppCompatActivity() {
         fun render() {
             stack.removeAllViews()
             emptyView.isVisible = card.stickyNotes.isEmpty()
-            card.stickyNotes.forEachIndexed { index, note ->
-                val noteView = createNoteView(note, index)
+            val total = card.stickyNotes.size
+            card.stickyNotes.asReversed().forEachIndexed { depth, note ->
+                val noteView = createNoteView(note, total - depth - 1)
                 stack.addView(noteView)
             }
         }
