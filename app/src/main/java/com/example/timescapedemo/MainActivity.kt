@@ -600,6 +600,11 @@ class MainActivity : AppCompatActivity() {
         restartStickyNoteNotificationSchedule()
     }
 
+    override fun onStart() {
+        super.onStart()
+        restartStickyNoteNotificationSchedule()
+    }
+
     private fun setupFlowPager() {
         val density = resources.displayMetrics.density
         flowPager.adapter = flowAdapter
@@ -2005,9 +2010,8 @@ class MainActivity : AppCompatActivity() {
         val intervalMillis = max(1_000L, 3_600_000L / perHour)
         stickyNoteNotificationJob = lifecycleScope.launch {
             while (isActive) {
+                chooseRandomStickyNoteTarget()?.let { dispatchStickyNoteNotification(it) }
                 delay(intervalMillis)
-                val target = chooseRandomStickyNoteTarget() ?: continue
-                dispatchStickyNoteNotification(target)
             }
         }
     }
