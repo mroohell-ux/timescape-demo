@@ -21,6 +21,8 @@
             android:layout_gravity="center"
             android:background="@drawable/sticky_wallpaper"
             android:foregroundGravity="center"
+            android:clipChildren="false"
+            android:clipToPadding="false"
             android:minHeight="360dp"
             android:minWidth="360dp"
             android:padding="24dp">
@@ -61,6 +63,8 @@
                     android:id="@+id/stickyNoteStack"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:clipChildren="false"
+                    android:clipToPadding="false"
                     android:padding="8dp" />
             </LinearLayout>
 

@@ -2013,6 +2013,8 @@ class MainActivity : AppCompatActivity() {
             val textView = noteCard.findViewById<TextView>(R.id.stickyText)
             textView.text = currentTextFor(note)
             val gestureDetector = GestureDetectorCompat(this@MainActivity, object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(e: MotionEvent?): Boolean = true
+
                 override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                     toggleFace(note, textView, noteCard)
                     return true
