@@ -4,4 +4,5 @@
     <color name="white">#FFFFFFFF</color>
     <color name="flow_bar_surface">#CCFFFFFF</color>
     <color name="flow_bar_stroke">#33FFFFFF</color>
+    <color name="sticky_note_icon_empty_tint">#9E9E9E</color>
 </resources>
