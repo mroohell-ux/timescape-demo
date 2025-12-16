@@ -2033,6 +2033,7 @@ class MainActivity : AppCompatActivity() {
             var swiped = false
             var downRawX = 0f
             var downRawY = 0f
+            var dragBounds = RectF(0f, 0f, 0f, 0f)
             val gestureDetector = GestureDetectorCompat(this@MainActivity, object : GestureDetector.SimpleOnGestureListener() {
                 override fun onDown(e: MotionEvent): Boolean = true
 
@@ -2066,15 +2067,15 @@ class MainActivity : AppCompatActivity() {
                     MotionEvent.ACTION_DOWN -> {
                         downRawX = event.rawX
                         downRawY = event.rawY
+                        dragBounds = wallpaperBounds(noteCard)
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.rawX - downRawX
                         val dy = event.rawY - downRawY
-                        val bounds = wallpaperBounds(noteCard)
-                        val minX = baseTranslationX + min(bounds.left, bounds.right)
-                        val maxX = baseTranslationX + max(bounds.left, bounds.right)
-                        val minY = baseTranslationY + min(bounds.top, bounds.bottom)
-                        val maxY = baseTranslationY + max(bounds.top, bounds.bottom)
+                        val minX = baseTranslationX + min(dragBounds.left, dragBounds.right)
+                        val maxX = baseTranslationX + max(dragBounds.left, dragBounds.right)
+                        val minY = baseTranslationY + min(dragBounds.top, dragBounds.bottom)
+                        val maxY = baseTranslationY + max(dragBounds.top, dragBounds.bottom)
                         noteCard.translationX = (baseTranslationX + dx).coerceIn(minX, maxX)
                         noteCard.translationY = (baseTranslationY + dy).coerceIn(minY, maxY)
                     }
