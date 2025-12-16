@@ -205,6 +205,10 @@
     <string name="dialog_sticky_new_title">Add sticky note</string>
     <string name="dialog_sticky_delete">Delete note</string>
     <string name="dialog_sticky_save">Save note</string>
+    <string name="sticky_note_notification_channel_name">Sticky notes</string>
+    <string name="sticky_note_notification_channel_description">Surface sticky notes from your cards.</string>
+    <string name="sticky_note_notification_title">Sticky note reminder</string>
+    <string name="sticky_note_notification_empty_front">(No front text)</string>
     <string name="debug_import_flow_label">Flow %1$d (%2$s)</string>
     <string name="debug_import_card_label_with_title">%1$s · Card %2$d (%3$s)</string>
     <string name="debug_import_card_label">%1$s · Card %2$d</string>
