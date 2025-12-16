@@ -2061,24 +2061,41 @@ class MainActivity : AppCompatActivity() {
                     showEditor(note)
                 }
             })
+            var startTx = 0f
+            var startTy = 0f
             noteCard.setOnTouchListener { v, event ->
                 gestureDetector.onTouchEvent(event)
                 when (event.actionMasked) {
+
                     MotionEvent.ACTION_DOWN -> {
                         downRawX = event.rawX
                         downRawY = event.rawY
+                        startTx = noteCard.translationX
+                        startTy = noteCard.translationY
                         dragBounds = wallpaperBounds(noteCard)
                     }
+
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.rawX - downRawX
                         val dy = event.rawY - downRawY
-                        val minX = baseTranslationX + min(dragBounds.left, dragBounds.right)
-                        val maxX = baseTranslationX + max(dragBounds.left, dragBounds.right)
-                        val minY = baseTranslationY + min(dragBounds.top, dragBounds.bottom)
-                        val maxY = baseTranslationY + max(dragBounds.top, dragBounds.bottom)
-                        noteCard.translationX = (baseTranslationX + dx).coerceIn(minX, maxX)
-                        noteCard.translationY = (baseTranslationY + dy).coerceIn(minY, maxY)
+                        noteCard.translationX = (startTx + dx).coerceIn(dragBounds.left, dragBounds.right)
+                        noteCard.translationY = (startTy + dy).coerceIn(dragBounds.top, dragBounds.bottom)
                     }
+//                    MotionEvent.ACTION_DOWN -> {
+//                        downRawX = event.rawX
+//                        downRawY = event.rawY
+//                        dragBounds = wallpaperBounds(noteCard)
+//                    }
+//                    MotionEvent.ACTION_MOVE -> {
+//                        val dx = event.rawX - downRawX
+//                        val dy = event.rawY - downRawY
+//                        val minX = baseTranslationX + min(dragBounds.left, dragBounds.right)
+//                        val maxX = baseTranslationX + max(dragBounds.left, dragBounds.right)
+//                        val minY = baseTranslationY + min(dragBounds.top, dragBounds.bottom)
+//                        val maxY = baseTranslationY + max(dragBounds.top, dragBounds.bottom)
+//                        noteCard.translationX = (baseTranslationX + dx).coerceIn(minX, maxX)
+//                        noteCard.translationY = (baseTranslationY + dy).coerceIn(minY, maxY)
+//                    }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (swiped) {
                             swiped = false
@@ -2130,59 +2147,139 @@ class MainActivity : AppCompatActivity() {
                 }
                 .start()
         }
+        private fun toggleFace(note: StickyNote, textView: TextView, card: MaterialCardView) {
+            val toBack = !showingBack.contains(note.id)
 
-        private fun toggleFace(note: StickyNote, textView: TextView, container: View) {
-            val flippingToBack = !showingBack.contains(note.id)
-            val flipOut = ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).setDuration(120)
-            val flipIn = ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).setDuration(120)
-            flipOut.addListener(object : AnimatorListenerAdapter() {
+            // 让旋转围绕中心
+            card.pivotX = card.width / 2f
+            card.pivotY = card.height / 2f
+
+            // 越小越“3D”（别太小，会畸变）
+            val d = resources.displayMetrics.density
+            card.cameraDistance = 4000f * d
+
+            // 动画期间用硬件层更顺
+            card.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+            val out = AnimatorSet().apply {
+                playTogether(
+                    ObjectAnimator.ofFloat(card, View.ROTATION_Y, 0f, 90f),
+                    ObjectAnimator.ofFloat(card, View.SCALE_X, 1f, 0.98f),
+                    ObjectAnimator.ofFloat(card, View.SCALE_Y, 1f, 0.98f),
+                    ObjectAnimator.ofFloat(card, View.TRANSLATION_Z, 0f, 16f * d),
+                )
+                duration = 140
+                interpolator = android.view.animation.AccelerateInterpolator()
+            }
+
+            val inn = AnimatorSet().apply {
+                card.rotationY = -90f
+                playTogether(
+                    ObjectAnimator.ofFloat(card, View.ROTATION_Y, -90f, 0f),
+                    ObjectAnimator.ofFloat(card, View.SCALE_X, 0.98f, 1f),
+                    ObjectAnimator.ofFloat(card, View.SCALE_Y, 0.98f, 1f),
+                    ObjectAnimator.ofFloat(card, View.TRANSLATION_Z, 16f * d, 0f),
+                )
+                duration = 160
+                interpolator = android.view.animation.DecelerateInterpolator()
+            }
+
+            out.addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    if (flippingToBack) {
+                    if (toBack) {
                         showingBack.add(note.id)
                         textView.text = note.backText
                     } else {
                         showingBack.remove(note.id)
                         textView.text = note.frontText
                     }
-                    flipIn.start()
+                    inn.start()
                 }
             })
-            AnimatorSet().apply {
-                play(flipOut)
-            }.start()
-            if (card.stickyNotes.isNotEmpty() && card.stickyNotes.first().id != note.id) {
-                card.stickyNotes.remove(note)
-                card.stickyNotes.add(0, note)
-                render()
-            }
+
+            inn.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    card.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+            })
+
+            out.start()
         }
+
+//        private fun toggleFace(note: StickyNote, textView: TextView, container: View) {
+//            val flippingToBack = !showingBack.contains(note.id)
+//            val flipOut = ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).setDuration(120)
+//            val flipIn = ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).setDuration(120)
+//            flipOut.addListener(object : AnimatorListenerAdapter() {
+//                override fun onAnimationEnd(animation: Animator) {
+//                    if (flippingToBack) {
+//                        showingBack.add(note.id)
+//                        textView.text = note.backText
+//                    } else {
+//                        showingBack.remove(note.id)
+//                        textView.text = note.frontText
+//                    }
+//                    flipIn.start()
+//                }
+//            })
+//            AnimatorSet().apply {
+//                play(flipOut)
+//            }.start()
+//            if (card.stickyNotes.isNotEmpty() && card.stickyNotes.first().id != note.id) {
+//                card.stickyNotes.remove(note)
+//                card.stickyNotes.add(0, note)
+//                render()
+//            }
+//        }
 
         private fun currentTextFor(note: StickyNote): String =
             if (showingBack.contains(note.id)) note.backText else note.frontText
 
         private fun wallpaperBounds(noteCard: View): RectF {
-            val lp = noteCard.layoutParams as? ViewGroup.MarginLayoutParams
-            val marginLeft = lp?.marginStart ?: 0
-            val marginRight = lp?.marginEnd ?: 0
-            val marginTop = lp?.topMargin ?: 0
-            val marginBottom = lp?.bottomMargin ?: 0
-
-            val noteLoc = IntArray(2)
+            val stackView = noteCard.parent as View // stickyNoteStack
+            val stackLoc = IntArray(2)
             val wallpaperLoc = IntArray(2)
-            noteCard.getLocationOnScreen(noteLoc)
+            stackView.getLocationOnScreen(stackLoc)
             wallpaper.getLocationOnScreen(wallpaperLoc)
 
-            val noteLeft = noteLoc[0] - wallpaperLoc[0] - marginLeft
-            val noteTop = noteLoc[1] - wallpaperLoc[1] - marginTop
-            val noteRight = noteLeft + noteCard.width + marginLeft + marginRight
-            val noteBottom = noteTop + noteCard.height + marginTop + marginBottom
+            val wLeft = (wallpaperLoc[0] - stackLoc[0]).toFloat()
+            val wTop  = (wallpaperLoc[1] - stackLoc[1]).toFloat()
 
-            val leftRoom = wallpaper.paddingLeft - noteLeft
-            val topRoom = wallpaper.paddingTop - noteTop
-            val rightRoom = (wallpaper.width - wallpaper.paddingRight) - noteRight
-            val bottomRoom = (wallpaper.height - wallpaper.paddingBottom) - noteBottom
-            return RectF(leftRoom.toFloat(), topRoom.toFloat(), rightRoom.toFloat(), bottomRoom.toFloat())
+            // 不想贴边可以加一点 inset（比如 8dp）
+            // 不想贴边可以加一点 inset（比如 8dp）
+            val inset = 0f
+
+            val minTx = (wLeft + inset) - noteCard.left
+            val maxTx = (wLeft + wallpaper.width - inset - noteCard.width) - noteCard.left
+            val minTy = (wTop + inset) - noteCard.top
+            val maxTy = (wTop + wallpaper.height - inset - noteCard.height) - noteCard.top
+
+            return RectF(minTx, minTy, maxTx, maxTy)
         }
+
+//        private fun wallpaperBounds(noteCard: View): RectF {
+//            val lp = noteCard.layoutParams as? ViewGroup.MarginLayoutParams
+//            val marginLeft = lp?.marginStart ?: 0
+//            val marginRight = lp?.marginEnd ?: 0
+//            val marginTop = lp?.topMargin ?: 0
+//            val marginBottom = lp?.bottomMargin ?: 0
+//
+//            val noteLoc = IntArray(2)
+//            val wallpaperLoc = IntArray(2)
+//            noteCard.getLocationOnScreen(noteLoc)
+//            wallpaper.getLocationOnScreen(wallpaperLoc)
+//
+//            val noteLeft = noteLoc[0] - wallpaperLoc[0] - marginLeft
+//            val noteTop = noteLoc[1] - wallpaperLoc[1] - marginTop
+//            val noteRight = noteLeft + noteCard.width + marginLeft + marginRight
+//            val noteBottom = noteTop + noteCard.height + marginTop + marginBottom
+//
+//            val leftRoom = wallpaper.paddingLeft - noteLeft
+//            val topRoom = wallpaper.paddingTop - noteTop
+//            val rightRoom = (wallpaper.width - wallpaper.paddingRight) - noteRight
+//            val bottomRoom = (wallpaper.height - wallpaper.paddingBottom) - noteBottom
+//            return RectF(leftRoom.toFloat(), topRoom.toFloat(), rightRoom.toFloat(), bottomRoom.toFloat())
+//        }
 
         private fun measureNoteHeight(template: TextView, text: String, availableWidth: Int): Int {
             val clone = TextView(template.context)
