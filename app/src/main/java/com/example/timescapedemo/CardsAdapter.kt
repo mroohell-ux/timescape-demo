@@ -83,7 +83,8 @@ data class CardItem(
     var handwriting: HandwritingContent? = null,
     var imageHandwriting: HandwritingSide? = null,
     var recognizedText: String? = null,
-    var relativeTimeText: CharSequence? = null
+    var relativeTimeText: CharSequence? = null,
+    val stickyNotes: MutableList<StickyNote> = mutableListOf()
 )
 
 data class CardImage(
@@ -107,6 +108,7 @@ class CardsAdapter(
     private val onItemClick: (index: Int) -> Unit,
     private val onItemDoubleClick: (card: CardItem, index: Int) -> Unit,
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
+    private val onStickyNotesClick: (CardItem) -> Unit,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
@@ -124,6 +126,7 @@ class CardsAdapter(
         val cardContent: View = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
+        val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -225,6 +228,12 @@ class CardsAdapter(
                 view.performClick()
             }
             true
+        }
+        vh.stickyNotesButton.setOnClickListener {
+            val index = vh.bindingAdapterPosition
+            if (index != RecyclerView.NO_POSITION) {
+                getItemAt(index)?.let(onStickyNotesClick)
+            }
         }
         return vh
     }
@@ -1069,5 +1078,6 @@ private fun CardItem.deepCopy(): CardItem = copy(
         )
     },
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
-    relativeTimeText = relativeTimeText
+    relativeTimeText = relativeTimeText,
+    stickyNotes = stickyNotes.map { it.copy() }.toMutableList()
 )
