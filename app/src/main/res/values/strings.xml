@@ -23,6 +23,8 @@
     <string name="drawer_global_search_label">Global search</string>
     <string name="drawer_global_search_button">Open global search</string>
     <string name="drawer_global_search_hint">Search all cards</string>
+    <string name="drawer_big_bang_label">Big Bang</string>
+    <string name="drawer_big_bang_button">Launch the galaxy</string>
     <string name="search_results_title">Search results</string>
     <string name="search_results_summary">%1$d results across %2$d flows for "%3$s"</string>
     <string name="search_results_empty">No cards matched "%1$s".</string>
@@ -71,6 +73,9 @@
     <string name="snackbar_app_background_updated">App background updated</string>
     <string name="snackbar_app_background_reset">App background reset</string>
     <string name="snackbar_app_background_failed">Couldnt load that background</string>
+    <string name="dialog_big_bang_title">Timescape Big Bang</string>
+    <string name="dialog_big_bang_description">A 3D render of a futuristic galaxy UI: every card in your app drifts inside a deep-space sphere, spinning at random angles with glowing gold and teal particles swirling in cinematic light and soft bloom.</string>
+    <string name="dialog_big_bang_close">Return to orbit</string>
     <string name="snackbar_export_failed">Couldnt export notes</string>
     <string name="snackbar_import_failed">Couldnt import notes</string>
     <string name="snackbar_import_empty">Nothing to import from that file</string>
