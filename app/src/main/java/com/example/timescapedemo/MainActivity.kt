@@ -2071,10 +2071,10 @@ class MainActivity : AppCompatActivity() {
                         val dx = event.rawX - downRawX
                         val dy = event.rawY - downRawY
                         val bounds = wallpaperBounds(noteCard)
-                        val minX = min(bounds.left, bounds.right)
-                        val maxX = max(bounds.left, bounds.right)
-                        val minY = min(bounds.top, bounds.bottom)
-                        val maxY = max(bounds.top, bounds.bottom)
+                        val minX = baseTranslationX + min(bounds.left, bounds.right)
+                        val maxX = baseTranslationX + max(bounds.left, bounds.right)
+                        val minY = baseTranslationY + min(bounds.top, bounds.bottom)
+                        val maxY = baseTranslationY + max(bounds.top, bounds.bottom)
                         noteCard.translationX = (baseTranslationX + dx).coerceIn(minX, maxX)
                         noteCard.translationY = (baseTranslationY + dy).coerceIn(minY, maxY)
                     }
@@ -2160,11 +2160,16 @@ class MainActivity : AppCompatActivity() {
             if (showingBack.contains(note.id)) note.backText else note.frontText
 
         private fun wallpaperBounds(noteCard: View): RectF {
-            val minX = (wallpaper.paddingLeft - noteCard.left).toFloat()
-            val maxX = (wallpaper.width - wallpaper.paddingRight - noteCard.right).toFloat()
-            val minY = (wallpaper.paddingTop - noteCard.top).toFloat()
-            val maxY = (wallpaper.height - wallpaper.paddingBottom - noteCard.bottom).toFloat()
-            return RectF(minX, minY, maxX, maxY)
+            val lp = noteCard.layoutParams as? ViewGroup.MarginLayoutParams
+            val horizontalMargins = (lp?.marginStart ?: 0) + (lp?.marginEnd ?: 0)
+            val verticalMargins = (lp?.topMargin ?: 0) + (lp?.bottomMargin ?: 0)
+            val noteWidth = noteCard.width + horizontalMargins
+            val noteHeight = noteCard.height + verticalMargins
+            val innerWidth = wallpaper.width - wallpaper.paddingLeft - wallpaper.paddingRight
+            val innerHeight = wallpaper.height - wallpaper.paddingTop - wallpaper.paddingBottom
+            val maxX = ((innerWidth - noteWidth) / 2f).coerceAtLeast(0f)
+            val maxY = ((innerHeight - noteHeight) / 2f).coerceAtLeast(0f)
+            return RectF(-maxX, -maxY, maxX, maxY)
         }
 
         private fun measureNoteHeight(template: TextView, text: String, availableWidth: Int): Int {
