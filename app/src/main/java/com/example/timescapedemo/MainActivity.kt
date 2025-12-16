@@ -773,6 +773,7 @@ class MainActivity : AppCompatActivity() {
             onItemClick = { index -> handleSearchResultTap(index) },
             onItemDoubleClick = { card, _ -> handleSearchResultCardOpen(card) },
             onItemLongPress = { _, _ -> false },
+            onStickyNotesClick = { card -> showSearchResultStickyNotes(card) },
             onTitleSpeakClick = { card -> speakCardTitle(card) }
         )
         adapter.setBodyTextSize(cardFontSizeSp)
@@ -870,6 +871,13 @@ class MainActivity : AppCompatActivity() {
     private fun handleSearchResultCardOpen(card: CardItem) {
         val entry = searchResultEntries.firstOrNull { it.card.id == card.id } ?: return
         openCardFromSearch(entry.flowId, card.id)
+    }
+
+    private fun showSearchResultStickyNotes(card: CardItem) {
+        val entry = searchResultEntries.firstOrNull { it.card.id == card.id } ?: return
+        val flow = flows.firstOrNull { it.id == entry.flowId } ?: return
+        val target = flow.cards.firstOrNull { it.id == card.id } ?: return
+        showStickyNotesDialog(flow, target)
     }
 
     private fun openCardFromSearch(flowId: Long, cardId: Long) {
