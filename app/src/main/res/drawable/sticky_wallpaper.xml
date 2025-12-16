@@ -1,18 +1,27 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="16dp" />
+            <corners android:radius="24dp" />
             <gradient
                 android:angle="90"
-                android:endColor="#FFFAF3"
-                android:startColor="#FFF2DC" />
+                android:endColor="#FFF8ED"
+                android:startColor="#FFF0D7" />
         </shape>
     </item>
+
+    <item>
+        <bitmap
+            android:gravity="fill"
+            android:tileMode="repeat"
+            android:src="@drawable/cloth_tile" />
+    </item>
+
     <item>
         <shape android:shape="rectangle">
-            <padding android:left="12dp" android:top="12dp" android:right="12dp" android:bottom="12dp" />
-            <size android:width="0dp" android:height="0dp" />
-            <stroke android:width="2dp" android:color="#1A000000" />
+            <padding android:left="16dp" android:top="16dp" android:right="16dp" android:bottom="16dp" />
+            <stroke android:width="2dp" android:color="#26000000" />
         </shape>
     </item>
+
+    <item android:drawable="@drawable/cloth_border" />
 </layer-list>
