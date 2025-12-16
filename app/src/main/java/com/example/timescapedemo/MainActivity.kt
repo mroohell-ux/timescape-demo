@@ -1,5 +1,10 @@
 package com.example.timescapedemo
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipDescription
@@ -21,8 +26,10 @@ import android.util.Base64
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
+import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MenuItem
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -41,6 +48,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
+import androidx.core.view.GestureDetectorCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.graphics.ColorUtils
@@ -170,6 +178,13 @@ class MainActivity : AppCompatActivity() {
     private val textRecognizer by lazy {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     }
+    private val stickyNotePalette = listOf(
+        Color.parseColor("#FFF8A6"),
+        Color.parseColor("#FFE0B2"),
+        Color.parseColor("#D7FFD9"),
+        Color.parseColor("#D7E8FF"),
+        Color.parseColor("#FFE4F3")
+    )
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -763,6 +778,7 @@ class MainActivity : AppCompatActivity() {
             onItemClick = { index -> handleSearchResultTap(index) },
             onItemDoubleClick = { card, _ -> handleSearchResultCardOpen(card) },
             onItemLongPress = { _, _ -> false },
+            onStickyNotesClick = { card -> showSearchResultStickyNotes(card) },
             onTitleSpeakClick = { card -> speakCardTitle(card) }
         )
         adapter.setBodyTextSize(cardFontSizeSp)
@@ -860,6 +876,13 @@ class MainActivity : AppCompatActivity() {
     private fun handleSearchResultCardOpen(card: CardItem) {
         val entry = searchResultEntries.firstOrNull { it.card.id == card.id } ?: return
         openCardFromSearch(entry.flowId, card.id)
+    }
+
+    private fun showSearchResultStickyNotes(card: CardItem) {
+        val entry = searchResultEntries.firstOrNull { it.card.id == card.id } ?: return
+        val flow = flows.firstOrNull { it.id == entry.flowId } ?: return
+        val target = flow.cards.firstOrNull { it.id == card.id } ?: return
+        showStickyNotesDialog(flow, target)
     }
 
     private fun openCardFromSearch(flowId: Long, cardId: Long) {
@@ -1853,6 +1876,223 @@ class MainActivity : AppCompatActivity() {
         refreshFlow(flow, scrollToTop = true)
         saveState()
         snackbar(getString(R.string.snackbar_deleted_card))
+    }
+
+    private fun showStickyNotesDialog(flow: CardFlow, card: CardItem) {
+        val view = layoutInflater.inflate(R.layout.dialog_sticky_notes, null)
+        val stack = view.findViewById<FrameLayout>(R.id.stickyNoteStack)
+        val empty = view.findViewById<TextView>(R.id.stickyEmptyState)
+        val addButton = view.findViewById<MaterialButton>(R.id.buttonAddSticky)
+        val closeButton = view.findViewById<MaterialButton>(R.id.buttonCloseSticky)
+        val dialog = Dialog(
+            this,
+            com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog
+        )
+        dialog.setContentView(view)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.setOnShowListener {
+            val targetWidth = (resources.displayMetrics.widthPixels * 0.9f).toInt()
+            dialog.window?.setLayout(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        val controller = StickyNoteBoardController(card, stack, empty)
+        controller.render()
+        addButton.setOnClickListener { controller.showEditor() }
+        closeButton.setOnClickListener { dialog.dismiss() }
+        dialog.setOnDismissListener {
+            refreshFlow(flow, scrollToTop = false)
+            saveState()
+        }
+        dialog.show()
+    }
+
+    private fun showStickyNoteEditor(
+        existing: StickyNote?,
+        onSave: (StickyNote) -> Unit,
+        onDelete: (() -> Unit)? = null
+    ) {
+        val view = layoutInflater.inflate(R.layout.dialog_edit_sticky_note, null)
+        val inputFront = view.findViewById<EditText>(R.id.inputStickyFront)
+        val inputBack = view.findViewById<EditText>(R.id.inputStickyBack)
+        val colorGroup = view.findViewById<ChipGroup>(R.id.groupStickyColors)
+        inputFront.setText(existing?.frontText ?: "")
+        inputBack.setText(existing?.backText ?: "")
+        var selectedColor = existing?.color ?: stickyNotePalette.first()
+        stickyNotePalette.forEachIndexed { index, color ->
+            val chip = Chip(ContextThemeWrapper(this, com.google.android.material.R.style.Widget_MaterialComponents_Chip_Choice))
+            chip.id = View.generateViewId()
+            chip.isCheckable = true
+            chip.text = ""
+            chip.chipBackgroundColor = ColorStateList.valueOf(color)
+            chip.chipStrokeWidth = resources.displayMetrics.density * 1
+            chip.chipStrokeColor = ColorStateList.valueOf(Color.parseColor("#33000000"))
+            chip.setOnClickListener {
+                selectedColor = color
+                colorGroup.check(chip.id)
+            }
+            colorGroup.addView(chip)
+            if (selectedColor == color || (existing == null && index == 0)) {
+                colorGroup.check(chip.id)
+            }
+        }
+        val title = if (existing == null) R.string.dialog_sticky_new_title else R.string.dialog_sticky_edit_title
+        val builder = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(view)
+            .setPositiveButton(R.string.dialog_sticky_save) { _, _ ->
+                val front = inputFront.text.toString().trim()
+                val back = inputBack.text.toString().trim()
+                val rotation = existing?.rotation ?: Random.nextDouble(-12.0, 12.0).toFloat()
+                val note = existing?.apply {
+                    frontText = front
+                    backText = back
+                    color = selectedColor
+                    this.rotation = rotation
+                } ?: StickyNote(
+                    id = System.currentTimeMillis() + Random.nextInt(1000),
+                    frontText = front,
+                    backText = back,
+                    color = selectedColor,
+                    rotation = rotation
+                )
+                onSave(note)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+        if (onDelete != null && existing != null) {
+            builder.setNeutralButton(R.string.dialog_sticky_delete) { _, _ -> onDelete() }
+        }
+        builder.show()
+    }
+
+    private inner class StickyNoteBoardController(
+        private val card: CardItem,
+        private val stack: FrameLayout,
+        private val emptyView: TextView
+    ) {
+        private val showingBack = mutableSetOf<Long>()
+
+        fun render() {
+            stack.removeAllViews()
+            emptyView.isVisible = card.stickyNotes.isEmpty()
+            val total = card.stickyNotes.size
+            card.stickyNotes.asReversed().forEachIndexed { depth, note ->
+                val noteView = createNoteView(note, total - depth - 1)
+                stack.addView(noteView)
+            }
+        }
+
+        fun showEditor(note: StickyNote? = null) {
+            showStickyNoteEditor(note, onSave = { saved ->
+                if (note == null) {
+                    card.stickyNotes.add(0, saved)
+                } else {
+                    val idx = card.stickyNotes.indexOfFirst { it.id == saved.id }
+                    if (idx >= 0) card.stickyNotes[idx] = saved
+                }
+                render()
+            }, onDelete = {
+                note?.let { deleteNote(it) }
+            })
+        }
+
+        private fun deleteNote(note: StickyNote) {
+            card.stickyNotes.removeAll { it.id == note.id }
+            showingBack.remove(note.id)
+            render()
+        }
+
+        private fun createNoteView(note: StickyNote, index: Int): View {
+            val noteCard = layoutInflater.inflate(R.layout.view_sticky_note, stack, false) as MaterialCardView
+            val maxWidth = (resources.displayMetrics.widthPixels * 0.75f).toInt()
+            noteCard.layoutParams = FrameLayout.LayoutParams(maxWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+            noteCard.setCardBackgroundColor(ColorStateList.valueOf(note.color))
+            noteCard.rotation = note.rotation
+            noteCard.translationY = index * resources.displayMetrics.density * 4
+            noteCard.translationX = index * resources.displayMetrics.density * 2
+            noteCard.cameraDistance = resources.displayMetrics.density * 8000
+            val textView = noteCard.findViewById<TextView>(R.id.stickyText)
+            textView.text = currentTextFor(note)
+            val gestureDetector = GestureDetectorCompat(this@MainActivity, object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(e: MotionEvent): Boolean = true
+
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    toggleFace(note, textView, noteCard)
+                    return true
+                }
+
+                override fun onFling(
+                    e1: MotionEvent?,
+                    e2: MotionEvent,
+                    velocityX: Float,
+                    velocityY: Float
+                ): Boolean {
+                    if (abs(velocityX) > abs(velocityY) && abs(velocityX) > 400) {
+                        val direction = if (velocityX >= 0) 1f else -1f
+                        advanceStack(note, noteCard, direction)
+                        return true
+                    }
+                    return false
+                }
+
+                override fun onLongPress(e: MotionEvent) {
+                    showEditor(note)
+                }
+            })
+            noteCard.setOnTouchListener { v, event ->
+                val handled = gestureDetector.onTouchEvent(event)
+                if (!handled && event.action == MotionEvent.ACTION_UP) v.performClick()
+                true
+            }
+            return noteCard
+        }
+
+        private fun advanceStack(note: StickyNote, view: View, direction: Float = 1f) {
+            if (card.stickyNotes.size <= 1) return
+            val travel = (stack.width.takeIf { it > 0 } ?: view.width).coerceAtLeast(1)
+            view.animate()
+                .translationX(travel * direction)
+                .rotationBy(6f * direction)
+                .alpha(0.5f)
+                .setDuration(220)
+                .withEndAction {
+                    view.translationX = 0f
+                    view.rotation = note.rotation
+                    view.alpha = 1f
+                    card.stickyNotes.remove(note)
+                    card.stickyNotes.add(note)
+                    render()
+                }
+                .start()
+        }
+
+        private fun toggleFace(note: StickyNote, textView: TextView, container: View) {
+            val flippingToBack = !showingBack.contains(note.id)
+            val flipOut = ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).setDuration(120)
+            val flipIn = ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).setDuration(120)
+            flipOut.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (flippingToBack) {
+                        showingBack.add(note.id)
+                        textView.text = note.backText
+                    } else {
+                        showingBack.remove(note.id)
+                        textView.text = note.frontText
+                    }
+                    flipIn.start()
+                }
+            })
+            AnimatorSet().apply {
+                play(flipOut)
+            }.start()
+            if (card.stickyNotes.isNotEmpty() && card.stickyNotes.first().id != note.id) {
+                card.stickyNotes.remove(note)
+                card.stickyNotes.add(0, note)
+                render()
+            }
+        }
+
+        private fun currentTextFor(note: StickyNote): String =
+            if (showingBack.contains(note.id)) note.backText else note.frontText
     }
 
     private fun loadEditableCardBitmap(image: CardImage): Bitmap? = try {
@@ -3342,6 +3582,25 @@ class MainActivity : AppCompatActivity() {
         HandwritingDrawingTool.fromName(prefs.getString(KEY_HANDWRITING_LAST_DRAWING_TOOL, null))
             ?: HandwritingDrawingTool.PEN
 
+    private fun parseStickyNotes(cardObj: JSONObject): MutableList<StickyNote> {
+        val notes = mutableListOf<StickyNote>()
+        val notesArray = cardObj.optJSONArray("stickyNotes") ?: return notes
+        for (i in 0 until notesArray.length()) {
+            val noteObj = notesArray.optJSONObject(i) ?: continue
+            val id = noteObj.optLong("id", System.currentTimeMillis())
+            val color = parseColorString(noteObj.optString("color")) ?: Color.parseColor("#FFF8A6")
+            val rotation = noteObj.optDouble("rotation", Random.nextDouble(-10.0, 10.0)).toFloat()
+            notes += StickyNote(
+                id = id,
+                frontText = noteObj.optString("front"),
+                backText = noteObj.optString("back"),
+                color = color,
+                rotation = rotation
+            )
+        }
+        return notes
+    }
+
     private fun parseHandwritingContent(cardObj: JSONObject): HandwritingContent? {
         val handwritingObj = cardObj.optJSONObject("handwriting")
         val baseOptions = defaultHandwritingOptions()
@@ -3606,6 +3865,19 @@ class MainActivity : AppCompatActivity() {
                             duplicateImageBacks.getOrPut(duplicate) { mutableListOf() }.add(cardLabel)
                         }
                     }
+                }
+                if (card.stickyNotes.isNotEmpty()) {
+                    val notesArray = JSONArray()
+                    card.stickyNotes.forEach { note ->
+                        notesArray.put(JSONObject().apply {
+                            put("id", note.id)
+                            put("front", note.frontText)
+                            put("back", note.backText)
+                            put("color", colorToString(note.color))
+                            put("rotation", note.rotation.toDouble())
+                        })
+                    }
+                    cardObj.put("stickyNotes", notesArray)
                 }
                 cardsArray.put(cardObj)
                 cardCount++
@@ -3881,8 +4153,9 @@ class MainActivity : AppCompatActivity() {
                             updatedAt = importedCard.updatedAt,
                             image = importedCard.image,
                             handwriting = importedCard.handwriting,
-                            imageHandwriting = importedCard.imageHandwriting
-                    )
+                            imageHandwriting = importedCard.imageHandwriting,
+                            stickyNotes = importedCard.stickyNotes.toMutableList()
+                        )
                 }.toMutableList()
                 val newFlow = CardFlow(
                     id = flowId,
@@ -3956,6 +4229,7 @@ class MainActivity : AppCompatActivity() {
                             duplicateTracker = imageBackPayloads
                         )
                     }
+                    val stickyNotes = parseStickyNotes(cardObj)
                     val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
                     cards += ImportedCard(
                         title,
@@ -3965,7 +4239,8 @@ class MainActivity : AppCompatActivity() {
                         handwriting,
                         image,
                         imageHandwriting,
-                        recognizedText
+                        recognizedText,
+                        stickyNotes
                     )
                 }
                 totalCards += cards.size
@@ -4337,6 +4612,7 @@ class MainActivity : AppCompatActivity() {
                             if (cardId < 0) cardId = highestCardId + 1
                             highestCardId = max(highestCardId, cardId)
                             val handwriting = parseHandwritingContent(cardObj)
+                            val stickyNotes = parseStickyNotes(cardObj)
                             flow.cards += CardItem(
                                 id = cardId,
                                 title = cardObj.optString("title"),
@@ -4349,7 +4625,8 @@ class MainActivity : AppCompatActivity() {
                                 handwriting = handwriting,
                                 imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
                                     parseHandwritingSide(it, baseHandwritingOptions)
-                                }
+                                },
+                                stickyNotes = stickyNotes
                             )
                         }
                     }
@@ -4509,6 +4786,19 @@ class MainActivity : AppCompatActivity() {
                 card.imageHandwriting?.let { back ->
                     obj.put("imageHandwriting", handwritingSideToJson(back))
                 }
+                if (card.stickyNotes.isNotEmpty()) {
+                    val notesArray = JSONArray()
+                    card.stickyNotes.forEach { note ->
+                        notesArray.put(JSONObject().apply {
+                            put("id", note.id)
+                            put("front", note.frontText)
+                            put("back", note.backText)
+                            put("color", colorToString(note.color))
+                            put("rotation", note.rotation.toDouble())
+                        })
+                    }
+                    obj.put("stickyNotes", notesArray)
+                }
                 cardsArray.put(obj)
             }
             flowObj.put("cards", cardsArray)
@@ -4615,14 +4905,15 @@ class MainActivity : AppCompatActivity() {
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
             lateinit var holder: FlowVH
-            val adapter = CardsAdapter(
-                cardTint,
-                onItemClick = { index -> holder.onCardTapped(index) },
-                onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
-                    holder.onCardDoubleTapped(card, index) },
-                onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
-                onTitleSpeakClick = { card -> speakCardTitle(card) }
-            )
+                val adapter = CardsAdapter(
+                    cardTint,
+                    onItemClick = { index -> holder.onCardTapped(index) },
+                    onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
+                        holder.onCardDoubleTapped(card, index) },
+                    onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
+                    onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
+                    onTitleSpeakClick = { card -> speakCardTitle(card) }
+                )
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
             recycler.adapter = adapter
@@ -4704,6 +4995,12 @@ class MainActivity : AppCompatActivity() {
                     "Target card: id=${targetCard.id}, imageUri=${targetCard.image?.uri}, face=$face"
                 )
                 editCard(flow, targetCard, face)
+            }
+
+            fun onStickyNotesTapped(card: CardItem) {
+                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val target = flow.cards.firstOrNull { it.id == card.id } ?: return
+                showStickyNotesDialog(flow, target)
             }
 
             fun onCardLongPressed(index: Int, cardView: View): Boolean {
@@ -4902,7 +5199,8 @@ class MainActivity : AppCompatActivity() {
         val handwriting: HandwritingContent?,
         val image: CardImage?,
         val imageHandwriting: HandwritingSide?,
-        val recognizedText: String?
+        val recognizedText: String?,
+        val stickyNotes: List<StickyNote>
     )
 
 }
