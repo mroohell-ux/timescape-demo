@@ -2070,9 +2070,13 @@ class MainActivity : AppCompatActivity() {
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.rawX - downRawX
                         val dy = event.rawY - downRawY
-                        val (limitX, limitY) = wallpaperBounds(noteCard)
-                        noteCard.translationX = (baseTranslationX + dx).coerceIn(-limitX, limitX)
-                        noteCard.translationY = (baseTranslationY + dy).coerceIn(-limitY, limitY)
+                        val bounds = wallpaperBounds(noteCard)
+                        val minX = min(bounds.left, bounds.right)
+                        val maxX = max(bounds.left, bounds.right)
+                        val minY = min(bounds.top, bounds.bottom)
+                        val maxY = max(bounds.top, bounds.bottom)
+                        noteCard.translationX = (baseTranslationX + dx).coerceIn(minX, maxX)
+                        noteCard.translationY = (baseTranslationY + dy).coerceIn(minY, maxY)
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (swiped) {
@@ -2155,12 +2159,12 @@ class MainActivity : AppCompatActivity() {
         private fun currentTextFor(note: StickyNote): String =
             if (showingBack.contains(note.id)) note.backText else note.frontText
 
-        private fun wallpaperBounds(noteCard: View): Pair<Float, Float> {
-            val availableWidth = (wallpaper.width - wallpaper.paddingLeft - wallpaper.paddingRight).coerceAtLeast(noteCard.width)
-            val availableHeight = (wallpaper.height - wallpaper.paddingTop - wallpaper.paddingBottom).coerceAtLeast(noteCard.height)
-            val limitX = max(0f, (availableWidth - noteCard.width) / 2f)
-            val limitY = max(0f, (availableHeight - noteCard.height) / 2f)
-            return limitX to limitY
+        private fun wallpaperBounds(noteCard: View): RectF {
+            val minX = (wallpaper.paddingLeft - noteCard.left).toFloat()
+            val maxX = (wallpaper.width - wallpaper.paddingRight - noteCard.right).toFloat()
+            val minY = (wallpaper.paddingTop - noteCard.top).toFloat()
+            val maxY = (wallpaper.height - wallpaper.paddingBottom - noteCard.bottom).toFloat()
+            return RectF(minX, minY, maxX, maxY)
         }
 
         private fun measureNoteHeight(template: TextView, text: String, availableWidth: Int): Int {
