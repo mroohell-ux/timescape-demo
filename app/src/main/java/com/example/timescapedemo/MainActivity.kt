@@ -2383,6 +2383,8 @@ class MainActivity : AppCompatActivity() {
         private fun toggleFace(note: StickyNote, textView: TextView, card: MaterialCardView) {
             val toBack = !showingBack.contains(note.id)
 
+            card.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+
             // 让旋转围绕中心
             card.pivotX = card.width / 2f
             card.pivotY = card.height / 2f
