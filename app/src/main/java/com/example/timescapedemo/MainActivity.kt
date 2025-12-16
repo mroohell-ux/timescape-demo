@@ -2161,15 +2161,26 @@ class MainActivity : AppCompatActivity() {
 
         private fun wallpaperBounds(noteCard: View): RectF {
             val lp = noteCard.layoutParams as? ViewGroup.MarginLayoutParams
-            val horizontalMargins = (lp?.marginStart ?: 0) + (lp?.marginEnd ?: 0)
-            val verticalMargins = (lp?.topMargin ?: 0) + (lp?.bottomMargin ?: 0)
-            val noteWidth = noteCard.width + horizontalMargins
-            val noteHeight = noteCard.height + verticalMargins
-            val innerWidth = wallpaper.width - wallpaper.paddingLeft - wallpaper.paddingRight
-            val innerHeight = wallpaper.height - wallpaper.paddingTop - wallpaper.paddingBottom
-            val maxX = ((innerWidth - noteWidth) / 2f).coerceAtLeast(0f)
-            val maxY = ((innerHeight - noteHeight) / 2f).coerceAtLeast(0f)
-            return RectF(-maxX, -maxY, maxX, maxY)
+            val marginLeft = lp?.marginStart ?: 0
+            val marginRight = lp?.marginEnd ?: 0
+            val marginTop = lp?.topMargin ?: 0
+            val marginBottom = lp?.bottomMargin ?: 0
+
+            val noteLoc = IntArray(2)
+            val wallpaperLoc = IntArray(2)
+            noteCard.getLocationOnScreen(noteLoc)
+            wallpaper.getLocationOnScreen(wallpaperLoc)
+
+            val noteLeft = noteLoc[0] - wallpaperLoc[0] - marginLeft
+            val noteTop = noteLoc[1] - wallpaperLoc[1] - marginTop
+            val noteRight = noteLeft + noteCard.width + marginLeft + marginRight
+            val noteBottom = noteTop + noteCard.height + marginTop + marginBottom
+
+            val leftRoom = wallpaper.paddingLeft - noteLeft
+            val topRoom = wallpaper.paddingTop - noteTop
+            val rightRoom = (wallpaper.width - wallpaper.paddingRight) - noteRight
+            val bottomRoom = (wallpaper.height - wallpaper.paddingBottom) - noteBottom
+            return RectF(leftRoom.toFloat(), topRoom.toFloat(), rightRoom.toFloat(), bottomRoom.toFloat())
         }
 
         private fun measureNoteHeight(template: TextView, text: String, availableWidth: Int): Int {
