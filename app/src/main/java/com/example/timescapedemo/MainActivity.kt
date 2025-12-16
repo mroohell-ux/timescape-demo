@@ -1879,7 +1879,10 @@ class MainActivity : AppCompatActivity() {
         val empty = view.findViewById<TextView>(R.id.stickyEmptyState)
         val addButton = view.findViewById<MaterialButton>(R.id.buttonAddSticky)
         val closeButton = view.findViewById<MaterialButton>(R.id.buttonCloseSticky)
-        val dialog = Dialog(this, R.style.ThemeOverlay_MaterialComponents_Dialog_Alert)
+        val dialog = Dialog(
+            this,
+            com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog
+        )
         dialog.setContentView(view)
         dialog.setCanceledOnTouchOutside(true)
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
