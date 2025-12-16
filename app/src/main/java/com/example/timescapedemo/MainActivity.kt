@@ -1942,7 +1942,7 @@ class MainActivity : AppCompatActivity() {
                     frontText = front
                     backText = back
                     color = selectedColor
-                    rotation = rotation
+                    this.rotation = rotation
                 } ?: StickyNote(
                     id = System.currentTimeMillis() + Random.nextInt(1000),
                     frontText = front,
