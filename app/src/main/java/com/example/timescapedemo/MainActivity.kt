@@ -107,6 +107,9 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
@@ -200,6 +203,7 @@ class MainActivity : AppCompatActivity() {
 
     private var pendingStickyNoteNotificationTarget: StickyNoteTarget? = null
     private var hasDispatchedStartupStickyNote = false
+    private var stickyNoteNotificationJob: Job? = null
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -591,6 +595,7 @@ class MainActivity : AppCompatActivity() {
 
         handleStickyNoteIntent(intent)
         maybeDispatchStartupStickyNoteNotification()
+        restartStickyNoteNotificationSchedule()
     }
 
     private fun setupFlowPager() {
@@ -1988,6 +1993,21 @@ class MainActivity : AppCompatActivity() {
         showStickyNoteNotification(target)
         hasDispatchedStartupStickyNote = true
         pendingStickyNoteNotificationTarget = null
+    }
+
+    private fun restartStickyNoteNotificationSchedule() {
+        stickyNoteNotificationJob?.cancel()
+        stickyNoteNotificationJob = null
+        val perHour = notificationFrequencyPerHour
+        if (perHour <= 0) return
+        val intervalMillis = max(1_000L, 3_600_000L / perHour)
+        stickyNoteNotificationJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(intervalMillis)
+                val target = chooseRandomStickyNoteTarget() ?: continue
+                dispatchStickyNoteNotification(target)
+            }
+        }
     }
 
     private fun chooseRandomStickyNoteTarget(): StickyNoteTarget? {
@@ -4823,6 +4843,7 @@ class MainActivity : AppCompatActivity() {
         if (changed) {
             prefs.edit().putInt(KEY_NOTIFICATION_FREQUENCY_PER_HOUR, notificationFrequencyPerHour)
                 .apply()
+            restartStickyNoteNotificationSchedule()
         }
         if (!fromUser && notificationFrequencySlider.value != rounded.toFloat()) {
             notificationFrequencySlider.value = rounded.toFloat()
@@ -5338,6 +5359,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         dismissSearchResultsDialog()
+        stickyNoteNotificationJob?.cancel()
+        stickyNoteNotificationJob = null
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
