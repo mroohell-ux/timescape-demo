@@ -204,6 +204,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingStickyNoteNotificationTarget: StickyNoteTarget? = null
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
+    private var stickyNoteNotificationSequence = 0
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -2057,7 +2058,14 @@ class MainActivity : AppCompatActivity() {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .build()
-        NotificationManagerCompat.from(this).notify(STICKY_NOTE_NOTIFICATION_ID, notification)
+        NotificationManagerCompat.from(this).notify(nextStickyNoteNotificationId(), notification)
+    }
+
+    private fun nextStickyNoteNotificationId(): Int {
+        val maxIncrement = Int.MAX_VALUE - STICKY_NOTE_NOTIFICATION_BASE_ID
+        stickyNoteNotificationSequence =
+            if (stickyNoteNotificationSequence >= maxIncrement) 0 else stickyNoteNotificationSequence + 1
+        return STICKY_NOTE_NOTIFICATION_BASE_ID + stickyNoteNotificationSequence
     }
 
     private fun createStickyNoteChannel() {
@@ -5729,7 +5737,7 @@ private const val EXTRA_TARGET_CARD_ID = "extra/target_card_id"
 private const val EXTRA_TARGET_STICKY_NOTE_ID = "extra/target_sticky_note_id"
 private const val EXTRA_TARGET_STICKY_NOTE_SHOW_BACK = "extra/target_sticky_note_show_back"
 private const val STICKY_NOTE_NOTIFICATION_CHANNEL_ID = "sticky_notes"
-private const val STICKY_NOTE_NOTIFICATION_ID = 1001
+private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
