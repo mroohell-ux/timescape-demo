@@ -153,6 +153,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
+    private lateinit var notificationFrequencySlider: Slider
+    private lateinit var notificationFrequencyValue: TextView
     private lateinit var cardFontSizeSlider: Slider
     private lateinit var cardFontSizeValue: TextView
     private lateinit var drawerPickFontButton: MaterialButton
@@ -174,6 +176,7 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+    private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var cardTypeface: Typeface? = null
     private var cardFontPath: String? = null
@@ -372,6 +375,8 @@ class MainActivity : AppCompatActivity() {
         hasDispatchedStartupStickyNote =
             savedInstanceState?.getBoolean(STATE_HAS_SENT_STARTUP_STICKY_NOTE, false) ?: false
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        notificationFrequencyPerHour =
+            prefs.getInt(KEY_NOTIFICATION_FREQUENCY_PER_HOUR, DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR)
         cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
@@ -420,11 +425,22 @@ class MainActivity : AppCompatActivity() {
         drawerPickAppBackgroundButton = header.findViewById(R.id.buttonDrawerPickAppBackground)
         drawerResetAppBackgroundButton = header.findViewById(R.id.buttonDrawerResetAppBackground)
         appBackgroundPreview = header.findViewById(R.id.imageAppBackgroundPreview)
+        notificationFrequencySlider = header.findViewById(R.id.sliderNotificationFrequency)
+        notificationFrequencyValue = header.findViewById(R.id.textNotificationFrequencyValue)
         cardFontSizeSlider = header.findViewById(R.id.sliderCardFontSize)
         cardFontSizeValue = header.findViewById(R.id.textCardFontSizeValue)
         drawerPickFontButton = header.findViewById(R.id.buttonDrawerPickFont)
         drawerResetFontButton = header.findViewById(R.id.buttonDrawerResetFont)
         cardFontNameView = header.findViewById(R.id.textCardFontName)
+        val frequencyMin = notificationFrequencySlider.valueFrom
+        val frequencyMax = notificationFrequencySlider.valueTo
+        val initialFrequencyValue =
+            notificationFrequencyPerHour.toFloat().coerceIn(frequencyMin, frequencyMax)
+        notificationFrequencySlider.value = initialFrequencyValue
+        updateNotificationFrequency(initialFrequencyValue, fromUser = false)
+        notificationFrequencySlider.addOnChangeListener { _, value, fromUser ->
+            updateNotificationFrequency(value, fromUser)
+        }
         val sliderMin = cardFontSizeSlider.valueFrom
         val sliderMax = cardFontSizeSlider.valueTo
         val initialSliderValue = cardFontSizeSp.coerceIn(sliderMin, sliderMax)
@@ -4796,6 +4812,32 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun updateNotificationFrequency(value: Float, fromUser: Boolean) {
+        val min = notificationFrequencySlider.valueFrom
+        val max = notificationFrequencySlider.valueTo
+        val clamped = value.coerceIn(min, max)
+        val rounded = clamped.roundToInt().coerceIn(min.toInt(), max.toInt())
+        val changed = notificationFrequencyPerHour != rounded
+        notificationFrequencyPerHour = rounded
+        updateNotificationFrequencyLabel()
+        if (changed) {
+            prefs.edit().putInt(KEY_NOTIFICATION_FREQUENCY_PER_HOUR, notificationFrequencyPerHour)
+                .apply()
+        }
+        if (!fromUser && notificationFrequencySlider.value != rounded.toFloat()) {
+            notificationFrequencySlider.value = rounded.toFloat()
+        }
+    }
+
+    private fun updateNotificationFrequencyLabel() {
+        if (::notificationFrequencyValue.isInitialized) {
+            notificationFrequencyValue.text = getString(
+                R.string.drawer_notification_frequency_value,
+                notificationFrequencyPerHour
+            )
+        }
+    }
+
     private fun updateCardFontSize(value: Float, fromUser: Boolean) {
         val clamped = value.coerceIn(cardFontSizeSlider.valueFrom, cardFontSizeSlider.valueTo)
         val changed = abs(cardFontSizeSp - clamped) >= 0.01f
@@ -5634,6 +5676,7 @@ private const val KEY_SELECTED_FLOW_INDEX = "selected_flow_index"
 private const val KEY_APP_BACKGROUND = "app_background"
 private const val KEY_NEXT_CARD_ID = "next_card_id"
 private const val KEY_NEXT_FLOW_ID = "next_flow_id"
+private const val KEY_NOTIFICATION_FREQUENCY_PER_HOUR = "notification_frequency_per_hour"
 private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
@@ -5670,6 +5713,7 @@ private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
+private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
 private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
