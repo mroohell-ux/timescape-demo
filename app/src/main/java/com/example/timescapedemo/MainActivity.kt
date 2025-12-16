@@ -32,6 +32,7 @@ import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -2361,6 +2362,7 @@ class MainActivity : AppCompatActivity() {
             baseRotation: Float = note.rotation
         ) {
             if (card.stickyNotes.size <= 1) return
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             val travel = (stack.width.takeIf { it > 0 } ?: view.width).coerceAtLeast(1)
             view.animate()
                 .translationX(travel * direction)
