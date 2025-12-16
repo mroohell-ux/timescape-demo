@@ -2013,7 +2013,7 @@ class MainActivity : AppCompatActivity() {
             val textView = noteCard.findViewById<TextView>(R.id.stickyText)
             textView.text = currentTextFor(note)
             val gestureDetector = GestureDetectorCompat(this@MainActivity, object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDown(e: MotionEvent?): Boolean = true
+                override fun onDown(e: MotionEvent): Boolean = true
 
                 override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                     toggleFace(note, textView, noteCard)
@@ -2022,7 +2022,7 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onFling(
                     e1: MotionEvent?,
-                    e2: MotionEvent?,
+                    e2: MotionEvent,
                     velocityX: Float,
                     velocityY: Float
                 ): Boolean {
