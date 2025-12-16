@@ -1999,7 +1999,7 @@ class MainActivity : AppCompatActivity() {
             val noteCard = layoutInflater.inflate(R.layout.view_sticky_note, stack, false) as MaterialCardView
             val maxWidth = (resources.displayMetrics.widthPixels * 0.75f).toInt()
             noteCard.layoutParams = FrameLayout.LayoutParams(maxWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-            noteCard.cardBackgroundColor = ColorStateList.valueOf(note.color)
+            noteCard.setCardBackgroundColor(ColorStateList.valueOf(note.color))
             noteCard.rotation = note.rotation
             noteCard.translationY = index * resources.displayMetrics.density * 4
             noteCard.translationX = index * resources.displayMetrics.density * 2
