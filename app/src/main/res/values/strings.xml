@@ -207,6 +207,13 @@
     <string name="dialog_sticky_new_title">Add sticky note</string>
     <string name="dialog_sticky_delete">Delete note</string>
     <string name="dialog_sticky_save">Save note</string>
+    <string name="button_study">Study</string>
+    <string name="study_dialog_title">%1$s · Study sticky notes</string>
+    <string name="study_empty_state">Add sticky notes to this flow to start studying.</string>
+    <string name="study_note_empty_side">(No text yet)</string>
+    <string name="study_side_front">Front</string>
+    <string name="study_side_back">Back</string>
+    <string name="study_note_title_fallback">Sticky note</string>
     <string name="sticky_note_notification_channel_name">Sticky notes</string>
     <string name="sticky_note_notification_channel_description">Surface sticky notes from your cards.</string>
     <string name="sticky_note_notification_title">Sticky note reminder</string>

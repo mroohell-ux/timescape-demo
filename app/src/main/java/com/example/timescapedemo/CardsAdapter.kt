@@ -111,7 +111,8 @@ class CardsAdapter(
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
-    backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
+    backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig(),
+    private val showStickyButton: Boolean = true
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -230,6 +231,7 @@ class CardsAdapter(
             }
             true
         }
+        vh.stickyNotesButton.isVisible = showStickyButton
         vh.stickyNotesButton.setOnClickListener {
             val index = vh.bindingAdapterPosition
             if (index != RecyclerView.NO_POSITION) {
@@ -242,6 +244,7 @@ class CardsAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
 
+        holder.stickyNotesButton.isVisible = showStickyButton
         val stickyIconTint = if (item.stickyNotes.isEmpty()) {
             ColorStateList.valueOf(
                 ContextCompat.getColor(holder.itemView.context, R.color.sticky_note_icon_empty_tint)

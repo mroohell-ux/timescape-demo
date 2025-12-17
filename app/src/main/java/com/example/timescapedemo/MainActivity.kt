@@ -271,6 +271,17 @@ class MainActivity : AppCompatActivity() {
         val frontText: String
     )
 
+    private data class StudyNoteEntry(
+        val id: Long,
+        val cardTitle: String,
+        val frontText: String,
+        val backText: String,
+        val textColor: Int,
+        val background: BgImage?,
+        val updatedAt: Long,
+        var showingBack: Boolean = false
+    )
+
     private var isCardMovePagerDragActive: Boolean = false
     private var lastCardMovePagerSwitchTime: Long = 0L
 
@@ -2212,6 +2223,109 @@ class MainActivity : AppCompatActivity() {
             saveState()
         }
         dialog.show()
+    }
+
+    private fun startStudySession(flow: CardFlow) {
+        val studyNotes = flow.cards.flatMap { card ->
+            card.stickyNotes.map { note ->
+                StudyNoteEntry(
+                    id = note.id xor (card.id shl 32),
+                    cardTitle = card.title.ifBlank { getString(R.string.study_note_title_fallback) },
+                    frontText = note.frontText,
+                    backText = note.backText,
+                    textColor = card.textColor,
+                    background = card.bg,
+                    updatedAt = card.updatedAt
+                )
+            }
+        }.toMutableList()
+        if (studyNotes.isEmpty()) {
+            snackbar(getString(R.string.study_empty_state))
+            return
+        }
+        val blurEffect = RenderEffect.createBlurEffect(28f, 28f, Shader.TileMode.CLAMP)
+        rootLayout.setRenderEffect(blurEffect)
+        val view = layoutInflater.inflate(R.layout.dialog_study_notes, null)
+        val recycler = view.findViewById<RecyclerView>(R.id.recyclerStudyNotes)
+        val emptyView = view.findViewById<TextView>(R.id.studyEmptyState)
+        val title = view.findViewById<TextView>(R.id.studyTitle)
+        val closeButton = view.findViewById<MaterialButton>(R.id.buttonCloseStudy)
+        title.text = getString(R.string.study_dialog_title, flow.name)
+
+        val dialog = Dialog(
+            this,
+            com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog
+        )
+        dialog.setContentView(view)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.setOnShowListener {
+            val metrics = resources.displayMetrics
+            val targetWidth = (metrics.widthPixels * 0.92f).toInt()
+            val targetHeight = (metrics.heightPixels * 0.86f).toInt()
+            dialog.window?.setLayout(targetWidth, targetHeight)
+        }
+        dialog.setOnDismissListener {
+            rootLayout.setRenderEffect(null)
+        }
+        val layoutManager = createLayoutManager()
+        layoutManager.selectionListener = null
+        recycler.layoutManager = layoutManager
+        recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+        lateinit var adapter: CardsAdapter
+        adapter = CardsAdapter(
+            tint = cardTint,
+            onItemClick = { index ->
+                toggleStudyNote(studyNotes, index)
+                recycler.findViewHolderForAdapterPosition(index)?.itemView?.performHapticFeedback(
+                    HapticFeedbackConstants.VIRTUAL_KEY
+                )
+                renderStudyCards(adapter, studyNotes, emptyView)
+            },
+            onItemDoubleClick = { _, _ -> },
+            onItemLongPress = { _, _ -> false },
+            onStickyNotesClick = {},
+            onTitleSpeakClick = null,
+            showStickyButton = false
+        )
+        adapter.setBodyTextSize(cardFontSizeSp)
+        adapter.setBodyTypeface(cardTypeface)
+        recycler.adapter = adapter
+        renderStudyCards(adapter, studyNotes, emptyView)
+        closeButton.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+    }
+
+    private fun renderStudyCards(
+        adapter: CardsAdapter,
+        studyNotes: List<StudyNoteEntry>,
+        emptyView: TextView
+    ) {
+        val items = studyNotes.map { note ->
+            val currentText = if (note.showingBack) note.backText else note.frontText
+            val resolvedText = currentText.ifBlank { getString(R.string.study_note_empty_side) }
+            val sideLabel = if (note.showingBack) R.string.study_side_back else R.string.study_side_front
+            val background = when (val bg = note.background) {
+                is BgImage.Res -> bg.copy()
+                is BgImage.UriRef -> bg.copy()
+                null -> null
+            }
+            CardItem(
+                id = note.id,
+                title = note.cardTitle,
+                snippet = resolvedText,
+                textColor = note.textColor,
+                bg = background,
+                updatedAt = note.updatedAt
+            ).apply { relativeTimeText = getString(sideLabel) }
+        }
+        emptyView.isVisible = items.isEmpty()
+        adapter.submitList(items)
+    }
+
+    private fun toggleStudyNote(studyNotes: MutableList<StudyNoteEntry>, index: Int) {
+        val target = studyNotes.getOrNull(index) ?: return
+        target.showingBack = !target.showingBack
     }
 
     private fun showStickyNoteEditor(
@@ -5483,6 +5597,7 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+            val studyButton = view.findViewById<MaterialButton>(R.id.buttonStudy)
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
@@ -5501,7 +5616,7 @@ class MainActivity : AppCompatActivity() {
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView, studyButton)
             return holder
         }
 
@@ -5525,7 +5640,8 @@ class MainActivity : AppCompatActivity() {
             val recycler: RecyclerView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter,
-            val cardCountView: TextView
+            val cardCountView: TextView,
+            val studyButton: MaterialButton
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
 
@@ -5535,7 +5651,7 @@ class MainActivity : AppCompatActivity() {
                     flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
-                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView)
+                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView, studyButton)
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
@@ -5545,6 +5661,10 @@ class MainActivity : AppCompatActivity() {
                     shouldRestoreState = flowSearchQueryNormalized.isEmpty(),
                     shouldScrollToTop = flowSearchQueryNormalized.isNotEmpty()
                 )
+                studyButton.setOnClickListener {
+                    val targetFlow = flows.getOrNull(bindingAdapterPosition) ?: return@setOnClickListener
+                    startStudySession(targetFlow)
+                }
             }
 
             fun onCardTapped(index: Int) {
@@ -5602,7 +5722,8 @@ class MainActivity : AppCompatActivity() {
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
         val adapter: CardsAdapter,
-        val cardCountView: TextView
+        val cardCountView: TextView,
+        val studyButton: MaterialButton
     ) {
         private var activeQuery: String = ""
         private var indicatorTotal: Int = 0
@@ -5621,6 +5742,8 @@ class MainActivity : AppCompatActivity() {
             recycler.addOnScrollListener(scrollListener)
             layoutManager.selectionListener = selectionCallback
             cardCountView.isVisible = false
+            studyButton.isEnabled = false
+            studyButton.alpha = 0.6f
         }
 
         fun updateDisplayedCards(
@@ -5630,6 +5753,7 @@ class MainActivity : AppCompatActivity() {
             shouldScrollToTop: Boolean
         ) {
             activeQuery = query
+            updateStudyButton(flow)
             val displayed = filterCardsForSearch(flow.cards, query)
             indicatorTotal = displayed.size
             if (indicatorTotal == 0) {
@@ -5729,6 +5853,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun owningFlow(): CardFlow? = flows.firstOrNull { it.id == flowId }
+
+        private fun updateStudyButton(flow: CardFlow) {
+            val hasStickyNotes = flow.cards.any { it.stickyNotes.isNotEmpty() }
+            studyButton.isEnabled = hasStickyNotes
+            studyButton.alpha = if (hasStickyNotes) 1f else 0.6f
+        }
 
         private fun updateCardCounter(selectionIndex: Int?) {
             if (indicatorTotal <= 0) {
