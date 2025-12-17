@@ -2272,7 +2272,8 @@ class MainActivity : AppCompatActivity() {
         layoutManager.selectionListener = null
         recycler.layoutManager = layoutManager
         recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
-        val adapter = CardsAdapter(
+        lateinit var adapter: CardsAdapter
+        adapter = CardsAdapter(
             tint = cardTint,
             onItemClick = { index ->
                 toggleStudyNote(studyNotes, index)
