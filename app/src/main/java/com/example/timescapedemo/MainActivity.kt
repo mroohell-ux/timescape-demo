@@ -2060,7 +2060,9 @@ class MainActivity : AppCompatActivity() {
             .setContentText(contentText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setContentIntent(pendingIntent)
             .build()
         NotificationManagerCompat.from(this).notify(nextStickyNoteNotificationId(), notification)
@@ -2075,15 +2077,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun createStickyNoteChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val desiredImportance = NotificationManager.IMPORTANCE_HIGH
+        val existingChannel = manager.getNotificationChannel(STICKY_NOTE_NOTIFICATION_CHANNEL_ID)
+        if (existingChannel != null && existingChannel.importance < desiredImportance) {
+            manager.deleteNotificationChannel(STICKY_NOTE_NOTIFICATION_CHANNEL_ID)
+        }
         val channel = NotificationChannel(
             STICKY_NOTE_NOTIFICATION_CHANNEL_ID,
             getString(R.string.sticky_note_notification_channel_name),
-            NotificationManager.IMPORTANCE_DEFAULT
+            desiredImportance
         ).apply {
             description = getString(R.string.sticky_note_notification_channel_description)
         }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.createNotificationChannel(channel)
+        manager.createNotificationChannel(channel)
     }
 
     private fun showStickyNotesDialog(
