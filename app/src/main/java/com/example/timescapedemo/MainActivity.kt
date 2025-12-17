@@ -7,12 +7,15 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Dialog
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
+import android.content.Context
+
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -119,7 +122,6 @@ import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
-
 class MainActivity : AppCompatActivity() {
 
     private lateinit var drawerLayout: DrawerLayout
@@ -2035,35 +2037,53 @@ class MainActivity : AppCompatActivity() {
         return targets.random()
     }
 
+
+    //private var stickyNoteNotificationSequence = 0
+
     private fun showStickyNoteNotification(target: StickyNoteTarget) {
-        createStickyNoteChannel()
+        createStickyNoteChannelIfNeeded()
+
         val contentText = target.frontText.ifBlank {
             getString(R.string.sticky_note_notification_empty_front)
         }
+
         val clickIntent = Intent(this, MainActivity::class.java).apply {
-            flags =
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+
             putExtra(EXTRA_TARGET_FLOW_ID, target.flowId)
             putExtra(EXTRA_TARGET_CARD_ID, target.cardId)
             putExtra(EXTRA_TARGET_STICKY_NOTE_ID, target.noteId)
             putExtra(EXTRA_TARGET_STICKY_NOTE_SHOW_BACK, true)
         }
+
         val pendingIntent = PendingIntent.getActivity(
             this,
             target.noteId.hashCode(),
             clickIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(this, STICKY_NOTE_NOTIFICATION_CHANNEL_ID)
+
+        val notification:Notification = NotificationCompat.Builder(this, STICKY_NOTE_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_sticky_note)
             .setContentTitle(getString(R.string.sticky_note_notification_title))
             .setContentText(contentText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
+
+            // Android 8+ heads-up is mainly controlled by channel IMPORTANCE_HIGH,
+            // but these help categorization + user expectations.
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+
+            // Optional: adds a timestamp
+            .setShowWhen(true)
             .build()
-        NotificationManagerCompat.from(this).notify(nextStickyNoteNotificationId(), notification)
+
+        NotificationManagerCompat.from(this)
+            .notify(nextStickyNoteNotificationId(), notification)
     }
 
     private fun nextStickyNoteNotificationId(): Int {
@@ -2073,18 +2093,85 @@ class MainActivity : AppCompatActivity() {
         return STICKY_NOTE_NOTIFICATION_BASE_ID + stickyNoteNotificationSequence
     }
 
-    private fun createStickyNoteChannel() {
+    private fun createStickyNoteChannelIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // If it already exists, do nothing.
+        if (nm.getNotificationChannel(STICKY_NOTE_NOTIFICATION_CHANNEL_ID) != null) return
+
+        val channelName = getString(R.string.sticky_note_notification_channel_name)
+        val channelDesc = getString(R.string.sticky_note_notification_channel_description)
+
         val channel = NotificationChannel(
             STICKY_NOTE_NOTIFICATION_CHANNEL_ID,
-            getString(R.string.sticky_note_notification_channel_name),
-            NotificationManager.IMPORTANCE_DEFAULT
+            channelName,
+            NotificationManager.IMPORTANCE_HIGH // <-- this enables heads-up pop-up
         ).apply {
-            description = getString(R.string.sticky_note_notification_channel_description)
+            description = channelDesc
+            enableLights(true)
+            lightColor = Color.YELLOW
+            enableVibration(true)
+            setShowBadge(true)
+
+            // Optional: if you want sound, keep default sound behavior
+            // setSound(...) // leave as default unless you need custom
         }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.createNotificationChannel(channel)
+
+        nm.createNotificationChannel(channel)
     }
+//    private fun showStickyNoteNotification(target: StickyNoteTarget) {
+//        createStickyNoteChannel()
+//        val contentText = target.frontText.ifBlank {
+//            getString(R.string.sticky_note_notification_empty_front)
+//        }
+//        val clickIntent = Intent(this, MainActivity::class.java).apply {
+//            flags =
+//                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+//            putExtra(EXTRA_TARGET_FLOW_ID, target.flowId)
+//            putExtra(EXTRA_TARGET_CARD_ID, target.cardId)
+//            putExtra(EXTRA_TARGET_STICKY_NOTE_ID, target.noteId)
+//            putExtra(EXTRA_TARGET_STICKY_NOTE_SHOW_BACK, true)
+//        }
+//        val pendingIntent = PendingIntent.getActivity(
+//            this,
+//            target.noteId.hashCode(),
+//            clickIntent,
+//            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+//        )
+//        val notification = NotificationCompat.Builder(this, STICKY_NOTE_NOTIFICATION_CHANNEL_ID)
+//            .setSmallIcon(R.drawable.ic_sticky_note)
+//            .setContentTitle(getString(R.string.sticky_note_notification_title))
+//            .setContentText(contentText)
+//            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+//            .setAutoCancel(true)
+//            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+//            .setContentIntent(pendingIntent)
+//            .build()
+//        NotificationManagerCompat.from(this).notify(nextStickyNoteNotificationId(), notification)
+//    }
+//
+//    private fun nextStickyNoteNotificationId(): Int {
+//        val maxIncrement = Int.MAX_VALUE - STICKY_NOTE_NOTIFICATION_BASE_ID
+//        stickyNoteNotificationSequence =
+//            if (stickyNoteNotificationSequence >= maxIncrement) 0 else stickyNoteNotificationSequence + 1
+//        return STICKY_NOTE_NOTIFICATION_BASE_ID + stickyNoteNotificationSequence
+//    }
+//
+
+//    private fun createStickyNoteChannel() {
+//        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+//        val channel = NotificationChannel(
+//            STICKY_NOTE_NOTIFICATION_CHANNEL_ID,
+//            getString(R.string.sticky_note_notification_channel_name),
+//            NotificationManager.IMPORTANCE_DEFAULT
+//        ).apply {
+//            description = getString(R.string.sticky_note_notification_channel_description)
+//        }
+//        val manager = getSystemService(NotificationManager::class.java)
+//        manager?.createNotificationChannel(channel)
+//    }
 
     private fun showStickyNotesDialog(
         flow: CardFlow,
