@@ -210,6 +210,8 @@ class MainActivity : AppCompatActivity() {
     private var stickyNoteNotificationJob: Job? = null
     private var stickyNoteNotificationSequence = 0
 
+    private data class StickyNoteFaces(val front: String, val back: String)
+
     private sealed interface ImageCardRequest {
         val flowId: Long
 
@@ -2283,7 +2285,6 @@ class MainActivity : AppCompatActivity() {
     ) {
         private val showingBack = mutableSetOf<Long>()
         private var hasAppliedInitialFocus = false
-        private data class StickyNoteFaces(val front: String, val back: String)
 
         fun render() {
             stack.removeAllViews()
