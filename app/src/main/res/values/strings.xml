@@ -198,7 +198,7 @@
     <string name="card_sticky_notes_content_desc">Open sticky notes</string>
     <string name="dialog_sticky_notes_title">Card sticky notes</string>
     <string name="dialog_sticky_add">Add</string>
-    <string name="dialog_sticky_close">Close</string>
+    <string name="dialog_sticky_auto_generate">Auto generate</string>
     <string name="dialog_sticky_front_hint">Front side</string>
     <string name="dialog_sticky_back_hint">Back side</string>
     <string name="dialog_sticky_color_label">Note color</string>
@@ -207,6 +207,12 @@
     <string name="dialog_sticky_new_title">Add sticky note</string>
     <string name="dialog_sticky_delete">Delete note</string>
     <string name="dialog_sticky_save">Save note</string>
+    <string name="dialog_sticky_bulk_title">Generate sticky notes</string>
+    <string name="dialog_sticky_bulk_hint">Paste text where each English line is followed by its Chinese translation.</string>
+    <string name="dialog_sticky_bulk_input_hint">Line 1: English\nLine 2: Chinese\nLine 3: English\nLine 4: Chinese…</string>
+    <string name="dialog_sticky_bulk_example">The first line will be placed on the back of a sticky note and the second line on the front. The pattern repeats for each pair.</string>
+    <string name="dialog_sticky_bulk_generate">Create notes</string>
+    <string name="dialog_sticky_bulk_empty_error">Please enter at least one line to generate sticky notes.</string>
     <string name="sticky_note_notification_channel_name">Sticky notes</string>
     <string name="sticky_note_notification_channel_description">Surface sticky notes from your cards.</string>
     <string name="sticky_note_notification_title">Sticky note reminder</string>

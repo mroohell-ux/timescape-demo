@@ -63,12 +63,12 @@
                     android:text="@string/dialog_sticky_add" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/buttonCloseSticky"
+                    android:id="@+id/buttonGenerateSticky"
                     style="@style/Widget.MaterialComponents.Button.TextButton"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="@string/dialog_sticky_close" />
+                    android:text="@string/dialog_sticky_auto_generate" />
             </LinearLayout>
             <TextView
                 android:id="@+id/stickyEmptyState"
