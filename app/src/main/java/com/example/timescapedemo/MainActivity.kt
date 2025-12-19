@@ -183,6 +183,8 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+    private val negativeOnePageIndex: Int = 0
+    private val flowPageOffset: Int = 1
     private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var cardTypeface: Typeface? = null
@@ -550,13 +552,14 @@ class MainActivity : AppCompatActivity() {
         applyAppBackground()
 
         flowAdapter.notifyDataSetChanged()
-        val initialIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
-        if (flowPager.currentItem != initialIndex) {
-            flowPager.setCurrentItem(initialIndex, false)
+        val initialFlowIndex = selectedFlowIndex.coerceIn(0, max(0, flows.lastIndex))
+        val initialPagerIndex = if (flows.isEmpty()) negativeOnePageIndex else flowIndexToPagerPosition(initialFlowIndex)
+        if (flowPager.currentItem != initialPagerIndex) {
+            flowPager.setCurrentItem(initialPagerIndex, false)
         }
-        selectedFlowIndex = initialIndex
-        renderFlowChips(initialIndex)
-        updateChipSelection(initialIndex)
+        selectedFlowIndex = initialFlowIndex
+        renderFlowChips(initialFlowIndex)
+        updateChipSelection(if (flows.isEmpty()) -1 else initialFlowIndex)
         updateToolbarSubtitle()
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
@@ -629,9 +632,16 @@ class MainActivity : AppCompatActivity() {
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
-                selectedFlowIndex = position
-                prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, position).apply()
-                updateChipSelection(position)
+                if (isNegativeOnePage(position)) {
+                    updateChipSelection(-1)
+                    updateToolbarSubtitle()
+                    updateShuffleMenuState()
+                    return
+                }
+                val flowIndex = pagerPositionToFlowIndex(position) ?: return
+                selectedFlowIndex = flowIndex
+                prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, flowIndex).apply()
+                updateChipSelection(flowIndex)
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
             }
@@ -785,7 +795,7 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
-            if (index >= 0) flowAdapter.notifyItemChanged(index)
+            if (index >= 0) notifyFlowChanged(index)
         }
     }
 
@@ -951,7 +961,7 @@ class MainActivity : AppCompatActivity() {
         flow.lastViewedCardIndex = cardIndex
         flow.lastViewedCardId = cardId
         flow.lastViewedCardFocused = true
-        flowPager.setCurrentItem(flowIndex, false)
+        goToFlow(flowIndex, smooth = false)
         val controller = flowControllers[flowId]
         if (controller != null) {
             controller.updateDisplayedCards(
@@ -962,7 +972,7 @@ class MainActivity : AppCompatActivity() {
             )
             controller.restoreState(flow)
         } else {
-            flowAdapter.notifyItemChanged(flowIndex)
+            notifyFlowChanged(flowIndex)
         }
         flowPager.post {
             flowControllers[flowId]?.restoreState(flow)
@@ -994,7 +1004,7 @@ class MainActivity : AppCompatActivity() {
         flow.lastViewedCardIndex = cardIndex
         flow.lastViewedCardId = cardId
         flow.lastViewedCardFocused = true
-        flowPager.setCurrentItem(flowIndex, false)
+        goToFlow(flowIndex, smooth = false)
         val controller = flowControllers[flowId]
         if (controller != null) {
             controller.updateDisplayedCards(
@@ -1005,7 +1015,7 @@ class MainActivity : AppCompatActivity() {
             )
             controller.restoreState(flow)
         } else {
-            flowAdapter.notifyItemChanged(flowIndex)
+            notifyFlowChanged(flowIndex)
         }
         flowPager.post {
             val targetFlow = flows.getOrNull(flowIndex) ?: return@post
@@ -1075,9 +1085,11 @@ class MainActivity : AppCompatActivity() {
     private fun updateChipSelection(position: Int) {
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
-            chip.isChecked = i == position
+            chip.isChecked = position >= 0 && i == position
         }
-        centerSelectedChip(position)
+        if (position >= 0) {
+            centerSelectedChip(position)
+        }
     }
 
     private fun handleFlowChipTap(flowId: Long, index: Int) {
@@ -1090,7 +1102,7 @@ class MainActivity : AppCompatActivity() {
             val targetIndex = flows.indexOfFirst { it.id == flowId }
             if (targetIndex >= 0) showFlowActionsDialog(targetIndex)
         } else {
-            flowPager.setCurrentItem(index, true)
+            goToFlow(index, smooth = true)
         }
     }
 
@@ -1254,13 +1266,13 @@ class MainActivity : AppCompatActivity() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
         val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
-        val currentIndex = flowPager.currentItem
+        val currentIndex = currentFlowIndex() ?: return
         val targetIndex = when {
             positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
             positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
             else -> null
         } ?: return
-        flowPager.setCurrentItem(targetIndex, true)
+        goToFlow(targetIndex, smooth = true)
         lastCardMovePagerSwitchTime = now
     }
 
@@ -1293,13 +1305,13 @@ class MainActivity : AppCompatActivity() {
         flowControllers.remove(sourceId)?.dispose()
         flows.removeAt(sourceIndex)
         updateFlowBarVisibility()
-        flowAdapter.notifyItemRemoved(sourceIndex)
+        notifyFlowRemoved(sourceIndex)
         val newTargetIndex = flows.indexOfFirst { it.id == targetId }.coerceAtLeast(0)
-        flowAdapter.notifyItemChanged(newTargetIndex)
+        notifyFlowChanged(newTargetIndex)
         refreshFlow(targetFlow)
         selectedFlowIndex = newTargetIndex
         renderFlowChips(newTargetIndex)
-        flowPager.setCurrentItem(newTargetIndex, false)
+        goToFlow(newTargetIndex, smooth = false)
         updateToolbarSubtitle()
         updateShuffleMenuState()
         saveState()
@@ -1381,7 +1393,7 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
-            if (index >= 0) flowAdapter.notifyItemChanged(index)
+            if (index >= 0) notifyFlowChanged(index)
         }
 
         updateShuffleMenuState()
@@ -1437,10 +1449,10 @@ class MainActivity : AppCompatActivity() {
         val flow = CardFlow(id = nextFlowId++, name = name)
         flows += flow
         updateFlowBarVisibility()
-        flowAdapter.notifyItemInserted(flows.lastIndex)
+        notifyFlowInserted(flows.lastIndex)
         selectedFlowIndex = flows.lastIndex
         renderFlowChips(selectedFlowIndex)
-        flowPager.setCurrentItem(flows.lastIndex, true)
+        goToFlow(flows.lastIndex, smooth = true)
         updateToolbarSubtitle()
         saveState()
         snackbar(getString(R.string.snackbar_added_flow, name))
@@ -1521,22 +1533,15 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_cannot_delete_last_flow))
             return
         }
-        val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
+        val currentItem = currentFlowIndex() ?: 0
         val removed = flows.removeAt(index)
         updateFlowBarVisibility()
         flowShuffleStates.remove(removed.id)
         removed.cards.forEach(::disposeCardResources)
         flowControllers.remove(removed.id)
-        flowAdapter.notifyItemRemoved(index)
+        notifyFlowRemoved(index)
+        notifyNegativeOnePageChanged()
         val remainingLastIndex = flows.lastIndex
-        if (remainingLastIndex < 0) {
-            selectedFlowIndex = 0
-            renderFlowChips(0)
-            updateToolbarSubtitle()
-            updateShuffleMenuState()
-            saveState()
-            return
-        }
         val target = when {
             currentItem > remainingLastIndex -> remainingLastIndex
             index <= currentItem && currentItem > 0 -> currentItem - 1
@@ -1545,14 +1550,52 @@ class MainActivity : AppCompatActivity() {
         val safeTarget = target.coerceIn(0, remainingLastIndex)
         selectedFlowIndex = safeTarget
         renderFlowChips(safeTarget)
-        flowPager.setCurrentItem(safeTarget, false)
+        goToFlow(safeTarget, smooth = false)
         updateToolbarSubtitle()
         updateShuffleMenuState()
         saveState()
         snackbar(getString(R.string.snackbar_deleted_flow, removed.name))
     }
 
-    private fun currentFlow(): CardFlow? = flows.getOrNull(flowPager.currentItem)
+    private fun flowIndexToPagerPosition(flowIndex: Int): Int = flowIndex + flowPageOffset
+
+    private fun isNegativeOnePage(position: Int): Boolean = position == negativeOnePageIndex
+
+    private fun pagerPositionToFlowIndex(position: Int): Int? =
+        (position - flowPageOffset).takeIf { it in flows.indices }
+
+    private fun currentFlowIndex(): Int? = pagerPositionToFlowIndex(flowPager.currentItem)
+
+    private fun goToFlow(flowIndex: Int, smooth: Boolean) {
+        if (flows.isEmpty()) return
+        flowPager.setCurrentItem(flowIndexToPagerPosition(flowIndex), smooth)
+    }
+
+    private fun notifyFlowChanged(flowIndex: Int) {
+        if (flowIndex !in flows.indices) return
+        flowAdapter.notifyItemChanged(flowIndexToPagerPosition(flowIndex))
+    }
+
+    private fun notifyFlowRemoved(flowIndex: Int) {
+        if (flowIndex < 0) return
+        flowAdapter.notifyItemRemoved(flowIndexToPagerPosition(flowIndex))
+    }
+
+    private fun notifyFlowInserted(flowIndex: Int) {
+        if (flowIndex < 0) return
+        flowAdapter.notifyItemInserted(flowIndexToPagerPosition(flowIndex))
+    }
+
+    private fun notifyFlowsInserted(startIndex: Int, count: Int) {
+        if (count <= 0) return
+        flowAdapter.notifyItemRangeInserted(flowIndexToPagerPosition(startIndex), count)
+    }
+
+    private fun notifyNegativeOnePageChanged() {
+        flowAdapter.notifyItemChanged(negativeOnePageIndex)
+    }
+
+    private fun currentFlow(): CardFlow? = currentFlowIndex()?.let { flows[it] }
 
     private fun currentController(): FlowPageController? {
         val flow = currentFlow() ?: return null
@@ -1612,11 +1655,12 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
-            if (index >= 0) flowAdapter.notifyItemChanged(index)
+            if (index >= 0) notifyFlowChanged(index)
         }
         if (flow == currentFlow()) {
             updateShuffleMenuState()
         }
+        notifyNegativeOnePageChanged()
     }
 
     private fun refreshAllFlows(scrollToTopCurrent: Boolean = false) {
@@ -2200,7 +2244,7 @@ class MainActivity : AppCompatActivity() {
             dialog.window?.setLayout(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         val controller = StickyNoteBoardController(
-            card,
+            card.stickyNotes,
             stack,
             wallpaper,
             empty,
@@ -2276,22 +2320,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private inner class StickyNoteBoardController(
-        private val card: CardItem,
+        private val notes: MutableList<StickyNote>,
         private val stack: FrameLayout,
         private val wallpaper: FrameLayout,
         private val emptyView: TextView,
         private val initialTopNoteId: Long? = null,
-        private val showInitialBack: Boolean = false
+        private val showInitialBack: Boolean = false,
+        private val allowEditing: Boolean = true
     ) {
         private val showingBack = mutableSetOf<Long>()
         private var hasAppliedInitialFocus = false
 
         fun render() {
             stack.removeAllViews()
-            emptyView.isVisible = card.stickyNotes.isEmpty()
-            val total = card.stickyNotes.size
+            emptyView.isVisible = notes.isEmpty()
+            val total = notes.size
             applyInitialFocusIfNeeded()
-            card.stickyNotes.asReversed().forEachIndexed { depth, note ->
+            notes.asReversed().forEachIndexed { depth, note ->
                 val noteView = createNoteView(note, total - depth - 1)
                 stack.addView(noteView)
             }
@@ -2299,10 +2344,10 @@ class MainActivity : AppCompatActivity() {
 
         private fun applyInitialFocusIfNeeded() {
             if (hasAppliedInitialFocus || initialTopNoteId == null) return
-            val target = card.stickyNotes.firstOrNull { it.id == initialTopNoteId }
+            val target = notes.firstOrNull { it.id == initialTopNoteId }
             if (target != null) {
-                card.stickyNotes.remove(target)
-                card.stickyNotes.add(0, target)
+                notes.remove(target)
+                notes.add(0, target)
                 if (showInitialBack) {
                     showingBack.add(target.id)
                 }
@@ -2311,12 +2356,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun showEditor(note: StickyNote? = null) {
+            if (!allowEditing) return
             showStickyNoteEditor(note, onSave = { saved ->
                 if (note == null) {
-                    card.stickyNotes.add(0, saved)
+                    notes.add(0, saved)
                 } else {
-                    val idx = card.stickyNotes.indexOfFirst { it.id == saved.id }
-                    if (idx >= 0) card.stickyNotes[idx] = saved
+                    val idx = notes.indexOfFirst { it.id == saved.id }
+                    if (idx >= 0) notes[idx] = saved
                 }
                 render()
             }, onDelete = {
@@ -2325,6 +2371,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun showAutoGenerator() {
+            if (!allowEditing) return
             val bulkView = layoutInflater.inflate(R.layout.dialog_sticky_bulk, null)
             val bulkInput = bulkView.findViewById<EditText>(R.id.inputStickyBulk)
             AlertDialog.Builder(this@MainActivity)
@@ -2347,7 +2394,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun deleteNote(note: StickyNote) {
-            card.stickyNotes.removeAll { it.id == note.id }
+            notes.removeAll { it.id == note.id }
             showingBack.remove(note.id)
             render()
         }
@@ -2370,7 +2417,7 @@ class MainActivity : AppCompatActivity() {
 
         private fun addGeneratedNotes(faces: List<StickyNoteFaces>) {
             if (faces.isEmpty()) return
-            val startSize = card.stickyNotes.size
+            val startSize = notes.size
             faces.forEachIndexed { offset, face ->
                 val colorIndex = (startSize + offset) % stickyNotePalette.size
                 val color = stickyNotePalette[colorIndex]
@@ -2381,7 +2428,7 @@ class MainActivity : AppCompatActivity() {
                     color = color,
                     rotation = Random.nextDouble(-12.0, 12.0).toFloat()
                 )
-                card.stickyNotes.add(0, note)
+                notes.add(0, note)
             }
             render()
         }
@@ -2440,7 +2487,9 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onLongPress(e: MotionEvent) {
-                    showEditor(note)
+                    if (allowEditing) {
+                        showEditor(note)
+                    }
                 }
             })
             var startTx = 0f
@@ -2511,7 +2560,7 @@ class MainActivity : AppCompatActivity() {
             baseTranslationY: Float = 0f,
             baseRotation: Float = note.rotation
         ) {
-            if (card.stickyNotes.size <= 1) return
+            if (notes.size <= 1) return
             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             val travel = (stack.width.takeIf { it > 0 } ?: view.width).coerceAtLeast(1)
             view.animate()
@@ -2524,8 +2573,8 @@ class MainActivity : AppCompatActivity() {
                     view.translationY = baseTranslationY
                     view.rotation = baseRotation
                     view.alpha = 1f
-                    card.stickyNotes.remove(note)
-                    card.stickyNotes.add(note)
+                    notes.remove(note)
+                    notes.add(note)
                     render()
                 }
                 .start()
@@ -2681,6 +2730,19 @@ class MainActivity : AppCompatActivity() {
             clone.measure(widthSpec, heightSpec)
             return clone.measuredHeight
         }
+    }
+
+    private fun collectAllStickyNotes(): MutableList<StickyNote> {
+        val aggregated = mutableListOf<StickyNote>()
+        flows.forEach { flow ->
+            flow.cards.forEach { card ->
+                card.stickyNotes.forEach { note ->
+                    aggregated += note.copy()
+                }
+            }
+        }
+        aggregated.sortByDescending { it.id }
+        return aggregated
     }
 
     private fun loadEditableCardBitmap(image: CardImage): Bitmap? = try {
@@ -4758,7 +4820,8 @@ class MainActivity : AppCompatActivity() {
                 flows += newFlow
             }
             val insertedFlows = payload.flows.size
-            flowAdapter.notifyItemRangeInserted(baseIndex, insertedFlows)
+            notifyFlowsInserted(baseIndex, insertedFlows)
+            notifyNegativeOnePageChanged()
             renderFlowChips(selectedFlowIndex.coerceIn(0, flows.lastIndex))
             updateToolbarSubtitle()
             updateShuffleMenuState()
@@ -5469,7 +5532,8 @@ class MainActivity : AppCompatActivity() {
             else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
-            val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
+            val currentIndex = currentFlowIndex()
+                ?: selectedFlowIndex.coerceIn(0, max(0, flows.lastIndex))
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
@@ -5537,46 +5601,91 @@ class MainActivity : AppCompatActivity() {
         return getString(R.string.default_flow_name, baseName)
     }
 
-    private inner class FlowPagerAdapter : RecyclerView.Adapter<FlowPagerAdapter.FlowVH>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowVH {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
-            val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
-            val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
-            val layoutManager = createLayoutManager()
-            recycler.layoutManager = layoutManager
-            recycler.setHasFixedSize(true)
-            recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+    private inner class FlowPagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-            lateinit var holder: FlowVH
+        private val viewTypeStickyBoard = 0
+        private val viewTypeFlow = 1
+
+        override fun getItemViewType(position: Int): Int =
+            if (isNegativeOnePage(position)) viewTypeStickyBoard else viewTypeFlow
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            return if (viewType == viewTypeStickyBoard) {
+                val view = LayoutInflater.from(parent.context).inflate(R.layout.page_sticky_board, parent, false)
+                val stack = view.findViewById<FrameLayout>(R.id.stickyBoardStack)
+                val wallpaper = view.findViewById<FrameLayout>(R.id.stickyBoardSurface)
+                val empty = view.findViewById<TextView>(R.id.stickyBoardEmpty)
+                StickyBoardVH(view, stack, wallpaper, empty)
+            } else {
+                val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
+                val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
+                val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+                val layoutManager = createLayoutManager()
+                recycler.layoutManager = layoutManager
+                recycler.setHasFixedSize(true)
+                recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+
+                lateinit var holder: FlowVH
                 val adapter = CardsAdapter(
                     cardTint,
                     onItemClick = { index -> holder.onCardTapped(index) },
-                    onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
-                        holder.onCardDoubleTapped(card, index) },
+                    onItemDoubleClick = { card, index ->
+                        Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
+                        holder.onCardDoubleTapped(card, index)
+                    },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
                     onTitleSpeakClick = { card -> speakCardTitle(card) }
                 )
-            adapter.setBodyTextSize(cardFontSizeSp)
-            adapter.setBodyTypeface(cardTypeface)
-            recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
-            return holder
+                adapter.setBodyTextSize(cardFontSizeSp)
+                adapter.setBodyTypeface(cardTypeface)
+                recycler.adapter = adapter
+                holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+                holder
+            }
         }
 
-        override fun onBindViewHolder(holder: FlowVH, position: Int) {
-            val flow = flows[position]
-            holder.bind(flow)
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            when (holder) {
+                is StickyBoardVH -> holder.bind()
+                is FlowVH -> {
+                    val flowIndex = pagerPositionToFlowIndex(position) ?: return
+                    val flow = flows.getOrNull(flowIndex) ?: return
+                    holder.bind(flow)
+                }
+            }
         }
 
-        override fun getItemCount(): Int = flows.size
+        override fun getItemCount(): Int = flows.size + flowPageOffset
 
-        override fun onViewRecycled(holder: FlowVH) {
-            holder.boundFlowId?.let {
-                persistControllerState(it)
-                flowControllers.remove(it)?.dispose()
+        override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+            if (holder is FlowVH) {
+                holder.boundFlowId?.let {
+                    persistControllerState(it)
+                    flowControllers.remove(it)?.dispose()
+                }
             }
             super.onViewRecycled(holder)
+        }
+
+        inner class StickyBoardVH(
+            view: View,
+            private val stack: FrameLayout,
+            private val wallpaper: FrameLayout,
+            private val emptyView: TextView
+        ) : RecyclerView.ViewHolder(view) {
+
+            fun bind() {
+                val aggregatedNotes = collectAllStickyNotes()
+                val controller = StickyNoteBoardController(
+                    aggregatedNotes,
+                    stack,
+                    wallpaper,
+                    emptyView,
+                    allowEditing = false
+                )
+                controller.render()
+            }
         }
 
         inner class FlowVH(
@@ -5587,6 +5696,10 @@ class MainActivity : AppCompatActivity() {
             val cardCountView: TextView
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
+
+            private fun boundFlow(): CardFlow? = boundFlowId?.let { id ->
+                flows.firstOrNull { it.id == id }
+            }
 
             fun bind(flow: CardFlow) {
                 boundFlowId?.let {
@@ -5628,7 +5741,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             fun onCardDoubleTapped(card: CardItem, index: Int) {
-                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val flow = boundFlow() ?: return
                 val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
                 if (cardIndex == -1) return
                 val targetCard = flow.cards[cardIndex]
@@ -5641,7 +5754,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             fun onStickyNotesTapped(card: CardItem) {
-                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                val flow = boundFlow() ?: return
                 val target = flow.cards.firstOrNull { it.id == card.id } ?: return
                 showStickyNotesDialog(flow, target)
             }
@@ -5649,7 +5762,7 @@ class MainActivity : AppCompatActivity() {
             fun onCardLongPressed(index: Int, cardView: View): Boolean {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return false
                 if (!layoutManager.isFocused(index)) return false
-                val flow = flows.getOrNull(bindingAdapterPosition) ?: return false
+                val flow = boundFlow() ?: return false
                 val card = adapter.getItemAt(index) ?: return false
                 return startCardMoveDrag(cardView, flow, card)
             }
