@@ -48,6 +48,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.PopupWindow
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
@@ -208,6 +209,8 @@ class MainActivity : AppCompatActivity() {
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
     private var stickyNoteNotificationSequence = 0
+
+    private data class StickyNoteFaces(val front: String, val back: String)
 
     private sealed interface ImageCardRequest {
         val flowId: Long
@@ -2184,7 +2187,7 @@ class MainActivity : AppCompatActivity() {
         val empty = view.findViewById<TextView>(R.id.stickyEmptyState)
         val wallpaper = view.findViewById<FrameLayout>(R.id.stickyWallpaper)
         val addButton = view.findViewById<MaterialButton>(R.id.buttonAddSticky)
-        val closeButton = view.findViewById<MaterialButton>(R.id.buttonCloseSticky)
+        val generateButton = view.findViewById<MaterialButton>(R.id.buttonGenerateSticky)
         val dialog = Dialog(
             this,
             com.google.android.material.R.style.ThemeOverlay_Material3_MaterialAlertDialog
@@ -2206,7 +2209,7 @@ class MainActivity : AppCompatActivity() {
         )
         controller.render()
         addButton.setOnClickListener { controller.showEditor() }
-        closeButton.setOnClickListener { dialog.dismiss() }
+        generateButton.setOnClickListener { controller.showAutoGenerator() }
         dialog.setOnDismissListener {
             refreshFlow(flow, scrollToTop = false)
             saveState()
@@ -2321,9 +2324,65 @@ class MainActivity : AppCompatActivity() {
             })
         }
 
+        fun showAutoGenerator() {
+            val bulkView = layoutInflater.inflate(R.layout.dialog_sticky_bulk, null)
+            val bulkInput = bulkView.findViewById<EditText>(R.id.inputStickyBulk)
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle(R.string.dialog_sticky_bulk_title)
+                .setView(bulkView)
+                .setPositiveButton(R.string.dialog_sticky_bulk_generate) { _, _ ->
+                    val faces = parseBulkStickyInput(bulkInput.text.toString())
+                    if (faces.isEmpty()) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            R.string.dialog_sticky_bulk_empty_error,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@setPositiveButton
+                    }
+                    addGeneratedNotes(faces)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+
         private fun deleteNote(note: StickyNote) {
             card.stickyNotes.removeAll { it.id == note.id }
             showingBack.remove(note.id)
+            render()
+        }
+
+        private fun parseBulkStickyInput(rawText: String): List<StickyNoteFaces> {
+            val lines = rawText.lines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            if (lines.isEmpty()) return emptyList()
+            val faces = mutableListOf<StickyNoteFaces>()
+            var idx = 0
+            while (idx < lines.size) {
+                val back = lines[idx]
+                val front = lines.getOrNull(idx + 1) ?: ""
+                faces.add(StickyNoteFaces(front = front, back = back))
+                idx += 2
+            }
+            return faces
+        }
+
+        private fun addGeneratedNotes(faces: List<StickyNoteFaces>) {
+            if (faces.isEmpty()) return
+            val startSize = card.stickyNotes.size
+            faces.forEachIndexed { offset, face ->
+                val colorIndex = (startSize + offset) % stickyNotePalette.size
+                val color = stickyNotePalette[colorIndex]
+                val note = StickyNote(
+                    id = System.currentTimeMillis() + Random.nextInt(1000) + offset,
+                    frontText = face.front,
+                    backText = face.back,
+                    color = color,
+                    rotation = Random.nextDouble(-12.0, 12.0).toFloat()
+                )
+                card.stickyNotes.add(0, note)
+            }
             render()
         }
 
