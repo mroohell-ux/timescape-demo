@@ -5695,7 +5695,11 @@ class MainActivity : AppCompatActivity() {
     ) {
         private var activeQuery: String = ""
         private var indicatorTotal: Int = 0
-        private val selectionCallback: (Int?) -> Unit = { index -> updateCardCounter(index) }
+        private var lastHapticSelection: Int? = null
+        private val selectionCallback: (Int?) -> Unit = { index ->
+            vibrateOnCardChange(index)
+            updateCardCounter(index)
+        }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
@@ -5830,6 +5834,16 @@ class MainActivity : AppCompatActivity() {
             ).coerceIn(0, indicatorTotal - 1)
             cardCountView.text = "${safeIndex + 1}/$indicatorTotal"
             cardCountView.isVisible = true
+        }
+
+        private fun vibrateOnCardChange(selectionIndex: Int?) {
+            if (selectionIndex == null) {
+                lastHapticSelection = null
+                return
+            }
+            if (selectionIndex == lastHapticSelection) return
+            recycler.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            lastHapticSelection = selectionIndex
         }
     }
 
