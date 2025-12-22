@@ -1209,6 +1209,7 @@ class MainActivity : AppCompatActivity() {
             cardView.startDrag(dragData, shadow, payload, 0)
         }
         if (started) {
+            cardView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             cardView.animate().alpha(0.65f).scaleX(0.98f).scaleY(0.98f).setDuration(120).start()
         }
         cardView.setOnDragListener { view, event ->
@@ -1589,6 +1590,7 @@ class MainActivity : AppCompatActivity() {
         return cards.filter { card ->
             card.title.contains(trimmed, ignoreCase = true) ||
                 card.snippet.contains(trimmed, ignoreCase = true) ||
+                (card.backSnippet?.contains(trimmed, ignoreCase = true) == true) ||
                 card.recognizedText?.contains(trimmed, ignoreCase = true) == true
         }
     }
@@ -2176,6 +2178,24 @@ class MainActivity : AppCompatActivity() {
 //        manager?.createNotificationChannel(channel)
 //    }
 
+    private fun addTextCardFromSticky(flow: CardFlow, note: StickyNote) {
+        val frontText = note.frontText.ifBlank { note.backText }.orEmpty()
+        val backText = note.backText.takeIf { it.isNotBlank() }
+        val card = CardItem(
+            id = nextCardId++,
+            title = "",
+            snippet = frontText,
+            backSnippet = backText,
+            textColor = Color.WHITE,
+            updatedAt = System.currentTimeMillis()
+        )
+        flow.cards.add(0, card)
+        flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
+        applyCardBackgrounds(flow)
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+    }
+
     private fun showStickyNotesDialog(
         flow: CardFlow,
         card: CardItem,
@@ -2200,6 +2220,7 @@ class MainActivity : AppCompatActivity() {
             dialog.window?.setLayout(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         val controller = StickyNoteBoardController(
+            flow,
             card,
             stack,
             wallpaper,
@@ -2276,6 +2297,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private inner class StickyNoteBoardController(
+        private val flow: CardFlow,
         private val card: CardItem,
         private val stack: FrameLayout,
         private val wallpaper: FrameLayout,
@@ -2314,6 +2336,7 @@ class MainActivity : AppCompatActivity() {
             showStickyNoteEditor(note, onSave = { saved ->
                 if (note == null) {
                     card.stickyNotes.add(0, saved)
+                    addTextCardFromSticky(flow, saved)
                 } else {
                     val idx = card.stickyNotes.indexOfFirst { it.id == saved.id }
                     if (idx >= 0) card.stickyNotes[idx] = saved
@@ -2382,6 +2405,7 @@ class MainActivity : AppCompatActivity() {
                     rotation = Random.nextDouble(-12.0, 12.0).toFloat()
                 )
                 card.stickyNotes.add(0, note)
+                addTextCardFromSticky(flow, note)
             }
             render()
         }
@@ -4433,6 +4457,7 @@ class MainActivity : AppCompatActivity() {
                 val cardObj = JSONObject()
                 cardObj.put("title", card.title)
                 cardObj.put("snippet", card.snippet)
+                card.backSnippet?.let { cardObj.put("backSnippet", it) }
                 card.recognizedText?.let { cardObj.put("recognizedText", it) }
                 cardObj.put("textColor", colorToString(card.textColor))
                 cardObj.put("updatedAt", card.updatedAt)
@@ -4736,6 +4761,7 @@ class MainActivity : AppCompatActivity() {
                             id = cardId,
                             title = importedCard.title,
                             snippet = importedCard.snippet,
+                            backSnippet = importedCard.backSnippet,
                             recognizedText = importedCard.recognizedText,
                             textColor = importedCard.textColor,
                             updatedAt = importedCard.updatedAt,
@@ -4819,9 +4845,11 @@ class MainActivity : AppCompatActivity() {
                     }
                     val stickyNotes = parseStickyNotes(cardObj)
                     val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
+                    val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
                     cards += ImportedCard(
                         title,
                         snippet,
+                        backSnippet,
                         updatedAt,
                         textColor,
                         handwriting,
@@ -5232,6 +5260,7 @@ class MainActivity : AppCompatActivity() {
                                 id = cardId,
                                 title = cardObj.optString("title"),
                                 snippet = cardObj.optString("snippet"),
+                                backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() },
                                 recognizedText = cardObj.optString("recognizedText")
                                     .takeIf { it.isNotBlank() },
                                 textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE,
@@ -5377,6 +5406,7 @@ class MainActivity : AppCompatActivity() {
                 obj.put("id", card.id)
                 obj.put("title", card.title)
                 obj.put("snippet", card.snippet)
+                card.backSnippet?.let { obj.put("backSnippet", it) }
                 card.recognizedText?.let { obj.put("recognizedText", it) }
                 obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
@@ -5837,6 +5867,7 @@ class MainActivity : AppCompatActivity() {
     private data class ImportedCard(
         val title: String,
         val snippet: String,
+        val backSnippet: String?,
         val updatedAt: Long,
         val textColor: Int,
         val handwriting: HandwritingContent?,
