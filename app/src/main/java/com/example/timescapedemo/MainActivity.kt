@@ -1230,10 +1230,9 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
             DragEvent.ACTION_DROP -> {
-                val moveData = event.localState as? CardMoveDragData ?: return false
-                val targetFlowId = currentFlow()?.id ?: return false
-                moveCardToFlow(moveData.cardId, moveData.sourceFlowId, targetFlowId)
-                return true
+                // Let the drop land on the target flow's recycler so it can compute the
+                // exact insertion anchor instead of forcing a top insert here.
+                return false
             }
             DragEvent.ACTION_DRAG_LOCATION -> {
                 maybeSwitchFlowForCardDrag(event.x)
@@ -1251,17 +1250,18 @@ class MainActivity : AppCompatActivity() {
         if (!isCardMovePagerDragActive) return
         if (flows.size <= 1) return
         val width = flowPager.width.takeIf { it > 0 } ?: return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
-        val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
+        val leftZone = width * 0.35f
+        val rightZone = width * 0.65f
         val currentIndex = flowPager.currentItem
         val targetIndex = when {
-            positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
-            positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
+            positionX < leftZone && currentIndex > 0 -> currentIndex - 1
+            positionX > rightZone && currentIndex < flows.lastIndex -> currentIndex + 1
             else -> null
         } ?: return
-        flowPager.setCurrentItem(targetIndex, true)
-        lastCardMovePagerSwitchTime = now
+        if (targetIndex != currentIndex || SystemClock.elapsedRealtime() - lastCardMovePagerSwitchTime > CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) {
+            flowPager.setCurrentItem(targetIndex, true)
+            lastCardMovePagerSwitchTime = SystemClock.elapsedRealtime()
+        }
     }
 
     private fun confirmMergeFlows(sourceId: Long, targetId: Long) {
@@ -1333,6 +1333,39 @@ class MainActivity : AppCompatActivity() {
         refreshFlow(targetFlow, scrollToTop = true)
         saveState()
         snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
+    }
+
+    private fun moveCardWithinFlow(
+        flow: CardFlow,
+        cardId: Long,
+        targetCardId: Long?,
+        placeBeforeTarget: Boolean
+    ) {
+        if (flow.cards.size <= 1) return
+        val currentIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (currentIndex < 0) return
+        val targetIndex = targetCardId?.let { id -> flow.cards.indexOfFirst { it.id == id } }
+        if (targetIndex != null && targetIndex == currentIndex) return
+
+        val card = flow.cards.removeAt(currentIndex)
+        var desiredIndex = when {
+            targetIndex == null -> flow.cards.size
+            placeBeforeTarget -> targetIndex
+            else -> targetIndex + 1
+        }
+        if (targetIndex != null && currentIndex < targetIndex && desiredIndex > 0) {
+            desiredIndex -= 1
+        }
+        desiredIndex = desiredIndex.coerceIn(0, flow.cards.size)
+
+        flow.cards.add(desiredIndex, card)
+        flow.lastViewedCardIndex = desiredIndex
+        flow.lastViewedCardId = card.id
+        flow.lastViewedCardFocused = true
+        flowShuffleStates.remove(flow.id)
+
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
     }
 
     private fun toggleShuffleCards() {
@@ -5679,6 +5712,7 @@ class MainActivity : AppCompatActivity() {
         init {
             recycler.addOnScrollListener(scrollListener)
             layoutManager.selectionListener = selectionCallback
+            recycler.setOnDragListener { _, event -> handleCardReorderDrag(event) }
             cardCountView.isVisible = false
         }
 
@@ -5746,6 +5780,7 @@ class MainActivity : AppCompatActivity() {
             if (layoutManager.selectionListener === selectionCallback) {
                 layoutManager.selectionListener = null
             }
+            recycler.setOnDragListener(null)
         }
 
         private fun handleListCommitted(
@@ -5800,6 +5835,123 @@ class MainActivity : AppCompatActivity() {
             ).coerceIn(0, indicatorTotal - 1)
             cardCountView.text = "${safeIndex + 1}/$indicatorTotal"
             cardCountView.isVisible = true
+        }
+
+        private fun handleCardReorderDrag(event: DragEvent): Boolean {
+            val flow = owningFlow() ?: return false
+            val moveData = event.localState as? CardMoveDragData ?: return false
+            return when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_LOCATION -> {
+                    maybeAutoScrollDuringDrag(event.y)
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    val anchor = findReorderAnchor(event.x, event.y) ?: (null to false)
+                    if (moveData.sourceFlowId == flow.id) {
+                        moveCardWithinFlow(flow, moveData.cardId, anchor.first, anchor.second)
+                    } else {
+                        moveCardIntoFlow(flow, moveData, anchor)
+                    }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> true
+                else -> true
+            }
+        }
+
+        private fun moveCardIntoFlow(
+            targetFlow: CardFlow,
+            moveData: CardMoveDragData,
+            anchor: Pair<Long?, Boolean>?
+        ) {
+            val sourceFlow = flows.firstOrNull { it.id == moveData.sourceFlowId } ?: return
+            val sourceIndex = sourceFlow.cards.indexOfFirst { it.id == moveData.cardId }
+            if (sourceIndex < 0) return
+            val card = sourceFlow.cards.removeAt(sourceIndex)
+            card.updatedAt = System.currentTimeMillis()
+            card.relativeTimeText = null
+
+            val clampedSourceIndex = sourceFlow.lastViewedCardIndex
+                .coerceIn(0, max(0, sourceFlow.cards.lastIndex))
+            sourceFlow.lastViewedCardIndex = clampedSourceIndex
+            sourceFlow.lastViewedCardId = sourceFlow.cards.getOrNull(clampedSourceIndex)?.id
+            sourceFlow.lastViewedCardFocused = sourceFlow.lastViewedCardFocused && sourceFlow.cards.isNotEmpty()
+
+            val anchorId = anchor?.first
+            val placeBefore = anchor?.second ?: false
+            val targetCards = targetFlow.cards
+            val anchorIndex = anchorId?.let { id -> targetCards.indexOfFirst { it.id == id } }
+            val desiredIndex = when {
+                anchorIndex == null || anchorIndex < 0 -> targetCards.size
+                placeBefore -> anchorIndex
+                else -> anchorIndex + 1
+            }.coerceIn(0, targetCards.size)
+
+            targetCards.add(desiredIndex, card)
+            targetFlow.lastViewedCardIndex = desiredIndex
+            targetFlow.lastViewedCardId = card.id
+            targetFlow.lastViewedCardFocused = true
+
+            flowShuffleStates.remove(sourceFlow.id)
+            flowShuffleStates.remove(targetFlow.id)
+
+            refreshFlow(sourceFlow, scrollToTop = false)
+            refreshFlow(targetFlow, scrollToTop = false)
+            saveState()
+            snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
+        }
+
+        private fun findReorderAnchor(x: Float, y: Float): Pair<Long?, Boolean>? {
+            val anchorView = recycler.findChildViewUnder(x, y)
+            val anchorPosition = anchorView?.let { recycler.getChildAdapterPosition(it) }
+                ?.takeIf { it != RecyclerView.NO_POSITION }
+            val anchorId = anchorPosition?.let { adapter.getItemAt(it)?.id }
+            if (anchorId != null && anchorView != null) {
+                val midpoint = (anchorView.top + anchorView.bottom) / 2f
+                val placeBefore = y < midpoint
+                return anchorId to placeBefore
+            }
+
+            if (recycler.childCount == 0) return null
+
+            var closestView: View? = null
+            var closestAdapterPosition: Int? = null
+            var closestDistance = Float.MAX_VALUE
+            for (i in 0 until recycler.childCount) {
+                val child = recycler.getChildAt(i)
+                val position = recycler.getChildAdapterPosition(child)
+                if (position == RecyclerView.NO_POSITION) continue
+                val distance = when {
+                    y < child.top -> child.top - y
+                    y > child.bottom -> y - child.bottom
+                    else -> 0f
+                }
+                if (distance < closestDistance) {
+                    closestDistance = distance
+                    closestView = child
+                    closestAdapterPosition = position
+                }
+            }
+
+            val closestId = closestAdapterPosition?.let { adapter.getItemAt(it)?.id }
+            if (closestId != null && closestView != null) {
+                val midpoint = (closestView.top + closestView.bottom) / 2f
+                val placeBefore = y < midpoint
+                return closestId to placeBefore
+            }
+
+            return null
+        }
+
+        private fun maybeAutoScrollDuringDrag(y: Float) {
+            val height = recycler.height.takeIf { it > 0 } ?: return
+            val edgeThreshold = height * 0.2f
+            val scrollStep = (24 * recycler.resources.displayMetrics.density).roundToInt()
+            when {
+                y < edgeThreshold -> recycler.smoothScrollBy(0, -scrollStep)
+                y > height - edgeThreshold -> recycler.smoothScrollBy(0, scrollStep)
+            }
         }
     }
 
@@ -5895,7 +6047,6 @@ private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
-private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
