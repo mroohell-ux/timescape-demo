@@ -77,6 +77,7 @@ data class CardItem(
     val id: Long,
     var title: String,
     var snippet: String,
+    var backSnippet: String? = null,
     var textColor: Int = Color.WHITE,
     var bg: BgImage? = null,
     var image: CardImage? = null,
@@ -182,7 +183,7 @@ class CardsAdapter(
         }.toSet()
         blockedUris.retainAll(activeUris)
         val flippableIds = copies.filter {
-            it.handwriting != null || it.imageHandwriting != null
+            it.handwriting != null || it.imageHandwriting != null || !it.backSnippet.isNullOrBlank()
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
         return copies
@@ -285,8 +286,7 @@ class CardsAdapter(
             HandwritingBitmapLoader.clear(holder.handwriting)
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
-            setCardMode(holder, CardMode.TEXT, fallbackText)
-            bindTitle(holder, item)
+            bindTextCard(holder, item, face)
         }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
@@ -556,8 +556,9 @@ class CardsAdapter(
         val item = getItem(position)
         val handwritingContent = item.handwriting
         val hasImageBack = item.imageHandwriting != null
+        val hasTextBack = !item.backSnippet.isNullOrBlank()
         val hasHandwriting = handwritingContent != null
-        if (!hasHandwriting && (!hasImageBack || item.image == null)) return null
+        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack) return null
         val current = currentCardFace(item.id)
         val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
         handwritingFaces[item.id] = next
@@ -566,10 +567,10 @@ class CardsAdapter(
             item.image != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.image_card_missing)
             else -> item.snippet
         }
-        if (handwritingContent != null) {
-            animateHandwritingFlip(holder, item, next, fallbackText, position)
-        } else {
-            bindImageCard(holder, item, next, fallbackText, position)
+        when {
+            handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
+            hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
+            hasTextBack -> bindTextCard(holder, item, next)
         }
         return next
     }
@@ -584,7 +585,8 @@ class CardsAdapter(
     fun canFlipCardAt(index: Int): Boolean {
         val item = getItemAt(index) ?: return false
         if (item.handwriting != null) return true
-        return item.imageHandwriting != null && item.image != null
+        if (item.imageHandwriting != null && item.image != null) return true
+        return !item.backSnippet.isNullOrBlank()
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
@@ -813,6 +815,13 @@ class CardsAdapter(
                 holder.bg.isVisible = false
             }
         }
+    }
+
+    private fun bindTextCard(holder: VH, item: CardItem, face: HandwritingFace) {
+        val backText = item.backSnippet?.takeIf { it.isNotBlank() }
+        val text = if (face == HandwritingFace.BACK && backText != null) backText else item.snippet
+        setCardMode(holder, CardMode.TEXT, text)
+        bindTitle(holder, item)
     }
 
     private fun bindTitle(holder: VH, item: CardItem) {
