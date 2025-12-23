@@ -5806,6 +5806,7 @@ class MainActivity : AppCompatActivity() {
             private val ringGlow: View = view.findViewById(R.id.watchRingGlow)
             private val card: MaterialCardView = view.findViewById(R.id.watchStickyCard)
             private val noteText: TextView = view.findViewById(R.id.watchStickyText)
+            private val noteScroll: ScrollView = view.findViewById(R.id.watchStickyScroll)
             private val metaText: TextView = view.findViewById(R.id.watchStickyMeta)
             private val counter: TextView = view.findViewById(R.id.watchStickyCounter)
             private val faceLabel: TextView = view.findViewById(R.id.watchStickyFace)
@@ -5870,6 +5871,7 @@ class MainActivity : AppCompatActivity() {
                 }.ifBlank { itemView.context.getString(R.string.watch_sticky_empty_face) }
                 card.setCardBackgroundColor(ColorStateList.valueOf(note.color))
                 noteText.text = content
+                noteScroll.scrollTo(0, 0)
                 metaText.text = itemView.context.getString(
                     R.string.watch_sticky_meta,
                     entry.flowName,

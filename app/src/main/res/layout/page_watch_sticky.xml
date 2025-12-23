@@ -45,11 +45,9 @@
             app:cardElevation="8dp"
             app:cardUseCompatPadding="true">
 
-            <LinearLayout
+            <androidx.constraintlayout.widget.ConstraintLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:gravity="center"
-                android:orientation="vertical"
                 android:padding="18dp">
 
                 <TextView
@@ -63,42 +61,70 @@
                     android:paddingBottom="6dp"
                     android:textColor="@android:color/white"
                     android:textSize="12sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
 
                 <TextView
                     android:id="@+id/watchStickyMeta"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="8dp"
                     android:gravity="center"
                     android:maxLines="2"
                     android:textColor="#CC111111"
                     android:textSize="14sp"
-                    android:textStyle="bold" />
+                    android:textStyle="bold"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
 
-                <TextView
-                    android:id="@+id/watchStickyText"
-                    android:layout_width="match_parent"
+                <ScrollView
+                    android:id="@+id/watchStickyScroll"
+                    android:layout_width="0dp"
                     android:layout_height="0dp"
-                    android:layout_marginTop="12dp"
-                    android:layout_marginBottom="12dp"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:lineSpacingExtra="6dp"
-                    android:textColor="#FF111111"
-                    android:textSize="20sp" />
+                    android:fillViewport="true"
+                    android:overScrollMode="ifContentScrolls"
+                    app:layout_constraintBottom_toTopOf="@+id/watchStickyHint"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toBottomOf="@+id/watchStickyMeta">
+
+                    <TextView
+                        android:id="@+id/watchStickyText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:includeFontPadding="false"
+                        android:lineSpacingExtra="6dp"
+                        android:padding="12dp"
+                        android:textColor="#FF111111"
+                        android:textSize="22sp"
+                        android:textStyle="bold"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="14sp"
+                        android:autoSizeMaxTextSize="30sp"
+                        android:autoSizeStepGranularity="1sp"
+                        android:breakStrategy="balanced"
+                        android:hyphenationFrequency="full"
+                        android:textAlignment="center" />
+                </ScrollView>
 
                 <TextView
                     android:id="@+id/watchStickyHint"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="8dp"
                     android:gravity="center"
                     android:text="@string/watch_sticky_hint"
                     android:textColor="#99111111"
-                    android:textSize="12sp" />
+                    android:textSize="12sp"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintStart_toStartOf="parent" />
 
-            </LinearLayout>
+            </androidx.constraintlayout.widget.ConstraintLayout>
         </com.google.android.material.card.MaterialCardView>
     </FrameLayout>
 
