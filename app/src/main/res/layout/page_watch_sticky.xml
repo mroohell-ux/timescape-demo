@@ -24,20 +24,20 @@
             android:id="@+id/watchRingGlow"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@android:color/transparent" />
+            android:background="@drawable/watch_ring_glow" />
 
         <ImageView
             android:id="@+id/watchBezel"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@android:color/transparent"
+            android:background="@drawable/watch_bezel"
             android:contentDescription="@string/watch_sticky_toolbar_subtitle" />
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/watchStickyCard"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_margin="0dp"
+            android:layout_margin="12dp"
             android:clipToPadding="false"
             android:foreground="?attr/selectableItemBackgroundBorderless"
             app:cardCornerRadius="320dp"
@@ -68,14 +68,14 @@
                         android:layout_height="wrap_content"
                         android:gravity="center"
                         android:includeFontPadding="false"
-                        android:lineSpacingExtra="6dp"
-                        android:padding="0dp"
+                        android:lineSpacingExtra="4dp"
+                        android:padding="2dp"
                         android:textColor="#FF0A0A0A"
-                        android:textSize="32sp"
+                        android:textSize="34sp"
                         android:textStyle="bold"
                         android:autoSizeTextType="uniform"
-                        android:autoSizeMinTextSize="18sp"
-                        android:autoSizeMaxTextSize="40sp"
+                        android:autoSizeMinTextSize="16sp"
+                        android:autoSizeMaxTextSize="46sp"
                         android:autoSizeStepGranularity="1sp"
                         android:breakStrategy="balanced"
                         android:hyphenationFrequency="full"
