@@ -5808,10 +5808,7 @@ class MainActivity : AppCompatActivity() {
             private val card: MaterialCardView = view.findViewById(R.id.watchStickyCard)
             private val noteText: TextView = view.findViewById(R.id.watchStickyText)
             private val noteScroll: ScrollView = view.findViewById(R.id.watchStickyScroll)
-            private val metaText: TextView = view.findViewById(R.id.watchStickyMeta)
             private val counter: TextView = view.findViewById(R.id.watchStickyCounter)
-            private val faceLabel: TextView = view.findViewById(R.id.watchStickyFace)
-            private val hint: TextView = view.findViewById(R.id.watchStickyHint)
             private var notes: List<AggregatedStickyNote> = emptyList()
             private var currentIndex: Int = 0
             private val showingBack: MutableSet<Long> = mutableSetOf()
@@ -5854,12 +5851,7 @@ class MainActivity : AppCompatActivity() {
                 if (notes.isEmpty()) {
                     card.setCardBackgroundColor(ColorStateList.valueOf(Color.parseColor("#F5F7FA")))
                     noteText.text = itemView.context.getString(R.string.watch_sticky_empty_title)
-                    metaText.text = itemView.context.getString(R.string.watch_sticky_empty_body)
                     counter.text = itemView.context.getString(R.string.watch_sticky_counter_empty)
-                    faceLabel.text = ""
-                    faceLabel.isVisible = false
-                    hint.isVisible = true
-                    hint.setText(R.string.watch_sticky_hint)
                     return
                 }
                 val entry = notes[currentIndex]
@@ -5873,23 +5865,11 @@ class MainActivity : AppCompatActivity() {
                 card.setCardBackgroundColor(ColorStateList.valueOf(note.color))
                 noteText.text = content
                 noteScroll.scrollTo(0, 0)
-                // Make long notes easier to read by resetting scroll and showing full text.
-                metaText.text = itemView.context.getString(
-                    R.string.watch_sticky_meta,
-                    entry.flowName,
-                    entry.cardLabel
-                )
                 counter.text = itemView.context.getString(
                     R.string.watch_sticky_counter,
                     currentIndex + 1,
                     notes.size
                 )
-                faceLabel.text = itemView.context.getString(
-                    if (showingBackFace) R.string.watch_sticky_back else R.string.watch_sticky_front
-                )
-                faceLabel.isVisible = true
-                hint.isVisible = true
-                hint.setText(R.string.watch_sticky_hint)
             }
 
             private fun handleBezelTouch(view: View, event: MotionEvent): Boolean {
