@@ -5873,6 +5873,7 @@ class MainActivity : AppCompatActivity() {
                 card.setCardBackgroundColor(ColorStateList.valueOf(note.color))
                 noteText.text = content
                 noteScroll.scrollTo(0, 0)
+                // Make long notes easier to read by resetting scroll and showing full text.
                 metaText.text = itemView.context.getString(
                     R.string.watch_sticky_meta,
                     entry.flowName,
