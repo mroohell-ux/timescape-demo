@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/watch_backdrop"
-    android:padding="16dp">
+    android:padding="0dp">
 
     <FrameLayout
         android:id="@+id/watchBezelTouchArea"
@@ -19,7 +19,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintWidth_percent="0.88">
+        app:layout_constraintWidth_percent="1.0">
 
         <View
             android:id="@+id/watchRingGlow"
@@ -38,7 +38,7 @@
             android:id="@+id/watchStickyCard"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_margin="12dp"
+            android:layout_margin="4dp"
             android:clipToPadding="false"
             android:foreground="?attr/selectableItemBackgroundBorderless"
             app:cardCornerRadius="320dp"
@@ -48,7 +48,7 @@
             <androidx.constraintlayout.widget.ConstraintLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:padding="18dp">
+                android:padding="12dp">
 
                 <TextView
                     android:id="@+id/watchStickyFace"
@@ -99,13 +99,13 @@
                         android:gravity="center"
                         android:includeFontPadding="false"
                         android:lineSpacingExtra="6dp"
-                        android:padding="8dp"
+                        android:padding="4dp"
                         android:textColor="#FF0A0A0A"
-                        android:textSize="28sp"
+                        android:textSize="32sp"
                         android:textStyle="bold"
                         android:autoSizeTextType="uniform"
-                        android:autoSizeMinTextSize="16sp"
-                        android:autoSizeMaxTextSize="34sp"
+                        android:autoSizeMinTextSize="18sp"
+                        android:autoSizeMaxTextSize="40sp"
                         android:autoSizeStepGranularity="1sp"
                         android:breakStrategy="balanced"
                         android:hyphenationFrequency="full"
