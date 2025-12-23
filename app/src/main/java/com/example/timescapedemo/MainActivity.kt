@@ -5822,8 +5822,9 @@ class MainActivity : AppCompatActivity() {
                 }
                 bezelTouchArea.setOnTouchListener(touchListener)
                 bezel.setOnTouchListener(touchListener)
-                card.setOnClickListener { toggleFace() }
-            }
+            card.setOnClickListener { toggleFace() }
+            view.setOnClickListener { toggleFace() }
+        }
 
             fun bind(stickyNotes: List<AggregatedStickyNote>) {
                 notes = stickyNotes
