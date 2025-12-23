@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/watch_backdrop"
+    android:padding="16dp">
+
+    <FrameLayout
+        android:id="@+id/watchBezelTouchArea"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:clipToPadding="false"
+        android:clipChildren="false"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintDimensionRatio="1:1"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintWidth_percent="0.88">
+
+        <View
+            android:id="@+id/watchRingGlow"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/watch_ring_glow" />
+
+        <ImageView
+            android:id="@+id/watchBezel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/watch_bezel"
+            android:contentDescription="@string/watch_sticky_toolbar_subtitle" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/watchStickyCard"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_margin="18dp"
+            android:clipToPadding="false"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            app:cardCornerRadius="320dp"
+            app:cardElevation="8dp"
+            app:cardUseCompatPadding="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    android:id="@+id/watchStickyFace"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/watch_face_pill"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/watchStickyMeta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:maxLines="2"
+                    android:textColor="#CC111111"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/watchStickyText"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="12dp"
+                    android:layout_marginBottom="12dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:lineSpacingExtra="6dp"
+                    android:textColor="#FF111111"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:id="@+id/watchStickyHint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="@string/watch_sticky_hint"
+                    android:textColor="#99111111"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/watchStickyCounter"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textColor="#CC111111"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/watchBezelTouchArea" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
