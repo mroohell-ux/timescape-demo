@@ -43,7 +43,7 @@
             app:cardCornerRadius="320dp"
             app:cardElevation="0dp"
             app:cardUseCompatPadding="false"
-            app:cardBackgroundColor="@android:color/transparent"
+            app:cardBackgroundColor="@android:color/white"
             app:strokeWidth="0dp">
 
             <androidx.constraintlayout.widget.ConstraintLayout
@@ -69,13 +69,13 @@
                         android:gravity="center"
                         android:includeFontPadding="false"
                         android:lineSpacingExtra="4dp"
-                        android:padding="2dp"
+                        android:padding="6dp"
                         android:textColor="#FF0A0A0A"
-                        android:textSize="34sp"
+                        android:textSize="28sp"
                         android:textStyle="bold"
                         android:autoSizeTextType="uniform"
-                        android:autoSizeMinTextSize="16sp"
-                        android:autoSizeMaxTextSize="46sp"
+                        android:autoSizeMinTextSize="14sp"
+                        android:autoSizeMaxTextSize="32sp"
                         android:autoSizeStepGranularity="1sp"
                         android:breakStrategy="balanced"
                         android:hyphenationFrequency="full"
