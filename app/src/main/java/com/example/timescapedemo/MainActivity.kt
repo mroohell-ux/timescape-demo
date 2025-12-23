@@ -5704,6 +5704,10 @@ class MainActivity : AppCompatActivity() {
 
         override fun getItemCount(): Int = flows.size + 1
 
+        override fun getItemViewType(position: Int): Int {
+            return if (isWatchPage(position)) viewTypeWatch else viewTypeFlow
+        }
+
         override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
             if (holder is FlowVH) {
                 holder.boundFlowId?.let {
