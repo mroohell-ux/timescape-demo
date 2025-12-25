@@ -217,6 +217,17 @@
     <string name="sticky_note_notification_channel_description">Surface sticky notes from your cards.</string>
     <string name="sticky_note_notification_title">Sticky note reminder</string>
     <string name="sticky_note_notification_empty_front">(No front text)</string>
+    <string name="watch_sticky_toolbar_subtitle">Sticky bezel</string>
+    <string name="watch_sticky_untitled_card">Untitled card</string>
+    <string name="watch_sticky_empty_title">No sticky notes yet</string>
+    <string name="watch_sticky_empty_body">Add sticky notes to any card, then rotate the bezel to browse them.</string>
+    <string name="watch_sticky_meta">%1$s • %2$s</string>
+    <string name="watch_sticky_counter">%1$d / %2$d</string>
+    <string name="watch_sticky_counter_empty">0 / 0</string>
+    <string name="watch_sticky_front">Front</string>
+    <string name="watch_sticky_back">Back</string>
+    <string name="watch_sticky_hint">Tap to flip • Rotate bezel for next/previous</string>
+    <string name="watch_sticky_empty_face">No text on this side</string>
     <string name="debug_import_flow_label">Flow %1$d (%2$s)</string>
     <string name="debug_import_card_label_with_title">%1$s · Card %2$d (%3$s)</string>
     <string name="debug_import_card_label">%1$s · Card %2$d</string>
