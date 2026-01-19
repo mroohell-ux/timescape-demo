@@ -285,6 +285,11 @@ class MainActivity : AppCompatActivity() {
     private var pagerBasePaddingEnd: Int = 0
     private var pagerBasePaddingBottom: Int = 0
     private var flowBarBaseMarginBottom: Int = 0
+    private var isFlowBarAutoHidden: Boolean = true
+    private val flowBarAutoHideRunnable = Runnable {
+        isFlowBarAutoHidden = true
+        updateFlowBarVisibility()
+    }
 
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -627,6 +632,8 @@ class MainActivity : AppCompatActivity() {
         }
         flowPager.setPageTransformer(transformer)
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            private var isUserSwiping = false
+
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
                 selectedFlowIndex = position
@@ -634,6 +641,14 @@ class MainActivity : AppCompatActivity() {
                 updateChipSelection(position)
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
+                if (isUserSwiping) {
+                    showFlowBarTemporarily()
+                }
+            }
+
+            override fun onPageScrollStateChanged(state: Int) {
+                super.onPageScrollStateChanged(state)
+                isUserSwiping = state == ViewPager2.SCROLL_STATE_DRAGGING
             }
         })
         flowPager.setOnDragListener { _, event ->
@@ -1164,7 +1179,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFlowBarVisibility() {
-        flowBar.isVisible = flows.size > 1
+        if (flows.size <= 1) {
+            flowBar.removeCallbacks(flowBarAutoHideRunnable)
+            isFlowBarAutoHidden = true
+            flowBar.isVisible = false
+            return
+        }
+        flowBar.isVisible = !isFlowBarAutoHidden
+    }
+
+    private fun showFlowBarTemporarily() {
+        if (flows.size <= 1) {
+            updateFlowBarVisibility()
+            return
+        }
+        flowBar.removeCallbacks(flowBarAutoHideRunnable)
+        isFlowBarAutoHidden = false
+        updateFlowBarVisibility()
+        flowBar.postDelayed(flowBarAutoHideRunnable, FLOW_BAR_AUTO_HIDE_DELAY_MS)
     }
 
     private fun resetFlowChipDragState() {
@@ -5943,6 +5975,7 @@ private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
+private const val FLOW_BAR_AUTO_HIDE_DELAY_MS = 5000L
 private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
