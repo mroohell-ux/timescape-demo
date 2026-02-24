@@ -87,6 +87,16 @@
             app:iconTint="@color/flow_bar_stroke"/>
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerExportStickyNotes"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_export_sticky_notes"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerImportNotes"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
