@@ -253,6 +253,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
     private var activeFlowReorderDragId: Long? = null
+    private var activeFlowReorderHoverTargetId: Long? = null
 
     private data class HandwritingDialogExtras(
         val baseBitmap: Bitmap? = null,
@@ -1142,7 +1143,13 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> !isSelf
                 DragEvent.ACTION_DRAG_ENTERED -> {
-                    if (!isSelf) targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
+                    if (!isSelf) {
+                        targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
+                        if (isFlowReorder && activeFlowReorderHoverTargetId != targetId) {
+                            reorderSourceId?.let { moveFlow(it, targetId, shouldPersist = false) }
+                            activeFlowReorderHoverTargetId = targetId
+                        }
+                    }
                     true
                 }
                 DragEvent.ACTION_DRAG_EXITED -> {
@@ -1155,7 +1162,7 @@ class MainActivity : AppCompatActivity() {
                         if (isFlowMerge) {
                             mergeSourceId?.let { confirmMergeFlows(it, targetId) }
                         } else if (isFlowReorder) {
-                            reorderSourceId?.let { moveFlow(it, targetId) }
+                            // Reorder is applied while hovering; drag end persists it.
                         } else if (isCardMove) {
                             moveData?.let { moveCardToFlow(it.cardId, it.sourceFlowId, targetId) }
                         }
@@ -1163,6 +1170,7 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 DragEvent.ACTION_DRAG_ENDED -> {
+                    if (isFlowReorder && activeFlowReorderDragId != null) saveState()
                     resetFlowChipDragState()
                     true
                 }
@@ -1227,6 +1235,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetFlowChipDragState() {
         activeFlowReorderDragId = null
+        activeFlowReorderHoverTargetId = null
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
             chip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
@@ -1265,13 +1274,14 @@ class MainActivity : AppCompatActivity() {
         }
         if (started) {
             activeFlowReorderDragId = flowId
+            activeFlowReorderHoverTargetId = null
             chip.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
             chip.alpha = 0.7f
         }
         return started
     }
 
-    private fun moveFlow(sourceFlowId: Long, targetFlowId: Long) {
+    private fun moveFlow(sourceFlowId: Long, targetFlowId: Long, shouldPersist: Boolean = true) {
         val sourceIndex = flows.indexOfFirst { it.id == sourceFlowId }
         val targetIndex = flows.indexOfFirst { it.id == targetFlowId }
         if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) return
@@ -1286,7 +1296,7 @@ class MainActivity : AppCompatActivity() {
         flowPager.setCurrentItem(selectedFlowIndex, false)
         updateToolbarSubtitle()
         updateShuffleMenuState()
-        saveState()
+        if (shouldPersist) saveState()
     }
 
     private fun startCardMoveDrag(cardView: View, flow: CardFlow, card: CardItem): Boolean {
@@ -1481,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateShuffleMenuState()
-        saveState()
+        if (shouldPersist) saveState()
     }
 
     private fun centerSelectedChip(position: Int) {
