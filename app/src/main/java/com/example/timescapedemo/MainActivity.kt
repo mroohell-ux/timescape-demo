@@ -1125,18 +1125,14 @@ class MainActivity : AppCompatActivity() {
             val targetId = targetChip.tag as? Long ?: return@OnDragListener false
             val label = event.clipDescription?.label?.toString()
             val isFlowMerge = label == FLOW_MERGE_DRAG_LABEL
-            val isFlowReorder = label == FLOW_REORDER_DRAG_LABEL
             val isCardMove = label == CARD_MOVE_DRAG_LABEL
-            if (!isFlowMerge && !isFlowReorder && !isCardMove) return@OnDragListener false
+            if (!isFlowMerge && !isCardMove) return@OnDragListener false
             val mergeSourceId = if (isFlowMerge) event.localState as? Long else null
-            val reorderSourceId = if (isFlowReorder) event.localState as? Long else null
             val moveData = if (isCardMove) event.localState as? CardMoveDragData else null
             if (isFlowMerge && mergeSourceId == null) return@OnDragListener false
-            if (isFlowReorder && reorderSourceId == null) return@OnDragListener false
             if (isCardMove && moveData == null) return@OnDragListener false
             val isSelf = when {
                 isFlowMerge -> mergeSourceId == targetId
-                isFlowReorder -> reorderSourceId == targetId
                 isCardMove -> moveData?.sourceFlowId == targetId
                 else -> false
             }
@@ -1145,21 +1141,6 @@ class MainActivity : AppCompatActivity() {
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     if (!isSelf) {
                         targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
-                    }
-                    true
-                }
-                DragEvent.ACTION_DRAG_LOCATION -> {
-                    if (isFlowReorder && !isSelf) {
-                        val sourceId = reorderSourceId ?: return@OnDragListener false
-                        val targetIndex = flows.indexOfFirst { it.id == targetId }
-                        if (targetIndex >= 0) {
-                            val insertAfterTarget = event.x >= (targetChip.width / 2f)
-                            val requestedIndex = if (insertAfterTarget) targetIndex + 1 else targetIndex
-                            if (activeFlowReorderHoverIndex != requestedIndex) {
-                                moveFlowToIndex(sourceId, requestedIndex, shouldPersist = false)
-                                activeFlowReorderHoverIndex = requestedIndex
-                            }
-                        }
                     }
                     true
                 }
@@ -1172,8 +1153,6 @@ class MainActivity : AppCompatActivity() {
                     if (!isSelf) {
                         if (isFlowMerge) {
                             mergeSourceId?.let { confirmMergeFlows(it, targetId) }
-                        } else if (isFlowReorder) {
-                            // Reorder is applied while hovering; drag end persists it.
                         } else if (isCardMove) {
                             moveData?.let { moveCardToFlow(it.cardId, it.sourceFlowId, targetId) }
                         }
@@ -1181,13 +1160,36 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 DragEvent.ACTION_DRAG_ENDED -> {
-                    if (isFlowReorder && activeFlowReorderDragId != null) saveState()
                     resetFlowChipDragState()
                     true
                 }
                 else -> false
             }
         }
+        val reorderGroupDragListener = View.OnDragListener { _, event ->
+            val isFlowReorder = event.clipDescription?.label?.toString() == FLOW_REORDER_DRAG_LABEL
+            if (!isFlowReorder) return@OnDragListener false
+            val sourceId = event.localState as? Long ?: return@OnDragListener false
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_LOCATION -> {
+                    val requestedIndex = flowInsertIndexForPosition(event.x)
+                    if (requestedIndex != null && activeFlowReorderHoverIndex != requestedIndex) {
+                        moveFlowToIndex(sourceId, requestedIndex, shouldPersist = false)
+                        activeFlowReorderHoverIndex = requestedIndex
+                    }
+                    true
+                }
+                DragEvent.ACTION_DROP -> true
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    if (activeFlowReorderDragId != null) saveState()
+                    resetFlowChipDragState()
+                    true
+                }
+                else -> true
+            }
+        }
+        flowChipGroup.setOnDragListener(reorderGroupDragListener)
         flows.forEachIndexed { index, flow ->
             val chip = Chip(this).apply {
                 text = flow.name
@@ -1247,6 +1249,20 @@ class MainActivity : AppCompatActivity() {
         }
         updateFlowBarVisibility()
         centerSelectedChip(safeIndex)
+    }
+
+    private fun flowInsertIndexForPosition(positionX: Float): Int? {
+        if (flows.isEmpty()) return null
+        val chips = (0 until flowChipGroup.childCount)
+            .mapNotNull { flowChipGroup.getChildAt(it) as? Chip }
+        if (chips.isEmpty()) return null
+        if (positionX <= chips.first().left) return 0
+        if (positionX >= chips.last().right) return chips.size
+        chips.forEachIndexed { index, chip ->
+            val midpoint = chip.left + chip.width / 2f
+            if (positionX < midpoint) return index
+        }
+        return chips.size
     }
 
     private fun updateFlowBarVisibility() {
