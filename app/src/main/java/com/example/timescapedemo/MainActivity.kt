@@ -40,6 +40,7 @@ import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -107,6 +108,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -189,6 +191,7 @@ class MainActivity : AppCompatActivity() {
     private var cardTypeface: Typeface? = null
     private var cardFontPath: String? = null
     private var cardFontDisplayName: String? = null
+    private var isFlowReorderModeEnabled: Boolean = false
     private var lastFlowChipTapId: Long = -1L
     private var lastFlowChipTapTime: Long = 0L
     private var textToSpeech: TextToSpeech? = null
@@ -250,6 +253,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingImageCardRequest: ImageCardRequest? = null
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
+    private var activeFlowReorderDragId: Long? = null
+    private var activeFlowReorderHoverIndex: Int? = null
 
     private data class HandwritingDialogExtras(
         val baseBitmap: Bitmap? = null,
@@ -401,6 +406,7 @@ class MainActivity : AppCompatActivity() {
         cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
+        isFlowReorderModeEnabled = prefs.getBoolean(KEY_FLOW_REORDER_MODE_ENABLED, false)
         cardTypeface = cardFontPath?.let { loadCardTypeface(it) }
         if (cardTypeface == null) {
             cardFontPath = null
@@ -663,6 +669,7 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
         setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
+        updateFlowReorderModeMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
@@ -671,6 +678,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_image_card -> { showAddImageCardDialog(); true }
                 R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
+                R.id.action_toggle_reorder_flows -> { toggleFlowReorderMode(); true }
                 else -> false
             }
         }
@@ -1089,6 +1097,28 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun updateFlowReorderModeMenuState() {
+        val item = toolbar.menu.findItem(R.id.action_toggle_reorder_flows) ?: return
+        item.isCheckable = true
+        item.isChecked = isFlowReorderModeEnabled
+        item.title = getString(
+            if (isFlowReorderModeEnabled) R.string.menu_reorder_flows_on
+            else R.string.menu_reorder_flows_off
+        )
+    }
+
+    private fun toggleFlowReorderMode() {
+        isFlowReorderModeEnabled = !isFlowReorderModeEnabled
+        updateFlowReorderModeMenuState()
+        prefs.edit().putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled).apply()
+        snackbar(
+            getString(
+                if (isFlowReorderModeEnabled) R.string.snackbar_reorder_flows_enabled
+                else R.string.snackbar_reorder_flows_disabled
+            )
+        )
+    }
+
     private fun updateChipSelection(position: Int) {
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
@@ -1115,6 +1145,7 @@ class MainActivity : AppCompatActivity() {
         val safeIndex = selectedIndex.coerceIn(0, max(0, flows.lastIndex))
         flowChipGroup.removeAllViews()
         val density = resources.displayMetrics.density
+        val dragThresholdPx = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
         val dragListener = View.OnDragListener { view, event ->
             val targetChip = view as? Chip ?: return@OnDragListener false
             val targetId = targetChip.tag as? Long ?: return@OnDragListener false
@@ -1134,7 +1165,9 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> !isSelf
                 DragEvent.ACTION_DRAG_ENTERED -> {
-                    if (!isSelf) targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
+                    if (!isSelf) {
+                        targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
+                    }
                     true
                 }
                 DragEvent.ACTION_DRAG_EXITED -> {
@@ -1159,6 +1192,30 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
+        val reorderGroupDragListener = View.OnDragListener { _, event ->
+            val isFlowReorder = event.clipDescription?.label?.toString() == FLOW_REORDER_DRAG_LABEL
+            if (!isFlowReorder) return@OnDragListener false
+            val sourceId = event.localState as? Long ?: return@OnDragListener false
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_LOCATION -> {
+                    val requestedIndex = flowInsertIndexForPosition(event.x)
+                    if (requestedIndex != null && activeFlowReorderHoverIndex != requestedIndex) {
+                        moveFlowToIndex(sourceId, requestedIndex, shouldPersist = false)
+                        activeFlowReorderHoverIndex = requestedIndex
+                    }
+                    true
+                }
+                DragEvent.ACTION_DROP -> true
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    if (activeFlowReorderDragId != null) saveState()
+                    resetFlowChipDragState()
+                    true
+                }
+                else -> true
+            }
+        }
+        flowChipGroup.setOnDragListener(reorderGroupDragListener)
         flows.forEachIndexed { index, flow ->
             val chip = Chip(this).apply {
                 text = flow.name
@@ -1169,9 +1226,57 @@ class MainActivity : AppCompatActivity() {
                 textSize = 14f
                 setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
                 isChecked = index == safeIndex
-                setOnClickListener { handleFlowChipTap(flow.id, index) }
                 tag = flow.id
-                setOnLongClickListener { startFlowMergeDrag(this, flow.id) }
+                setOnTouchListener(object : View.OnTouchListener {
+                    private var downX = 0f
+                    private var downY = 0f
+                    private var interactionHandled = false
+                    private var mergeRunnable: Runnable? = null
+
+                    override fun onTouch(v: View, event: MotionEvent): Boolean {
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                downX = event.rawX
+                                downY = event.rawY
+                                interactionHandled = false
+                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                                if (!isFlowReorderModeEnabled) {
+                                    mergeRunnable = Runnable {
+                                        interactionHandled = startFlowMergeDrag(this@apply, flow.id)
+                                    }.also {
+                                        v.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong())
+                                    }
+                                }
+                                return true
+                            }
+
+                            MotionEvent.ACTION_MOVE -> {
+                                if (isFlowReorderModeEnabled && !interactionHandled) {
+                                    val distance = hypot(event.rawX - downX, event.rawY - downY)
+                                    if (distance >= dragThresholdPx) {
+                                        mergeRunnable?.let(v::removeCallbacks)
+                                        mergeRunnable = null
+                                        interactionHandled = startFlowReorderDrag(this@apply, flow.id)
+                                    }
+                                }
+                                return true
+                            }
+
+                            MotionEvent.ACTION_UP,
+                            MotionEvent.ACTION_CANCEL -> {
+                                mergeRunnable?.let(v::removeCallbacks)
+                                mergeRunnable = null
+                                v.parent?.requestDisallowInterceptTouchEvent(false)
+                                if (event.actionMasked == MotionEvent.ACTION_UP && !interactionHandled) {
+                                    handleFlowChipTap(flow.id, index)
+                                }
+                                interactionHandled = false
+                                return true
+                            }
+                        }
+                        return true
+                    }
+                })
                 setOnDragListener(dragListener)
             }
             flowChipGroup.addView(chip)
@@ -1180,11 +1285,27 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(safeIndex)
     }
 
+    private fun flowInsertIndexForPosition(positionX: Float): Int? {
+        if (flows.isEmpty()) return null
+        val chips = (0 until flowChipGroup.childCount)
+            .mapNotNull { flowChipGroup.getChildAt(it) as? Chip }
+        if (chips.isEmpty()) return null
+        if (positionX <= chips.first().left) return 0
+        if (positionX >= chips.last().right) return chips.size
+        chips.forEachIndexed { index, chip ->
+            val midpoint = chip.left + chip.width / 2f
+            if (positionX < midpoint) return index
+        }
+        return chips.size
+    }
+
     private fun updateFlowBarVisibility() {
         flowBar.isVisible = flows.size > 1
     }
 
     private fun resetFlowChipDragState() {
+        activeFlowReorderDragId = null
+        activeFlowReorderHoverIndex = null
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
             chip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
@@ -1209,6 +1330,51 @@ class MainActivity : AppCompatActivity() {
             chip.alpha = 0.6f
         }
         return started
+    }
+
+    private fun startFlowReorderDrag(chip: Chip, flowId: Long): Boolean {
+        if (flows.size <= 1) return false
+        // Clear any stale drag-tracking state so a new reorder can always start.
+        activeFlowReorderDragId = null
+        activeFlowReorderHoverIndex = null
+        val dragData = ClipData.newPlainText(FLOW_REORDER_DRAG_LABEL, flowId.toString())
+        val shadow = View.DragShadowBuilder(chip)
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            chip.startDragAndDrop(dragData, shadow, flowId, View.DRAG_FLAG_OPAQUE)
+        } else {
+            @Suppress("DEPRECATION")
+            chip.startDrag(dragData, shadow, flowId, 0)
+        }
+        if (started) {
+            activeFlowReorderDragId = flowId
+            activeFlowReorderHoverIndex = null
+            chip.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
+            chip.alpha = 0.7f
+        }
+        return started
+    }
+
+    private fun moveFlowToIndex(sourceFlowId: Long, targetIndex: Int, shouldPersist: Boolean = true) {
+        val sourceIndex = flows.indexOfFirst { it.id == sourceFlowId }
+        if (sourceIndex < 0) return
+        val clampedTargetIndex = targetIndex.coerceIn(0, flows.size)
+        val adjustedTargetIndex = if (sourceIndex < clampedTargetIndex) {
+            clampedTargetIndex - 1
+        } else {
+            clampedTargetIndex
+        }.coerceIn(0, flows.lastIndex)
+        if (sourceIndex == adjustedTargetIndex) return
+
+        val sourceFlow = flows.removeAt(sourceIndex)
+        flows.add(adjustedTargetIndex, sourceFlow)
+        flowAdapter.notifyItemMoved(sourceIndex, adjustedTargetIndex)
+
+        selectedFlowIndex = flows.indexOfFirst { it.id == sourceFlow.id }.coerceAtLeast(0)
+        renderFlowChips(selectedFlowIndex)
+        flowPager.setCurrentItem(selectedFlowIndex, false)
+        updateToolbarSubtitle()
+        updateShuffleMenuState()
+        if (shouldPersist) saveState()
     }
 
     private fun startCardMoveDrag(cardView: View, flow: CardFlow, card: CardItem): Boolean {
@@ -5625,6 +5791,7 @@ class MainActivity : AppCompatActivity() {
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
             if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
+            putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled)
             remove(KEY_CARDS)
             apply()
         }
@@ -6036,6 +6203,7 @@ private const val KEY_NOTIFICATION_FREQUENCY_PER_HOUR = "notification_frequency_
 private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
+private const val KEY_FLOW_REORDER_MODE_ENABLED = "flow_reorder_mode_enabled"
 private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
@@ -6065,6 +6233,7 @@ private const val STICKY_NOTE_NOTIFICATION_CHANNEL_ID = "sticky_notes"
 private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
+private const val FLOW_REORDER_DRAG_LABEL = "flow_reorder_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
