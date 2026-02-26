@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+    <group android:pivotX="180" android:pivotY="180">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#80FFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M180,18 L180,42" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="30">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#66FFFFFF"
+            android:strokeWidth="2"
+            android:pathData="M180,18 L180,40" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="60">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#80FFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M180,18 L180,42" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="90">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#66FFFFFF"
+            android:strokeWidth="2"
+            android:pathData="M180,18 L180,40" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="120">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#80FFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M180,18 L180,42" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="150">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#66FFFFFF"
+            android:strokeWidth="2"
+            android:pathData="M180,18 L180,40" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="180">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#80FFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M180,18 L180,42" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="210">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#66FFFFFF"
+            android:strokeWidth="2"
+            android:pathData="M180,18 L180,40" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="240">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#80FFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M180,18 L180,42" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="270">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#66FFFFFF"
+            android:strokeWidth="2"
+            android:pathData="M180,18 L180,40" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="300">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#80FFFFFF"
+            android:strokeWidth="3"
+            android:pathData="M180,18 L180,42" />
+    </group>
+    <group android:pivotX="180" android:pivotY="180" android:rotation="330">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#66FFFFFF"
+            android:strokeWidth="2"
+            android:pathData="M180,18 L180,40" />
+    </group>
+</vector>
