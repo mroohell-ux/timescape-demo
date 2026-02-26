@@ -29,6 +29,7 @@
     <string name="search_results_empty_prompt">Start typing to search across every flow</string>
     <string name="drawer_notes_tools">Notes</string>
     <string name="drawer_export_notes">Export notes</string>
+    <string name="drawer_export_sticky_notes">Export sticky notes JSON</string>
     <string name="drawer_import_notes">Import notes</string>
     <string name="drawer_notification_frequency">Notification frequency</string>
     <string name="drawer_notification_frequency_value">%1$d pushes/hr</string>
@@ -77,6 +78,7 @@
     <string name="snackbar_import_failed">Couldnt import notes</string>
     <string name="snackbar_import_empty">Nothing to import from that file</string>
     <string name="snackbar_export_cancelled">Export cancelled</string>
+    <string name="snackbar_sticky_export_success">Exported %1$s.</string>
     <string name="snackbar_action_share">Share</string>
     <string name="snackbar_export_success_with_warnings">%1$s across %2$s. Some handwriting couldnt be exported.</string>
     <string name="snackbar_share_failed">Unable to share export</string>
@@ -100,6 +102,10 @@
     <plurals name="count_flows">
         <item quantity="one">%d flow</item>
         <item quantity="other">%d flows</item>
+    </plurals>
+    <plurals name="count_sticky_notes">
+        <item quantity="one">%d sticky note</item>
+        <item quantity="other">%d sticky notes</item>
     </plurals>
     <string name="drawer_card_font_size">Card font size</string>
     <string name="drawer_card_font_size_value">%1$.0f sp</string>

@@ -158,6 +158,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerPickAppBackgroundButton: MaterialButton
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
     private lateinit var drawerExportNotesButton: MaterialButton
+    private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
@@ -356,6 +357,15 @@ class MainActivity : AppCompatActivity() {
             } else snackbar(getString(R.string.snackbar_export_cancelled))
         }
 
+    private val exportStickyNotesLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            val fileName = pendingExportFileName ?: buildStickyNotesExportFileName()
+            pendingExportFileName = null
+            if (uri != null) {
+                exportStickyNotes(uri, fileName)
+            } else snackbar(getString(R.string.snackbar_export_cancelled))
+        }
+
     private val exportFlowLauncher =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             val flowId = pendingExportFlowId
@@ -429,6 +439,7 @@ class MainActivity : AppCompatActivity() {
         val header = navigationView.getHeaderView(0)
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
+        drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
@@ -508,6 +519,12 @@ class MainActivity : AppCompatActivity() {
             val defaultName = buildExportFileName()
             pendingExportFileName = defaultName
             exportNotesLauncher.launch(defaultName)
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerExportStickyNotesButton.setOnClickListener {
+            val defaultName = buildStickyNotesExportFileName()
+            pendingExportFileName = defaultName
+            exportStickyNotesLauncher.launch(defaultName)
             drawerLayout.closeDrawer(GravityCompat.START)
         }
         drawerImportNotesButton.setOnClickListener {
@@ -4351,12 +4368,49 @@ class MainActivity : AppCompatActivity() {
         return collapsed.ifEmpty { "flow" }
     }
 
+    private fun buildStickyNotesExportFileName(): String {
+        val formatter = SimpleDateFormat(EXPORT_FILE_DATE_PATTERN, Locale.US)
+        val timestamp = formatter.format(Date())
+        return "timescape_sticky_notes_${timestamp}.json"
+    }
+
     private fun exportNotes(uri: Uri, fileName: String) {
         exportFlows(uri, flows.toList(), fileName)
     }
 
     private fun exportSingleFlow(flow: CardFlow, uri: Uri, fileName: String) {
         exportFlows(uri, listOf(flow), fileName)
+    }
+
+    private fun exportStickyNotes(uri: Uri, fileName: String) {
+        captureVisibleFlowStates()
+        lifecycleScope.launch {
+            val payload = withContext(Dispatchers.IO) {
+                runCatching {
+                    val exportPayload = buildStickyNotesExportPayload(flows.toList())
+                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
+                            writer.write(exportPayload.json)
+                        }
+                    } ?: error("Unable to open output stream")
+                    exportPayload
+                }
+            }.getOrElse {
+                snackbar(getString(R.string.snackbar_export_failed))
+                return@launch
+            }
+            val stickyText = resources.getQuantityString(
+                R.plurals.count_sticky_notes,
+                payload.stickyNoteCount,
+                payload.stickyNoteCount
+            )
+            snackbarWithAction(
+                getString(R.string.snackbar_sticky_export_success, stickyText),
+                getString(R.string.snackbar_action_share)
+            ) {
+                shareStickyNotesExportPayload(payload, fileName)
+            }
+        }
     }
 
     private fun exportFlows(uri: Uri, flowsToExport: List<CardFlow>, fileName: String) {
@@ -4408,6 +4462,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareExportPayload(payload: ExportPayload, fileName: String) {
+        lifecycleScope.launch {
+            val exportUri = withContext(Dispatchers.IO) {
+                runCatching {
+                    val exportDir = File(cacheDir, "exports").apply { mkdirs() }
+                    val exportFile = File(exportDir, fileName)
+                    FileOutputStream(exportFile).use { stream ->
+                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
+                            writer.write(payload.json)
+                        }
+                    }
+                    FileProvider.getUriForFile(
+                        this@MainActivity,
+                        "${applicationContext.packageName}.fileprovider",
+                        exportFile
+                    )
+                }.getOrNull()
+            }
+            if (exportUri == null) {
+                snackbar(getString(R.string.snackbar_share_failed))
+                return@launch
+            }
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(Intent.EXTRA_STREAM, exportUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, getString(R.string.share_export_chooser_title)))
+        }
+    }
+
+    private fun shareStickyNotesExportPayload(payload: StickyNotesExportPayload, fileName: String) {
         lifecycleScope.launch {
             val exportUri = withContext(Dispatchers.IO) {
                 runCatching {
@@ -4508,6 +4593,42 @@ class MainActivity : AppCompatActivity() {
         }
         logExportJson(root)
         return ExportPayload(root.toString(2), flowsToExport.size, cardCount, warnings)
+    }
+
+    private fun buildStickyNotesExportPayload(flowsToExport: List<CardFlow>): StickyNotesExportPayload {
+        val root = JSONObject()
+        root.put("version", STICKY_NOTES_EXPORT_VERSION)
+        root.put("generatedAt", System.currentTimeMillis())
+        val stickyNotes = JSONArray()
+        var stickyCount = 0
+        flowsToExport.forEach { flow ->
+            flow.cards.forEach { card ->
+                card.stickyNotes.forEach { note ->
+                    stickyNotes.put(JSONObject().apply {
+                        put("id", note.id)
+                        put("flowId", flow.id)
+                        put("flowName", flow.name)
+                        put("cardId", card.id)
+                        put("cardTitle", card.title)
+                        put("color", colorToString(note.color))
+                        put("rotation", note.rotation.toDouble())
+                        put("front", JSONObject().apply {
+                            put("label", "front")
+                            put("text", note.frontText)
+                        })
+                        put("back", JSONObject().apply {
+                            put("label", "back")
+                            put("text", note.backText)
+                        })
+                    })
+                    stickyCount++
+                }
+            }
+        }
+        root.put("stickyNotes", stickyNotes)
+        root.put("totalStickyNotes", stickyCount)
+        root.put("totalFlows", flowsToExport.size)
+        return StickyNotesExportPayload(root.toString(2), stickyCount)
     }
 
     private fun handwritingOptionsToJson(options: HandwritingOptions): JSONObject = JSONObject().apply {
@@ -5867,6 +5988,11 @@ class MainActivity : AppCompatActivity() {
         val warnings: List<String>
     )
 
+    private data class StickyNotesExportPayload(
+        val json: String,
+        val stickyNoteCount: Int
+    )
+
     private data class HandwritingExportPayload(val json: JSONObject, val data: String)
 
     private data class ImportPayload(val flows: List<ImportedFlow>, val cardCount: Int, val warnings: List<String>)
@@ -5959,3 +6085,4 @@ private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
 private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
 private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"
 private const val NOTES_EXPORT_VERSION = 1
+private const val STICKY_NOTES_EXPORT_VERSION = 1
