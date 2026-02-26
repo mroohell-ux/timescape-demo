@@ -249,5 +249,12 @@
     <string name="debug_export_missing_image_back">Skipped image back handwriting for %1$s because the file could not be read.</string>
     <string name="debug_export_duplicate_image_back">Back handwriting for %1$s is identical to %2$s. The export keeps one copy and reuses it for the match. If those backs should be different, update them before exporting again.</string>
     <string name="debug_export_duplicate_image_back_grouped">Back handwriting for %1$s is identical to these cards. The export keeps one copy and reuses it for the matches. If those backs should be different, update them before exporting again:\n%2$s.</string>
+    <string name="flow_library_button">All flows</string>
+    <string name="flow_library_title">Jump to flow</string>
+    <string name="flow_library_current">Current</string>
+    <plurals name="flow_library_card_count">
+        <item quantity="one">%d card</item>
+        <item quantity="other">%d cards</item>
+    </plurals>
     <string name="untitled_flow_name">Flow %1$d</string>
 </resources>

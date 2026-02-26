@@ -134,6 +134,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
     private lateinit var flowChipScroll: HorizontalScrollView
+    private lateinit var flowLibraryButton: MaterialButton
 
     private var searchMenuItem: MenuItem? = null
     private var searchView: SearchView? = null
@@ -430,6 +431,7 @@ class MainActivity : AppCompatActivity() {
         flowBar = findViewById(R.id.flowBar)
         flowChipGroup = findViewById(R.id.flowChips)
         flowChipScroll = findViewById(R.id.flowChipScroll)
+        flowLibraryButton = findViewById(R.id.buttonFlowLibrary)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window.statusBarColor = Color.TRANSPARENT
@@ -483,6 +485,7 @@ class MainActivity : AppCompatActivity() {
             showGlobalSearchDialog(focusSearchInput = true)
             drawerLayout.closeDrawer(GravityCompat.START)
         }
+        flowLibraryButton.setOnClickListener { showFlowLibraryDialog() }
 
         toolbarBasePaddingTop = toolbar.paddingTop
         toolbarBasePaddingBottom = toolbar.paddingBottom
@@ -1588,6 +1591,29 @@ class MainActivity : AppCompatActivity() {
             val maxScroll = max(0, flowChipGroup.width - scrollWidth)
             flowChipScroll.smoothScrollTo(target.coerceIn(0, maxScroll), 0)
         }
+    }
+
+
+    private fun showFlowLibraryDialog() {
+        if (flows.isEmpty()) return
+        val titles = flows.mapIndexed { index, flow ->
+            val cardCountLabel = resources.getQuantityString(
+                R.plurals.flow_library_card_count,
+                flow.cards.size,
+                flow.cards.size
+            )
+            val selectedMarker = if (index == selectedFlowIndex) "  • ${getString(R.string.flow_library_current)}" else ""
+            "${flow.name}  ·  $cardCountLabel$selectedMarker"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.flow_library_title)
+            .setItems(titles) { _, which ->
+                val target = which.coerceIn(0, flows.lastIndex)
+                flowPager.setCurrentItem(target, true)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showAddFlowDialog() {
