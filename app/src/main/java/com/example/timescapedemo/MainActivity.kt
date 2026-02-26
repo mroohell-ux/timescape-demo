@@ -1188,53 +1188,43 @@ class MainActivity : AppCompatActivity() {
                 setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
                 isChecked = index == safeIndex
                 tag = flow.id
+                setOnClickListener { handleFlowChipTap(flow.id, index) }
+                setOnLongClickListener { startFlowMergeDrag(this, flow.id) }
                 setOnTouchListener(object : View.OnTouchListener {
                     private var downX = 0f
                     private var downY = 0f
-                    private var interactionHandled = false
-                    private var mergeRunnable: Runnable? = null
+                    private var started = false
 
                     override fun onTouch(v: View, event: MotionEvent): Boolean {
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
                                 downX = event.rawX
                                 downY = event.rawY
-                                interactionHandled = false
-                                mergeRunnable = Runnable {
-                                    interactionHandled = startFlowMergeDrag(this@apply, flow.id)
-                                }.also {
-                                    v.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong())
-                                }
-                                return true
+                                started = false
+                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                                return false
                             }
 
                             MotionEvent.ACTION_MOVE -> {
-                                if (!interactionHandled) {
+                                if (!started) {
                                     val distance = hypot(event.rawX - downX, event.rawY - downY)
                                     if (distance >= dragThresholdPx) {
-                                        mergeRunnable?.let(v::removeCallbacks)
-                                        mergeRunnable = null
-                                        interactionHandled = startFlowReorderDrag(this@apply, flow.id)
+                                        started = startFlowReorderDrag(this@apply, flow.id)
+                                        if (started) {
+                                            v.parent?.requestDisallowInterceptTouchEvent(true)
+                                            return true
+                                        }
                                     }
                                 }
-                                return true
+                                return started
                             }
 
-                            MotionEvent.ACTION_UP -> {
-                                mergeRunnable?.let(v::removeCallbacks)
-                                mergeRunnable = null
-                                if (!interactionHandled) {
-                                    handleFlowChipTap(flow.id, index)
-                                }
-                                interactionHandled = false
-                                return true
-                            }
-
+                            MotionEvent.ACTION_UP,
                             MotionEvent.ACTION_CANCEL -> {
-                                mergeRunnable?.let(v::removeCallbacks)
-                                mergeRunnable = null
-                                interactionHandled = false
-                                return true
+                                v.parent?.requestDisallowInterceptTouchEvent(false)
+                                val wasStarted = started
+                                started = false
+                                return wasStarted
                             }
                         }
                         return false
