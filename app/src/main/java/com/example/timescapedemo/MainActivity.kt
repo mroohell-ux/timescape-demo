@@ -1491,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateShuffleMenuState()
-        if (shouldPersist) saveState()
+        saveState()
     }
 
     private fun centerSelectedChip(position: Int) {
