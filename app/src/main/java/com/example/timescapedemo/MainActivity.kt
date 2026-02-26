@@ -1333,7 +1333,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startFlowReorderDrag(chip: Chip, flowId: Long): Boolean {
-        if (flows.size <= 1 || activeFlowReorderDragId != null) return false
+        if (flows.size <= 1) return false
+        // Clear any stale drag-tracking state so a new reorder can always start.
+        activeFlowReorderDragId = null
+        activeFlowReorderHoverIndex = null
         val dragData = ClipData.newPlainText(FLOW_REORDER_DRAG_LABEL, flowId.toString())
         val shadow = View.DragShadowBuilder(chip)
         val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
