@@ -253,7 +253,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
     private var activeFlowReorderDragId: Long? = null
-    private var activeFlowReorderHoverTargetId: Long? = null
+    private var activeFlowReorderHoverIndex: Int? = null
 
     private data class HandwritingDialogExtras(
         val baseBitmap: Bitmap? = null,
@@ -1145,9 +1145,20 @@ class MainActivity : AppCompatActivity() {
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     if (!isSelf) {
                         targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
-                        if (isFlowReorder && activeFlowReorderHoverTargetId != targetId) {
-                            reorderSourceId?.let { moveFlow(it, targetId, shouldPersist = false) }
-                            activeFlowReorderHoverTargetId = targetId
+                    }
+                    true
+                }
+                DragEvent.ACTION_DRAG_LOCATION -> {
+                    if (isFlowReorder && !isSelf) {
+                        val sourceId = reorderSourceId ?: return@OnDragListener false
+                        val targetIndex = flows.indexOfFirst { it.id == targetId }
+                        if (targetIndex >= 0) {
+                            val insertAfterTarget = event.x >= (targetChip.width / 2f)
+                            val requestedIndex = if (insertAfterTarget) targetIndex + 1 else targetIndex
+                            if (activeFlowReorderHoverIndex != requestedIndex) {
+                                moveFlowToIndex(sourceId, requestedIndex, shouldPersist = false)
+                                activeFlowReorderHoverIndex = requestedIndex
+                            }
                         }
                     }
                     true
@@ -1244,7 +1255,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetFlowChipDragState() {
         activeFlowReorderDragId = null
-        activeFlowReorderHoverTargetId = null
+        activeFlowReorderHoverIndex = null
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
             chip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
@@ -1283,20 +1294,25 @@ class MainActivity : AppCompatActivity() {
         }
         if (started) {
             activeFlowReorderDragId = flowId
-            activeFlowReorderHoverTargetId = null
+            activeFlowReorderHoverIndex = null
             chip.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
             chip.alpha = 0.7f
         }
         return started
     }
 
-    private fun moveFlow(sourceFlowId: Long, targetFlowId: Long, shouldPersist: Boolean = true) {
+    private fun moveFlowToIndex(sourceFlowId: Long, targetIndex: Int, shouldPersist: Boolean = true) {
         val sourceIndex = flows.indexOfFirst { it.id == sourceFlowId }
-        val targetIndex = flows.indexOfFirst { it.id == targetFlowId }
-        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) return
+        if (sourceIndex < 0) return
+        val clampedTargetIndex = targetIndex.coerceIn(0, flows.size)
+        val adjustedTargetIndex = if (sourceIndex < clampedTargetIndex) {
+            clampedTargetIndex - 1
+        } else {
+            clampedTargetIndex
+        }.coerceIn(0, flows.lastIndex)
+        if (sourceIndex == adjustedTargetIndex) return
 
         val sourceFlow = flows.removeAt(sourceIndex)
-        val adjustedTargetIndex = if (sourceIndex < targetIndex) targetIndex - 1 else targetIndex
         flows.add(adjustedTargetIndex, sourceFlow)
         flowAdapter.notifyItemMoved(sourceIndex, adjustedTargetIndex)
 
