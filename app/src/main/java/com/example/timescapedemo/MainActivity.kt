@@ -191,6 +191,7 @@ class MainActivity : AppCompatActivity() {
     private var cardTypeface: Typeface? = null
     private var cardFontPath: String? = null
     private var cardFontDisplayName: String? = null
+    private var isFlowReorderModeEnabled: Boolean = false
     private var lastFlowChipTapId: Long = -1L
     private var lastFlowChipTapTime: Long = 0L
     private var textToSpeech: TextToSpeech? = null
@@ -405,6 +406,7 @@ class MainActivity : AppCompatActivity() {
         cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
+        isFlowReorderModeEnabled = prefs.getBoolean(KEY_FLOW_REORDER_MODE_ENABLED, false)
         cardTypeface = cardFontPath?.let { loadCardTypeface(it) }
         if (cardTypeface == null) {
             cardFontPath = null
@@ -667,6 +669,7 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
         setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
+        updateFlowReorderModeMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
@@ -675,6 +678,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_image_card -> { showAddImageCardDialog(); true }
                 R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
+                R.id.action_toggle_reorder_flows -> { toggleFlowReorderMode(); true }
                 else -> false
             }
         }
@@ -1093,6 +1097,28 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun updateFlowReorderModeMenuState() {
+        val item = toolbar.menu.findItem(R.id.action_toggle_reorder_flows) ?: return
+        item.isCheckable = true
+        item.isChecked = isFlowReorderModeEnabled
+        item.title = getString(
+            if (isFlowReorderModeEnabled) R.string.menu_reorder_flows_on
+            else R.string.menu_reorder_flows_off
+        )
+    }
+
+    private fun toggleFlowReorderMode() {
+        isFlowReorderModeEnabled = !isFlowReorderModeEnabled
+        updateFlowReorderModeMenuState()
+        prefs.edit().putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled).apply()
+        snackbar(
+            getString(
+                if (isFlowReorderModeEnabled) R.string.snackbar_reorder_flows_enabled
+                else R.string.snackbar_reorder_flows_disabled
+            )
+        )
+    }
+
     private fun updateChipSelection(position: Int) {
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
@@ -1214,16 +1240,18 @@ class MainActivity : AppCompatActivity() {
                                 downY = event.rawY
                                 interactionHandled = false
                                 v.parent?.requestDisallowInterceptTouchEvent(true)
-                                mergeRunnable = Runnable {
-                                    interactionHandled = startFlowMergeDrag(this@apply, flow.id)
-                                }.also {
-                                    v.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong())
+                                if (!isFlowReorderModeEnabled) {
+                                    mergeRunnable = Runnable {
+                                        interactionHandled = startFlowMergeDrag(this@apply, flow.id)
+                                    }.also {
+                                        v.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong())
+                                    }
                                 }
                                 return true
                             }
 
                             MotionEvent.ACTION_MOVE -> {
-                                if (!interactionHandled) {
+                                if (isFlowReorderModeEnabled && !interactionHandled) {
                                     val distance = hypot(event.rawX - downX, event.rawY - downY)
                                     if (distance >= dragThresholdPx) {
                                         mergeRunnable?.let(v::removeCallbacks)
@@ -5760,6 +5788,7 @@ class MainActivity : AppCompatActivity() {
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
             if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
+            putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled)
             remove(KEY_CARDS)
             apply()
         }
@@ -6171,6 +6200,7 @@ private const val KEY_NOTIFICATION_FREQUENCY_PER_HOUR = "notification_frequency_
 private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
+private const val KEY_FLOW_REORDER_MODE_ENABLED = "flow_reorder_mode_enabled"
 private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"

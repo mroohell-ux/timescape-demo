@@ -15,6 +15,10 @@
     <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
     <string name="menu_unshuffle_cards">Restore order</string>
+    <string name="menu_reorder_flows_on">Reorder flows: On</string>
+    <string name="menu_reorder_flows_off">Reorder flows: Off</string>
+    <string name="snackbar_reorder_flows_enabled">Flow reordering enabled</string>
+    <string name="snackbar_reorder_flows_disabled">Flow merge mode enabled</string>
     <string name="search_cards_hint">Search cards</string>
     <string name="snackbar_not_enough_cards_to_shuffle">Add at least two cards to shuffle.</string>
     <string name="drawer_card_backgrounds">Card backgrounds</string>

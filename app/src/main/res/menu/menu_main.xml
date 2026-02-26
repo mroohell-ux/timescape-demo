@@ -46,4 +46,10 @@
         android:icon="@drawable/ic_add"
         app:showAsAction="always"/>
 
+    <item
+        android:id="@+id/action_toggle_reorder_flows"
+        android:title="@string/menu_reorder_flows_off"
+        android:checkable="true"
+        app:showAsAction="never"/>
+
 </menu>
