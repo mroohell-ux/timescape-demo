@@ -36,6 +36,7 @@ import android.view.DragEvent
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -635,6 +636,38 @@ class MainActivity : AppCompatActivity() {
         handleStickyNoteIntent(intent)
         maybeDispatchStartupStickyNoteNotification()
         restartStickyNoteNotificationSchedule()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) {
+            return super.dispatchKeyEvent(event)
+        }
+        if (!shouldHandleArrowKeys()) {
+            return super.dispatchKeyEvent(event)
+        }
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> currentController()?.moveSelectionBy(-1) ?: false
+            KeyEvent.KEYCODE_DPAD_DOWN -> currentController()?.moveSelectionBy(1) ?: false
+            KeyEvent.KEYCODE_DPAD_LEFT -> moveFlowBy(-1)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> moveFlowBy(1)
+            else -> super.dispatchKeyEvent(event)
+        }
+    }
+
+    private fun shouldHandleArrowKeys(): Boolean {
+        val focused = currentFocus
+        if (focused is TextView && focused.inputType != InputType.TYPE_NULL) {
+            return false
+        }
+        return true
+    }
+
+    private fun moveFlowBy(delta: Int): Boolean {
+        if (flows.isEmpty()) return false
+        val target = (flowPager.currentItem + delta).coerceIn(0, flows.lastIndex)
+        if (target == flowPager.currentItem) return true
+        flowPager.setCurrentItem(target, true)
+        return true
     }
 
     override fun onStart() {
@@ -6095,6 +6128,20 @@ class MainActivity : AppCompatActivity() {
             flow.lastViewedCardFocused = layoutManager.hasSelection()
         }
 
+        fun moveSelectionBy(delta: Int): Boolean {
+            if (adapter.itemCount == 0) return false
+            val current = layoutManager.currentSelectionIndex() ?: layoutManager.nearestIndex()
+            val target = (current + delta).coerceIn(0, adapter.itemCount - 1)
+            if (target == current) {
+                if (!layoutManager.isFocused(target)) {
+                    focusOrScrollTo(target)
+                }
+                return true
+            }
+            focusOrScrollTo(target)
+            return true
+        }
+
         fun dispose() {
             recycler.removeOnScrollListener(scrollListener)
             if (layoutManager.selectionListener === selectionCallback) {
@@ -6131,6 +6178,15 @@ class MainActivity : AppCompatActivity() {
             }
             ensureMainCard(flow)
             updateCardCounter(layoutManager.currentSelectionIndex())
+        }
+
+        private fun focusOrScrollTo(index: Int) {
+            val delta = layoutManager.offsetTo(index)
+            if (delta == 0) {
+                layoutManager.focus(index)
+            } else {
+                recycler.smoothScrollBy(0, delta)
+            }
         }
 
         private fun ensureMainCard(flow: CardFlow) {
