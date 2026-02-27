@@ -122,7 +122,7 @@ class LocalSyncServer(
             val requestLine = readLine(input) ?: return
             val parts = requestLine.split(" ")
             if (parts.size < 2) {
-                writeJson(output, 400, jsonOf("error" to "Malformed request"))
+                writeText(output, 400, jsonOf("error" to "Malformed request").toString(), "application/json")
                 return
             }
             val method = parts[0].uppercase(Locale.US)
@@ -132,11 +132,7 @@ class LocalSyncServer(
             val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
             val body = if (contentLength > 0) readBody(input, contentLength) else ""
             val response = route(method, path, query, body)
-            if (response.contentType == "application/json") {
-                writeJson(output, response.statusCode, response.body)
-            } else {
-                writeText(output, response.statusCode, response.body, response.contentType)
-            }
+            writeText(output, response.statusCode, response.body, response.contentType)
         }
     }
 
@@ -152,27 +148,27 @@ class LocalSyncServer(
                     "app" to "Timescape",
                     "protocolVersion" to 1,
                     "deviceName" to deviceName()
-                ))
+                ).toString())
             }
 
             method == "POST" && path == "/session/request" -> {
                 val requestObj = runCatching { JSONObject(body) }.getOrNull()
-                    ?: return HttpResponse(400, "application/json", jsonOf("error" to "Invalid JSON"))
+                    ?: return HttpResponse(400, "application/json", jsonOf("error" to "Invalid JSON").toString())
                 val clientId = requestObj.optString("clientId")
                 val clientName = requestObj.optString("clientName")
                 if (clientId.isBlank() || clientName.isBlank()) {
-                    return HttpResponse(400, "application/json", jsonOf("error" to "clientId and clientName are required"))
+                    return HttpResponse(400, "application/json", jsonOf("error" to "clientId and clientName are required").toString())
                 }
                 val sessionId = UUID.randomUUID().toString()
                 requests[sessionId] = Session(sessionId, clientId, clientName)
                 emitRequests()
-                HttpResponse(200, "application/json", jsonOf("sessionId" to sessionId, "status" to SessionStatus.PENDING.name))
+                HttpResponse(200, "application/json", jsonOf("sessionId" to sessionId, "status" to SessionStatus.PENDING.name).toString())
             }
 
             method == "GET" && path == "/session/status" -> {
                 val sessionId = query["sessionId"] ?: ""
                 val session = requests[sessionId]
-                    ?: return HttpResponse(404, "application/json", jsonOf("error" to "Unknown sessionId"))
+                    ?: return HttpResponse(404, "application/json", jsonOf("error" to "Unknown sessionId").toString())
                 val payload = JSONObject().apply {
                     put("status", session.status.name)
                     if (session.status == SessionStatus.APPROVED && !session.isExpired()) {
@@ -180,22 +176,22 @@ class LocalSyncServer(
                         put("expiresInSec", session.remainingSeconds())
                     }
                 }
-                HttpResponse(200, "application/json", payload)
+                HttpResponse(200, "application/json", payload.toString())
             }
 
             method == "POST" && path == "/session/decision" -> {
                 val requestObj = runCatching { JSONObject(body) }.getOrNull()
-                    ?: return HttpResponse(400, "application/json", jsonOf("error" to "Invalid JSON"))
+                    ?: return HttpResponse(400, "application/json", jsonOf("error" to "Invalid JSON").toString())
                 val sessionId = requestObj.optString("sessionId")
                 val approve = requestObj.optBoolean("approve", false)
                 when (val result = decide(sessionId, approve)) {
-                    LocalSyncDecisionResult.NotFound -> HttpResponse(404, "application/json", jsonOf("error" to "Unknown sessionId"))
+                    LocalSyncDecisionResult.NotFound -> HttpResponse(404, "application/json", jsonOf("error" to "Unknown sessionId").toString())
                     is LocalSyncDecisionResult.Decided -> {
                         HttpResponse(200, "application/json", JSONObject().apply {
                             put("status", result.status)
                             result.token?.let { put("token", it) }
                             result.expiresInSec?.let { put("expiresInSec", it) }
-                        })
+                        }.toString())
                     }
                 }
             }
@@ -203,14 +199,14 @@ class LocalSyncServer(
             method == "GET" && path == "/export" -> {
                 val token = query["token"] ?: ""
                 val session = requests.values.firstOrNull { it.token == token && it.status == SessionStatus.APPROVED }
-                    ?: return HttpResponse(401, "application/json", jsonOf("error" to "Invalid token"))
+                    ?: return HttpResponse(401, "application/json", jsonOf("error" to "Invalid token").toString())
                 if (session.isExpired()) {
-                    return HttpResponse(401, "application/json", jsonOf("error" to "Token expired"))
+                    return HttpResponse(401, "application/json", jsonOf("error" to "Token expired").toString())
                 }
                 HttpResponse(200, "application/json", exportProvider())
             }
 
-            else -> HttpResponse(404, "application/json", jsonOf("error" to "Not found"))
+            else -> HttpResponse(404, "application/json", jsonOf("error" to "Not found").toString())
         }
     }
 
@@ -326,10 +322,6 @@ class LocalSyncServer(
         }
     }
 
-    private fun writeJson(output: BufferedOutputStream, statusCode: Int, payload: Any) {
-        writeText(output, statusCode, payload.toString(), "application/json")
-    }
-
     private fun writeText(output: BufferedOutputStream, statusCode: Int, body: String, contentType: String) {
         val data = body.toByteArray(StandardCharsets.UTF_8)
         val response = buildString {
@@ -362,7 +354,7 @@ class LocalSyncServer(
         runCatching { close() }
     }
 
-    private data class HttpResponse(val statusCode: Int, val contentType: String, val body: Any)
+    private data class HttpResponse(val statusCode: Int, val contentType: String, val body: String)
 
     private data class Session(
         val sessionId: String,
