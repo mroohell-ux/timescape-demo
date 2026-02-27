@@ -1111,11 +1111,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             R.string.menu_reorder_flows_off
         }
-        toolbar.menu.findItem(R.id.action_toggle_reorder_flows)?.let { item ->
-            item.isCheckable = true
-            item.isChecked = isFlowReorderModeEnabled
-            item.title = getString(titleRes)
-        }
         if (::drawerToggleReorderFlowsButton.isInitialized) {
             drawerToggleReorderFlowsButton.text = getString(titleRes)
         }
