@@ -15,7 +15,6 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentResolver
 import android.content.Context
-
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -47,6 +46,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
@@ -93,6 +93,8 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
+import com.example.timescapedemo.LocalSyncServer.LocalSyncRequest
+import com.example.timescapedemo.LocalSyncServer.LocalSyncStatus
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
@@ -164,6 +166,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
+    private lateinit var drawerLocalSyncButton: MaterialButton
+    private lateinit var drawerLocalSyncStatus: TextView
+    private lateinit var drawerLocalSyncServiceName: TextView
+    private lateinit var drawerLocalSyncRequestsContainer: LinearLayout
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
@@ -215,6 +221,8 @@ class MainActivity : AppCompatActivity() {
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
     private var stickyNoteNotificationSequence = 0
+    private var localSyncServer: LocalSyncServer? = null
+    private var localSyncRequests: List<LocalSyncRequest> = emptyList()
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -450,6 +458,10 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
+        drawerLocalSyncButton = header.findViewById(R.id.buttonDrawerLocalSync)
+        drawerLocalSyncStatus = header.findViewById(R.id.textDrawerLocalSyncStatus)
+        drawerLocalSyncServiceName = header.findViewById(R.id.textDrawerLocalSyncServiceName)
+        drawerLocalSyncRequestsContainer = header.findViewById(R.id.layoutDrawerLocalSyncRequests)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
@@ -482,6 +494,8 @@ class MainActivity : AppCompatActivity() {
             updateCardFontSize(value, fromUser)
         }
         updateCardFontLabel()
+        renderLocalSyncStatus(LocalSyncStatus.Stopped)
+        renderLocalSyncRequests()
 
         drawerGlobalSearchButton.setOnClickListener {
             showGlobalSearchDialog(focusSearchInput = true)
@@ -541,6 +555,9 @@ class MainActivity : AppCompatActivity() {
         drawerImportNotesButton.setOnClickListener {
             importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
             drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerLocalSyncButton.setOnClickListener {
+            toggleLocalSync()
         }
         drawerToggleReorderFlowsButton.setOnClickListener {
             toggleFlowReorderMode()
@@ -5879,7 +5896,120 @@ class MainActivity : AppCompatActivity() {
         textToSpeechReady = false
         textToSpeechInitializing = false
         pendingTextToSpeechRequests.clear()
+        localSyncServer?.shutdown()
+        localSyncServer = null
         super.onDestroy()
+    }
+
+    private fun toggleLocalSync() {
+        val server = localSyncServer
+        if (server == null) {
+            val created = LocalSyncServer(
+                context = this,
+                exportProvider = { exportAllStickyNotesJson() },
+                onStatusChanged = { status ->
+                    runOnUiThread { renderLocalSyncStatus(status) }
+                },
+                onRequestsChanged = { requests ->
+                    runOnUiThread {
+                        localSyncRequests = requests
+                        renderLocalSyncRequests()
+                    }
+                }
+            )
+            localSyncServer = created
+            created.start()
+            snackbar(getString(R.string.snackbar_local_sync_started))
+        } else {
+            server.stop()
+            localSyncServer = null
+            localSyncRequests = emptyList()
+            renderLocalSyncRequests()
+            snackbar(getString(R.string.snackbar_local_sync_stopped))
+        }
+    }
+
+    private fun renderLocalSyncStatus(status: LocalSyncStatus) {
+        when (status) {
+            is LocalSyncStatus.Stopped -> {
+                drawerLocalSyncButton.text = getString(R.string.drawer_local_sync_start)
+                drawerLocalSyncStatus.text = getString(R.string.drawer_local_sync_status_stopped)
+                drawerLocalSyncServiceName.isVisible = false
+            }
+            is LocalSyncStatus.Advertising -> {
+                drawerLocalSyncButton.text = getString(R.string.drawer_local_sync_stop)
+                drawerLocalSyncStatus.text = getString(R.string.drawer_local_sync_status_advertising)
+                drawerLocalSyncServiceName.text = getString(R.string.drawer_local_sync_service_name, status.serviceName)
+                drawerLocalSyncServiceName.isVisible = status.serviceName.isNotBlank()
+            }
+            is LocalSyncStatus.Error -> {
+                drawerLocalSyncButton.text = getString(R.string.drawer_local_sync_start)
+                drawerLocalSyncStatus.text = getString(R.string.drawer_local_sync_status_error, status.message)
+                drawerLocalSyncServiceName.isVisible = false
+                localSyncServer = null
+            }
+        }
+    }
+
+    private fun renderLocalSyncRequests() {
+        drawerLocalSyncRequestsContainer.removeAllViews()
+        if (localSyncRequests.isEmpty()) {
+            val emptyView = TextView(this).apply {
+                text = getString(R.string.drawer_local_sync_requests_empty)
+                setTextAppearance(com.google.android.material.R.style.TextAppearance_MaterialComponents_Body2)
+            }
+            drawerLocalSyncRequestsContainer.addView(emptyView)
+            return
+        }
+        localSyncRequests.forEach { request ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, (8 * resources.displayMetrics.density).toInt(), 0, (8 * resources.displayMetrics.density).toInt())
+            }
+            val title = TextView(this).apply {
+                text = getString(R.string.drawer_local_sync_request_title, request.clientName, request.clientId)
+                setTypeface(typeface, Typeface.BOLD)
+            }
+            val subtitle = TextView(this).apply {
+                text = getString(R.string.drawer_local_sync_request_status, request.sessionId.take(8), request.status)
+                setTextAppearance(com.google.android.material.R.style.TextAppearance_MaterialComponents_Body2)
+            }
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+            val approve = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = getString(R.string.drawer_local_sync_approve)
+                isEnabled = request.status == "PENDING"
+                setOnClickListener {
+                    localSyncServer?.decide(request.sessionId, true)
+                    localSyncRequests = localSyncRequests.map {
+                        if (it.sessionId == request.sessionId) it.copy(status = "APPROVED") else it
+                    }
+                    renderLocalSyncRequests()
+                }
+            }
+            val deny = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = getString(R.string.drawer_local_sync_deny)
+                isEnabled = request.status == "PENDING"
+                setOnClickListener {
+                    localSyncServer?.decide(request.sessionId, false)
+                    localSyncRequests = localSyncRequests.map {
+                        if (it.sessionId == request.sessionId) it.copy(status = "DENIED") else it
+                    }
+                    renderLocalSyncRequests()
+                }
+            }
+            actions.addView(approve)
+            actions.addView(deny)
+            row.addView(title)
+            row.addView(subtitle)
+            row.addView(actions)
+            drawerLocalSyncRequestsContainer.addView(row)
+        }
+    }
+
+    private fun exportAllStickyNotesJson(): String {
+        return buildStickyNotesExportPayload(flows).json
     }
 
     private fun defaultFlowName(): String {

@@ -104,6 +104,53 @@
             android:text="@string/drawer_import_notes"
             app:iconGravity="textStart"/>
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:background="@color/flow_bar_stroke"/>
+
+        <TextView
+            android:id="@+id/labelLocalWatchImport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/drawer_local_watch_import_label"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerLocalSync"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_local_sync_start"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
+        <TextView
+            android:id="@+id/textDrawerLocalSyncStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_local_sync_status_stopped"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"/>
+
+        <TextView
+            android:id="@+id/textDrawerLocalSyncServiceName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+            android:visibility="gone"/>
+
+        <LinearLayout
+            android:id="@+id/layoutDrawerLocalSyncRequests"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"/>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerToggleReorderFlows"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
