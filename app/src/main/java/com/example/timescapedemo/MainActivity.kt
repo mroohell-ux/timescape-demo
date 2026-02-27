@@ -163,6 +163,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
+    private lateinit var drawerToggleReorderFlowsButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
@@ -449,6 +450,7 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
+        drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -538,6 +540,10 @@ class MainActivity : AppCompatActivity() {
         }
         drawerImportNotesButton.setOnClickListener {
             importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerToggleReorderFlowsButton.setOnClickListener {
+            toggleFlowReorderMode()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
 
@@ -681,7 +687,6 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_image_card -> { showAddImageCardDialog(); true }
                 R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
-                R.id.action_toggle_reorder_flows -> { toggleFlowReorderMode(); true }
                 else -> false
             }
         }
@@ -1101,13 +1106,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFlowReorderModeMenuState() {
-        val item = toolbar.menu.findItem(R.id.action_toggle_reorder_flows) ?: return
-        item.isCheckable = true
-        item.isChecked = isFlowReorderModeEnabled
-        item.title = getString(
-            if (isFlowReorderModeEnabled) R.string.menu_reorder_flows_on
-            else R.string.menu_reorder_flows_off
-        )
+        val titleRes = if (isFlowReorderModeEnabled) {
+            R.string.menu_reorder_flows_on
+        } else {
+            R.string.menu_reorder_flows_off
+        }
+        if (::drawerToggleReorderFlowsButton.isInitialized) {
+            drawerToggleReorderFlowsButton.text = getString(titleRes)
+        }
     }
 
     private fun toggleFlowReorderMode() {
