@@ -120,6 +120,7 @@ class CardsAdapter(
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
+        val card: AspectRatioCardView = v.findViewById(R.id.card)
         val time: TextView = v.findViewById(R.id.time)
         val titleContainer: View = v.findViewById(R.id.titleContainer)
         val title: TextView = v.findViewById(R.id.title)
@@ -332,15 +333,18 @@ class CardsAdapter(
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
+            holder.card.clearRatio()
             bindHandwriting(holder, item, handwritingContent, face, fallbackText, position)
             clearTitle(holder)
         } else if (item.video != null) {
             bindVideoCard(holder, item, fallbackText, position)
             clearTitle(holder)
         } else if (imageContent != null) {
+            holder.card.clearRatio()
             bindImageCard(holder, item, face, fallbackText, position)
             clearTitle(holder)
         } else {
+            holder.card.clearRatio()
             HandwritingBitmapLoader.clear(holder.handwriting)
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
@@ -448,6 +452,13 @@ class CardsAdapter(
             holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
         }
         val isActive = activeVideoCardId == item.id
+        val aspect = video.aspectRatio
+        val ratio = when {
+            aspect <= 0.8f -> "2:3"     // screen-recording style: smaller portrait cards
+            aspect >= 1.25f -> "4:5"    // movie landscape: render in taller vertical card
+            else -> "3:4"
+        }
+        holder.card.setRatioString(ratio)
         holder.playOverlay.isVisible = !isActive
         holder.durationBadge.isVisible = true
         holder.durationBadge.text = formatDuration(video.durationMs)
@@ -532,6 +543,7 @@ class CardsAdapter(
         holder.videoPlayPauseButton.setOnClickListener(null)
         holder.itemView.removeCallbacks(videoProgressUpdater)
         attachedVideoHolders.remove(holder)
+        holder.card.clearRatio()
         holder.itemView.setTag(R.id.tag_card_id, null)
         setCardMode(holder, CardMode.TEXT, holder.snippet.text ?: "")
         super.onViewRecycled(holder)
