@@ -49,8 +49,10 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.PopupWindow
+import android.widget.VideoView
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.MediaController
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
@@ -6096,16 +6098,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun playVideoCard(video: VideoCardData) {
         val uri = Uri.parse(video.sourceUri)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "video/*")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val dialog = Dialog(this)
+        val videoView = VideoView(this)
+        val mediaController = MediaController(this)
+        mediaController.setAnchorView(videoView)
+        videoView.setMediaController(mediaController)
+        videoView.setVideoURI(uri)
+        videoView.setOnPreparedListener { player ->
+            player.isLooping = false
+            videoView.start()
         }
-        val canHandle = intent.resolveActivity(packageManager) != null
-        if (!canHandle) {
-            snackbar(getString(R.string.snackbar_video_player_missing))
-            return
+        videoView.setOnErrorListener { _, _, _ ->
+            snackbar(getString(R.string.snackbar_video_play_failed))
+            dialog.dismiss()
+            true
         }
-        runCatching { startActivity(intent) }
+        dialog.setTitle(video.fileName)
+        dialog.setContentView(videoView)
+        dialog.setOnDismissListener { videoView.stopPlayback() }
+        runCatching { dialog.show() }
             .onFailure { snackbar(getString(R.string.snackbar_video_play_failed)) }
     }
 
