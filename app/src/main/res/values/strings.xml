@@ -182,6 +182,7 @@
     <string name="handwriting_card_content_desc">Handwritten card content</string>
     <string name="handwriting_card_missing">Handwriting preview unavailable</string>
     <string name="image_card_content_desc">Image card</string>
+    <string name="video_play_icon_desc">Play video</string>
     <string name="image_card_missing">Image preview unavailable</string>
     <string name="dialog_edit_image_card_title">Image card</string>
     <string name="image_card_option_replace">Replace photo</string>
@@ -257,4 +258,13 @@
         <item quantity="other">%d cards</item>
     </plurals>
     <string name="untitled_flow_name">Flow %1$d</string>
+    <string name="video_flow_name">Video Flow</string>
+    <string name="menu_pick_video_folder">Choose video folder</string>
+    <string name="menu_refresh_video_folder">Refresh videos</string>
+    <string name="snackbar_video_folder_missing">Pick a video folder to populate Video Flow.</string>
+    <string name="snackbar_video_folder_saved">Video source folder connected.</string>
+    <string name="snackbar_video_refresh_complete">Video Flow synced: %1$d videos.</string>
+    <string name="snackbar_video_refresh_failed">Could not scan the selected video folder.</string>
+    <string name="video_empty_title">No videos yet</string>
+    <string name="video_empty_snippet">Choose a source folder to build your Timescape video flow.</string>
 </resources>

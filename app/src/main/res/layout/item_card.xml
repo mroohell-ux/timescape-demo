@@ -46,6 +46,45 @@
                 android:adjustViewBounds="true"
                 android:contentDescription="@string/image_card_content_desc"
                 android:scaleType="centerCrop"/>
+
+            <ImageView
+                android:id="@+id/videoPlayOverlay"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="center"
+                android:alpha="0.9"
+                android:contentDescription="@string/video_play_icon_desc"
+                android:src="@android:drawable/ic_media_play"
+                android:tint="@android:color/white"
+                android:visibility="gone"/>
+
+            <TextView
+                android:id="@+id/videoDurationBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|end"
+                android:layout_margin="12dp"
+                android:background="@drawable/bg_card_count_indicator"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <ProgressBar
+                android:id="@+id/videoProgressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:layout_gravity="bottom"
+                android:indeterminate="false"
+                android:max="1000"
+                android:progressTint="@android:color/white"
+                android:progressBackgroundTint="#66FFFFFF"
+                android:visibility="gone" />
         </FrameLayout>
 
         <!-- LOCAL scrim: very light, only beneath the text block for readability -->

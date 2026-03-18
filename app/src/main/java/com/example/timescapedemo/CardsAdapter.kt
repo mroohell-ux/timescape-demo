@@ -26,6 +26,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.annotation.ColorInt
 import androidx.core.content.ContextCompat
@@ -86,7 +87,8 @@ data class CardItem(
     var imageHandwriting: HandwritingSide? = null,
     var recognizedText: String? = null,
     var relativeTimeText: CharSequence? = null,
-    val stickyNotes: MutableList<StickyNote> = mutableListOf()
+    val stickyNotes: MutableList<StickyNote> = mutableListOf(),
+    var video: VideoCardData? = null
 )
 
 data class CardImage(
@@ -129,6 +131,9 @@ class CardsAdapter(
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
+        val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
+        val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
+        val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -273,11 +278,17 @@ class CardsAdapter(
             else -> item.snippet
         }
         holder.itemView.setTag(R.id.tag_card_id, item.id)
+        holder.playOverlay.isVisible = false
+        holder.durationBadge.isVisible = false
+        holder.progressBar.isVisible = false
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
             bindHandwriting(holder, item, handwritingContent, face, fallbackText, position)
+            clearTitle(holder)
+        } else if (item.video != null) {
+            bindVideoCard(holder, item, fallbackText, position)
             clearTitle(holder)
         } else if (imageContent != null) {
             bindImageCard(holder, item, face, fallbackText, position)
@@ -365,6 +376,47 @@ class CardsAdapter(
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
         addShadow(holder.time, holder.title, holder.snippet)
+    }
+
+    private fun bindVideoCard(
+        holder: VH,
+        item: CardItem,
+        fallbackText: CharSequence,
+        position: Int
+    ) {
+        setCardMode(holder, CardMode.IMAGE, fallbackText)
+        val video = item.video
+        if (video == null) {
+            holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+            holder.playOverlay.isVisible = false
+            holder.durationBadge.isVisible = false
+            holder.progressBar.isVisible = false
+            return
+        }
+        val coverPath = video.coverImagePath
+        val coverFile = coverPath?.let { java.io.File(it) }
+        if (coverFile != null && coverFile.exists()) {
+            holder.imageCard.setImageBitmap(android.graphics.BitmapFactory.decodeFile(coverFile.absolutePath))
+        } else {
+            holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+        }
+        holder.playOverlay.isVisible = true
+        holder.durationBadge.isVisible = true
+        holder.durationBadge.text = formatDuration(video.durationMs)
+        holder.progressBar.isVisible = video.watchProgressMs > 0L && video.durationMs > 0L
+        val progress = if (video.durationMs > 0L) {
+            ((video.watchProgressMs.toDouble() / video.durationMs.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
+        } else 0
+        holder.progressBar.max = 1000
+        holder.progressBar.progress = progress
+    }
+
+    private fun formatDuration(durationMs: Long): String {
+        val seconds = (durationMs / 1000L).coerceAtLeast(0L)
+        val h = seconds / 3600L
+        val m = (seconds % 3600L) / 60L
+        val s = seconds % 60L
+        return if (h > 0L) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
     }
 
     override fun getItemId(position: Int): Long = getItem(position).id
@@ -1097,6 +1149,7 @@ private fun CardItem.deepCopy(): CardItem = copy(
         )
     },
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
+    video = video?.copy(),
     relativeTimeText = relativeTimeText,
     stickyNotes = stickyNotes.map { it.copy() }.toMutableList()
 )
