@@ -6499,7 +6499,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             ensureMainCard(flow)
-            updateCardCounter(layoutManager.currentSelectionIndex())
+            val selection = layoutManager.currentSelectionIndex()
+            updateCardCounter(selection)
+            maybeAutoPlayCenteredVideo(selection)
         }
 
         private fun ensureMainCard(flow: CardFlow) {
@@ -6540,11 +6542,7 @@ class MainActivity : AppCompatActivity() {
                 adapter.setActiveVideoCardId(null)
                 return
             }
-            val index = selectionIndex ?: run {
-                adapter.setActiveVideoCardId(null)
-                return
-            }
-            if (!layoutManager.isFocused(index)) {
+            val index = (selectionIndex ?: layoutManager.nearestIndex()).takeIf { it >= 0 } ?: run {
                 adapter.setActiveVideoCardId(null)
                 return
             }
