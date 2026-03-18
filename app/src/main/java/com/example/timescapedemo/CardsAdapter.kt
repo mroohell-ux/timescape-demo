@@ -116,6 +116,7 @@ class CardsAdapter(
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
+    private val onVideoRotationChange: ((cardId: Long, rotationDegrees: Int) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
@@ -140,6 +141,7 @@ class CardsAdapter(
         val videoInlineView: VideoView = v.findViewById(R.id.videoInlineView)
         val videoPlaybackControls: View = v.findViewById(R.id.videoPlaybackControls)
         val videoPlayPauseButton: ImageButton = v.findViewById(R.id.videoPlayPauseButton)
+        val videoRotateButton: ImageButton = v.findViewById(R.id.videoRotateButton)
         val videoSeekBar: SeekBar = v.findViewById(R.id.videoSeekBar)
         val videoTimeLabel: TextView = v.findViewById(R.id.videoTimeLabel)
         lateinit var gestureDetector: GestureDetectorCompat
@@ -343,6 +345,8 @@ class CardsAdapter(
         holder.progressBar.isVisible = false
         holder.videoInlineView.isVisible = false
         holder.videoPlaybackControls.isVisible = false
+        holder.videoInlineView.rotation = 0f
+        holder.imageCard.rotation = 0f
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
@@ -493,6 +497,9 @@ class CardsAdapter(
             holder.videoInlineView.isVisible = true
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
+            val normalizedRotation = ((video.rotationDegrees % 360) + 360) % 360
+            holder.videoInlineView.rotation = normalizedRotation.toFloat()
+            holder.imageCard.rotation = normalizedRotation.toFloat()
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
                 player.isLooping = true
@@ -536,6 +543,11 @@ class CardsAdapter(
                         holder.itemView.context.getString(R.string.video_pause)
                 }
             }
+            holder.videoRotateButton.setOnClickListener {
+                showVideoControls(holder)
+                val nextRotation = (normalizedRotation + 90) % 360
+                onVideoRotationChange?.invoke(item.id, nextRotation)
+            }
             holder.videoInlineView.setOnClickListener { showVideoControls(holder) }
             holder.videoPlaybackControls.setOnClickListener { showVideoControls(holder) }
             holder.videoInlineView.setVideoURI(videoUri)
@@ -548,6 +560,7 @@ class CardsAdapter(
             holder.videoPlaybackControls.isVisible = false
             holder.videoSeekBar.setOnSeekBarChangeListener(null)
             holder.videoPlayPauseButton.setOnClickListener(null)
+            holder.videoRotateButton.setOnClickListener(null)
             attachedVideoHolders.remove(holder)
             hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
         }
@@ -574,6 +587,7 @@ class CardsAdapter(
         holder.videoInlineView.setOnPreparedListener(null)
         holder.videoSeekBar.setOnSeekBarChangeListener(null)
         holder.videoPlayPauseButton.setOnClickListener(null)
+        holder.videoRotateButton.setOnClickListener(null)
         holder.videoInlineView.setOnClickListener(null)
         holder.videoPlaybackControls.setOnClickListener(null)
         holder.itemView.removeCallbacks(videoProgressUpdater)

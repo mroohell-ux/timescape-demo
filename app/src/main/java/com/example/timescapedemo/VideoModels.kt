@@ -13,6 +13,7 @@ data class VideoCardData(
     val coverImagePath: String?,
     val coverTimestampMs: Long?,
     val sourceFingerprint: String,
+    val rotationDegrees: Int = 0,
     val isFavorite: Boolean = false,
     val isHidden: Boolean = false,
     val isPinned: Boolean = false,

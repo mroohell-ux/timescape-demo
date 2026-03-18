@@ -271,6 +271,7 @@
     <string name="video_unmute">Unmute</string>
     <string name="video_play">Play</string>
     <string name="video_pause">Pause</string>
+    <string name="video_rotate">Rotate video</string>
     <string name="drawer_video_mute">Global video: Mute</string>
     <string name="drawer_video_unmute">Global video: Unmute</string>
     <string name="video_empty_title">No videos yet</string>

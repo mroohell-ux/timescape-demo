@@ -4575,6 +4575,7 @@ class MainActivity : AppCompatActivity() {
             coverImagePath = coverPath,
             coverTimestampMs = coverTimestamp,
             sourceFingerprint = fingerprint,
+            rotationDegrees = obj.optInt("rotationDegrees", 0),
             isFavorite = obj.optBoolean("isFavorite", false),
             isHidden = obj.optBoolean("isHidden", false),
             isPinned = obj.optBoolean("isPinned", false),
@@ -5885,6 +5886,7 @@ class MainActivity : AppCompatActivity() {
                         video.coverImagePath?.let { put("coverImagePath", it) }
                         video.coverTimestampMs?.let { put("coverTimestampMs", it) }
                         put("sourceFingerprint", video.sourceFingerprint)
+                        put("rotationDegrees", video.rotationDegrees)
                         put("isFavorite", video.isFavorite)
                         put("isHidden", video.isHidden)
                         put("isPinned", video.isPinned)
@@ -6091,6 +6093,7 @@ class MainActivity : AppCompatActivity() {
                     coverImagePath = cover.first,
                     coverTimestampMs = cover.second,
                     sourceFingerprint = meta.sourceFingerprint,
+                    rotationDegrees = priorVideo?.rotationDegrees ?: 0,
                     isFavorite = priorVideo?.isFavorite ?: false,
                     isHidden = priorVideo?.isHidden ?: false,
                     isPinned = priorVideo?.isPinned ?: false,
@@ -6273,6 +6276,19 @@ class MainActivity : AppCompatActivity() {
         return samples == 0 || (luminance / samples) < 28.0
     }
 
+    private fun updateVideoRotation(flowId: Long?, cardId: Long, rotationDegrees: Int) {
+        val id = flowId ?: return
+        val flow = flows.firstOrNull { it.id == id } ?: return
+        val index = flow.cards.indexOfFirst { it.id == cardId }
+        if (index < 0) return
+        val current = flow.cards[index]
+        val video = current.video ?: return
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        flow.cards[index] = current.copy(video = video.copy(rotationDegrees = normalized))
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+    }
+
     private fun defaultFlowName(): String {
         val baseName = SimpleDateFormat("M/d", Locale.getDefault()).format(Date())
         return getString(R.string.default_flow_name, baseName)
@@ -6296,7 +6312,10 @@ class MainActivity : AppCompatActivity() {
                         holder.onCardDoubleTapped(card, index) },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
-                    onTitleSpeakClick = { card -> speakCardTitle(card) }
+                    onTitleSpeakClick = { card -> speakCardTitle(card) },
+                    onVideoRotationChange = { cardId, rotation ->
+                        updateVideoRotation(flowId = holder.boundFlowId, cardId = cardId, rotationDegrees = rotation)
+                    }
                 )
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
