@@ -49,12 +49,8 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.PopupWindow
-import android.widget.VideoView
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.MediaController
-import android.media.MediaPlayer
-import android.widget.Button
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.activity.addCallback
@@ -221,9 +217,6 @@ class MainActivity : AppCompatActivity() {
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
     private var stickyNoteNotificationSequence = 0
-    private var activeVideoDialog: Dialog? = null
-    private var activeVideoUri: String? = null
-    private var isVideoMuted: Boolean = false
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -690,9 +683,6 @@ class MainActivity : AppCompatActivity() {
                 updateChipSelection(position)
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
-                if (flows.getOrNull(position)?.id != VIDEO_FLOW_ID) {
-                    activeVideoDialog?.dismiss()
-                }
             }
         })
         flowPager.setOnDragListener { _, event ->
@@ -6006,9 +5996,6 @@ class MainActivity : AppCompatActivity() {
         textToSpeechReady = false
         textToSpeechInitializing = false
         pendingTextToSpeechRequests.clear()
-        activeVideoDialog?.dismiss()
-        activeVideoDialog = null
-        activeVideoUri = null
         super.onDestroy()
     }
 
@@ -6105,77 +6092,6 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_video_refresh_complete, count))
         }
         saveState()
-    }
-
-    private fun playVideoCard(video: VideoCardData, autoPlay: Boolean = false) {
-        val uri = Uri.parse(video.sourceUri)
-        if (activeVideoDialog?.isShowing == true && activeVideoUri == video.sourceUri) {
-            return
-        }
-        activeVideoDialog?.dismiss()
-        val dialog = Dialog(this)
-        val container = FrameLayout(this)
-        val videoView = VideoView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        }
-        val muteButton = Button(this).apply {
-            text = if (isVideoMuted) getString(R.string.video_unmute) else getString(R.string.video_mute)
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.END
-            ).apply {
-                topMargin = (12 * resources.displayMetrics.density).roundToInt()
-                marginEnd = (12 * resources.displayMetrics.density).roundToInt()
-            }
-        }
-        container.addView(videoView)
-        container.addView(muteButton)
-
-        val mediaController = MediaController(this)
-        mediaController.setAnchorView(videoView)
-        videoView.setMediaController(mediaController)
-        videoView.setVideoURI(uri)
-        var preparedPlayer: MediaPlayer? = null
-        videoView.setOnPreparedListener { player ->
-            preparedPlayer = player
-            player.isLooping = false
-            if (isVideoMuted) {
-                player.setVolume(0f, 0f)
-            } else {
-                player.setVolume(1f, 1f)
-            }
-            videoView.start()
-        }
-        muteButton.setOnClickListener {
-            isVideoMuted = !isVideoMuted
-            preparedPlayer?.setVolume(if (isVideoMuted) 0f else 1f, if (isVideoMuted) 0f else 1f)
-            muteButton.text = if (isVideoMuted) getString(R.string.video_unmute) else getString(R.string.video_mute)
-        }
-        videoView.setOnErrorListener { _, _, _ ->
-            snackbar(getString(R.string.snackbar_video_play_failed))
-            dialog.dismiss()
-            true
-        }
-        dialog.setTitle(video.fileName)
-        dialog.setContentView(container)
-        dialog.setOnDismissListener {
-            videoView.stopPlayback()
-            if (activeVideoDialog === dialog) {
-                activeVideoDialog = null
-                activeVideoUri = null
-            }
-        }
-        runCatching { dialog.show() }
-            .onFailure { snackbar(getString(R.string.snackbar_video_play_failed)) }
-            .onSuccess {
-                activeVideoDialog = dialog
-                activeVideoUri = video.sourceUri
-                if (autoPlay) videoView.start()
-            }
     }
 
     private data class ScannedVideo(
@@ -6399,6 +6315,7 @@ class MainActivity : AppCompatActivity() {
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
+                adapter.setActiveVideoCardId(null)
                 controller.updateDisplayedCards(
                     flow = flow,
                     query = flowSearchQueryNormalized,
@@ -6411,10 +6328,6 @@ class MainActivity : AppCompatActivity() {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return
                 val card = adapter.getItemAt(index) ?: return
                 if (layoutManager.isFocused(index)) {
-                    card.video?.let { video ->
-                        playVideoCard(video)
-                        return
-                    }
                     if (adapter.canFlipCardAt(index)) {
                         val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
                         if (vh != null && adapter.toggleCardFace(vh) != null) {
@@ -6623,11 +6536,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun maybeAutoPlayCenteredVideo(selectionIndex: Int?) {
-            if (flowId != VIDEO_FLOW_ID) return
-            val index = selectionIndex ?: return
-            if (!layoutManager.isFocused(index)) return
-            val video = adapter.getItemAt(index)?.video ?: return
-            playVideoCard(video, autoPlay = true)
+            if (flowId != VIDEO_FLOW_ID) {
+                adapter.setActiveVideoCardId(null)
+                return
+            }
+            val index = selectionIndex ?: run {
+                adapter.setActiveVideoCardId(null)
+                return
+            }
+            if (!layoutManager.isFocused(index)) {
+                adapter.setActiveVideoCardId(null)
+                return
+            }
+            val item = adapter.getItemAt(index)
+            adapter.setActiveVideoCardId(item?.video?.let { item.id })
         }
     }
 

@@ -58,6 +58,24 @@
                 android:tint="@android:color/white"
                 android:visibility="gone"/>
 
+            <VideoView
+                android:id="@+id/videoInlineView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/videoMuteToggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|end"
+                android:layout_margin="10dp"
+                android:minHeight="32dp"
+                android:text="@string/video_mute"
+                android:textAllCaps="false"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/videoDurationBadge"
                 android:layout_width="wrap_content"
