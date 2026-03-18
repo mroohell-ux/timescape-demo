@@ -6094,6 +6094,21 @@ class MainActivity : AppCompatActivity() {
         saveState()
     }
 
+    private fun playVideoCard(video: VideoCardData) {
+        val uri = Uri.parse(video.sourceUri)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "video/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val canHandle = intent.resolveActivity(packageManager) != null
+        if (!canHandle) {
+            snackbar(getString(R.string.snackbar_video_player_missing))
+            return
+        }
+        runCatching { startActivity(intent) }
+            .onFailure { snackbar(getString(R.string.snackbar_video_play_failed)) }
+    }
+
     private data class ScannedVideo(
         val sourceUri: String,
         val fileName: String,
@@ -6327,6 +6342,10 @@ class MainActivity : AppCompatActivity() {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return
                 val card = adapter.getItemAt(index) ?: return
                 if (layoutManager.isFocused(index)) {
+                    card.video?.let { video ->
+                        playVideoCard(video)
+                        return
+                    }
                     if (adapter.canFlipCardAt(index)) {
                         val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
                         if (vh != null && adapter.toggleCardFace(vh) != null) {
