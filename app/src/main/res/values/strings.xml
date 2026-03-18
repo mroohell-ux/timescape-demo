@@ -269,6 +269,8 @@
     <string name="snackbar_video_play_failed">Could not open this video.</string>
     <string name="video_mute">Mute</string>
     <string name="video_unmute">Unmute</string>
+    <string name="drawer_video_mute">Global video: Mute</string>
+    <string name="drawer_video_unmute">Global video: Unmute</string>
     <string name="video_empty_title">No videos yet</string>
     <string name="video_empty_snippet">Choose a source folder to build your Timescape video flow.</string>
 </resources>

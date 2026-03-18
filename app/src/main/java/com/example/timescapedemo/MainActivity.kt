@@ -166,6 +166,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
+    private lateinit var drawerVideoMuteToggleButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
@@ -217,6 +218,7 @@ class MainActivity : AppCompatActivity() {
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
     private var stickyNoteNotificationSequence = 0
+    private var isGlobalVideoMuted: Boolean = false
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -466,6 +468,7 @@ class MainActivity : AppCompatActivity() {
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
+        drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -561,6 +564,9 @@ class MainActivity : AppCompatActivity() {
             toggleFlowReorderMode()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
+        drawerVideoMuteToggleButton.setOnClickListener {
+            setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
+        }
 
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
@@ -589,6 +595,7 @@ class MainActivity : AppCompatActivity() {
         loadState()
         ensureVideoFlow()
         refreshVideoFlow(showSnackbar = false)
+        setGlobalVideoMuted(prefs.getBoolean(KEY_VIDEO_GLOBAL_MUTED, false), persist = false)
 
         imagesAdapter.submit(selectedImages)
         refreshAllFlows()
@@ -1154,6 +1161,23 @@ class MainActivity : AppCompatActivity() {
         }
         if (::drawerToggleReorderFlowsButton.isInitialized) {
             drawerToggleReorderFlowsButton.text = getString(titleRes)
+        }
+    }
+
+    private fun setGlobalVideoMuted(muted: Boolean, persist: Boolean) {
+        isGlobalVideoMuted = muted
+        if (::drawerVideoMuteToggleButton.isInitialized) {
+            drawerVideoMuteToggleButton.text = if (muted) {
+                getString(R.string.drawer_video_unmute)
+            } else {
+                getString(R.string.drawer_video_mute)
+            }
+        }
+        flowControllers.values.forEach { controller ->
+            controller.adapter.setGlobalVideoMuted(muted)
+        }
+        if (persist) {
+            prefs.edit().putBoolean(KEY_VIDEO_GLOBAL_MUTED, muted).apply()
         }
     }
 
@@ -6315,6 +6339,7 @@ class MainActivity : AppCompatActivity() {
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
+                adapter.setGlobalVideoMuted(isGlobalVideoMuted)
                 adapter.setActiveVideoCardId(null)
                 controller.updateDisplayedCards(
                     flow = flow,
@@ -6629,6 +6654,7 @@ private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_c
 private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
 private const val KEY_VIDEO_SOURCE_URI = "video/source_uri"
 private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
+private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
 private const val VIDEO_FLOW_ID = 0L
 private const val VIDEO_EMPTY_CARD_ID = 1L
 private const val VIDEO_CARD_ID_BASE = 10_000L

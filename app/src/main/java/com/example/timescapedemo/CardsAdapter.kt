@@ -28,7 +28,6 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Button
 import android.widget.VideoView
 import androidx.annotation.ColorInt
 import androidx.core.content.ContextCompat
@@ -137,7 +136,6 @@ class CardsAdapter(
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
         val videoInlineView: VideoView = v.findViewById(R.id.videoInlineView)
-        val videoMuteToggle: Button = v.findViewById(R.id.videoMuteToggle)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -219,6 +217,12 @@ class CardsAdapter(
         if (newIndex != null && newIndex != prevIndex) notifyItemChanged(newIndex)
     }
 
+    fun setGlobalVideoMuted(muted: Boolean) {
+        if (inlineVideoMuted == muted) return
+        inlineVideoMuted = muted
+        notifyDataSetChanged()
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
         val vh = VH(v)
@@ -298,7 +302,6 @@ class CardsAdapter(
         holder.durationBadge.isVisible = false
         holder.progressBar.isVisible = false
         holder.videoInlineView.isVisible = false
-        holder.videoMuteToggle.isVisible = false
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
@@ -430,12 +433,6 @@ class CardsAdapter(
         holder.progressBar.progress = progress
         if (isActive) {
             holder.videoInlineView.isVisible = true
-            holder.videoMuteToggle.isVisible = true
-            holder.videoMuteToggle.text = if (inlineVideoMuted) {
-                holder.itemView.context.getString(R.string.video_unmute)
-            } else {
-                holder.itemView.context.getString(R.string.video_mute)
-            }
             val videoUri = Uri.parse(video.sourceUri)
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
@@ -443,15 +440,6 @@ class CardsAdapter(
                 holder.videoInlineView.start()
             }
             holder.videoInlineView.setVideoURI(videoUri)
-            holder.videoMuteToggle.setOnClickListener {
-                inlineVideoMuted = !inlineVideoMuted
-                holder.videoMuteToggle.text = if (inlineVideoMuted) {
-                    holder.itemView.context.getString(R.string.video_unmute)
-                } else {
-                    holder.itemView.context.getString(R.string.video_mute)
-                }
-                holder.videoInlineView.setVideoURI(videoUri)
-            }
         } else {
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
