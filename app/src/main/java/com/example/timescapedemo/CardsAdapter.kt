@@ -334,6 +334,8 @@ class CardsAdapter(
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
             holder.card.clearRatio()
+            holder.card.scaleX = 1f
+            holder.card.scaleY = 1f
             bindHandwriting(holder, item, handwritingContent, face, fallbackText, position)
             clearTitle(holder)
         } else if (item.video != null) {
@@ -341,10 +343,14 @@ class CardsAdapter(
             clearTitle(holder)
         } else if (imageContent != null) {
             holder.card.clearRatio()
+            holder.card.scaleX = 1f
+            holder.card.scaleY = 1f
             bindImageCard(holder, item, face, fallbackText, position)
             clearTitle(holder)
         } else {
             holder.card.clearRatio()
+            holder.card.scaleX = 1f
+            holder.card.scaleY = 1f
             HandwritingBitmapLoader.clear(holder.handwriting)
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
@@ -452,13 +458,14 @@ class CardsAdapter(
             holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
         }
         val isActive = activeVideoCardId == item.id
-        val aspect = video.aspectRatio
-        val ratio = when {
-            aspect <= 0.8f -> "2:3"     // screen-recording style: smaller portrait cards
-            aspect >= 1.25f -> "4:5"    // movie landscape: render in taller vertical card
-            else -> "3:4"
+        holder.card.clearRatio()
+        val scale = when {
+            video.aspectRatio <= 0.8f -> 0.82f // portrait/screen records
+            video.aspectRatio >= 1.25f -> 0.9f // landscape/movies
+            else -> 0.86f
         }
-        holder.card.setRatioString(ratio)
+        holder.card.scaleX = scale
+        holder.card.scaleY = scale
         holder.playOverlay.isVisible = !isActive
         holder.durationBadge.isVisible = true
         holder.durationBadge.text = formatDuration(video.durationMs)
@@ -544,6 +551,8 @@ class CardsAdapter(
         holder.itemView.removeCallbacks(videoProgressUpdater)
         attachedVideoHolders.remove(holder)
         holder.card.clearRatio()
+        holder.card.scaleX = 1f
+        holder.card.scaleY = 1f
         holder.itemView.setTag(R.id.tag_card_id, null)
         setCardMode(holder, CardMode.TEXT, holder.snippet.text ?: "")
         super.onViewRecycled(holder)
