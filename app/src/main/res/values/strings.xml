@@ -269,6 +269,8 @@
     <string name="snackbar_video_play_failed">Could not open this video.</string>
     <string name="video_mute">Mute</string>
     <string name="video_unmute">Unmute</string>
+    <string name="video_play">Play</string>
+    <string name="video_pause">Pause</string>
     <string name="drawer_video_mute">Global video: Mute</string>
     <string name="drawer_video_unmute">Global video: Unmute</string>
     <string name="video_empty_title">No videos yet</string>
