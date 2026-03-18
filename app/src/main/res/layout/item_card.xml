@@ -96,8 +96,10 @@
                     android:layout_marginEnd="8dp"
                     android:layout_weight="1"
                     android:max="1000"
-                    android:progressTint="@android:color/white"
-                    android:thumbTint="@android:color/white" />
+                    android:minHeight="32dp"
+                    android:progressDrawable="@drawable/video_seekbar_track"
+                    android:thumb="@drawable/video_seekbar_thumb"
+                    android:splitTrack="false" />
 
                 <TextView
                     android:id="@+id/videoTimeLabel"
@@ -129,12 +131,11 @@
                 android:id="@+id/videoProgressBar"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
-                android:layout_height="3dp"
+                android:layout_height="5dp"
                 android:layout_gravity="bottom"
                 android:indeterminate="false"
                 android:max="1000"
-                android:progressTint="@android:color/white"
-                android:progressBackgroundTint="#66FFFFFF"
+                android:progressDrawable="@drawable/video_watch_progress"
                 android:visibility="gone" />
         </FrameLayout>
 
