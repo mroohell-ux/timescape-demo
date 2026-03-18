@@ -66,9 +66,11 @@
 
             <LinearLayout
                 android:id="@+id/videoPlaybackControls"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
+                android:layout_marginStart="14dp"
+                android:layout_marginEnd="14dp"
                 android:background="#66000000"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
