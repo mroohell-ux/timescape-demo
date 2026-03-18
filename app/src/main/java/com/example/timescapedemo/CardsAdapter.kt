@@ -173,6 +173,7 @@ class CardsAdapter(
         }
     }
     private val attachedVideoHolders = mutableSetOf<VH>()
+    private val hideControlsRunnables = mutableMapOf<VH, Runnable>()
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
     private enum class CardMode { TEXT, IMAGE, HANDWRITING }
     private val blurEffect: RenderEffect? =
@@ -247,6 +248,19 @@ class CardsAdapter(
         if (inlineVideoMuted == muted) return
         inlineVideoMuted = muted
         notifyDataSetChanged()
+    }
+
+    private fun showVideoControls(holder: VH) {
+        holder.videoPlaybackControls.isVisible = true
+        val existing = hideControlsRunnables.remove(holder)
+        if (existing != null) holder.itemView.removeCallbacks(existing)
+        val runnable = Runnable {
+            if (holder.videoInlineView.isVisible) {
+                holder.videoPlaybackControls.isVisible = false
+            }
+        }
+        hideControlsRunnables[holder] = runnable
+        holder.itemView.postDelayed(runnable, VIDEO_CONTROLS_AUTO_HIDE_MS)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -477,7 +491,7 @@ class CardsAdapter(
         holder.progressBar.progress = progress
         if (isActive) {
             holder.videoInlineView.isVisible = true
-            holder.videoPlaybackControls.isVisible = true
+            showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
@@ -490,6 +504,7 @@ class CardsAdapter(
                     holder.itemView.context.getString(R.string.video_pause)
                 holder.itemView.removeCallbacks(videoProgressUpdater)
                 holder.itemView.post(videoProgressUpdater)
+                showVideoControls(holder)
             }
             holder.videoSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -499,10 +514,16 @@ class CardsAdapter(
                     holder.videoInlineView.seekTo(target)
                 }
 
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                    showVideoControls(holder)
+                }
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    showVideoControls(holder)
+                }
             })
             holder.videoPlayPauseButton.setOnClickListener {
+                showVideoControls(holder)
                 if (holder.videoInlineView.isPlaying) {
                     holder.videoInlineView.pause()
                     holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_play)
@@ -515,15 +536,20 @@ class CardsAdapter(
                         holder.itemView.context.getString(R.string.video_pause)
                 }
             }
+            holder.videoInlineView.setOnClickListener { showVideoControls(holder) }
+            holder.videoPlaybackControls.setOnClickListener { showVideoControls(holder) }
             holder.videoInlineView.setVideoURI(videoUri)
             attachedVideoHolders.add(holder)
         } else {
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
+            holder.videoInlineView.setOnClickListener(null)
+            holder.videoPlaybackControls.setOnClickListener(null)
             holder.videoPlaybackControls.isVisible = false
             holder.videoSeekBar.setOnSeekBarChangeListener(null)
             holder.videoPlayPauseButton.setOnClickListener(null)
             attachedVideoHolders.remove(holder)
+            hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
         }
     }
 
@@ -548,7 +574,10 @@ class CardsAdapter(
         holder.videoInlineView.setOnPreparedListener(null)
         holder.videoSeekBar.setOnSeekBarChangeListener(null)
         holder.videoPlayPauseButton.setOnClickListener(null)
+        holder.videoInlineView.setOnClickListener(null)
+        holder.videoPlaybackControls.setOnClickListener(null)
         holder.itemView.removeCallbacks(videoProgressUpdater)
+        hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
         attachedVideoHolders.remove(holder)
         holder.card.clearRatio()
         holder.card.scaleX = 1f
@@ -1257,6 +1286,7 @@ class CardsAdapter(
 }
 
 private const val HANDWRITING_PREFETCH_DISTANCE = 2
+private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 5_000L
 
 private fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
