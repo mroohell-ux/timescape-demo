@@ -29,8 +29,8 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.VideoView
 import androidx.annotation.ColorInt
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
@@ -58,6 +58,7 @@ private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 80
 private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 30
 private const val DEFAULT_BG_WIDTH_FRACTION = 0.25f
 private const val MIN_BG_WIDTH_FRACTION = 0.1f
+private const val ULTRA_WIDE_ASPECT_THRESHOLD = 2.1f
 
 data class BackgroundSizingConfig(
     val maxLongEdgePx: Int = DEFAULT_MAX_BG_LONG_EDGE_PX,
@@ -138,7 +139,7 @@ class CardsAdapter(
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
-        val videoInlineView: VideoView = v.findViewById(R.id.videoInlineView)
+        val videoInlineView: InlineVideoView = v.findViewById(R.id.videoInlineView)
         val videoPlaybackControls: View = v.findViewById(R.id.videoPlaybackControls)
         val videoPlayPauseButton: ImageButton = v.findViewById(R.id.videoPlayPauseButton)
         val videoRotateButton: ImageButton = v.findViewById(R.id.videoRotateButton)
@@ -347,6 +348,10 @@ class CardsAdapter(
         holder.videoPlaybackControls.isVisible = false
         holder.videoInlineView.rotation = 0f
         holder.imageCard.rotation = 0f
+        holder.videoInlineView.scaleX = 1f
+        holder.videoInlineView.scaleY = 1f
+        holder.imageCard.scaleX = 1f
+        holder.imageCard.scaleY = 1f
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
@@ -477,7 +482,9 @@ class CardsAdapter(
         }
         val isActive = activeVideoCardId == item.id
         holder.card.clearRatio()
+        val isUltraWide = isUltraWideVideo(video)
         val scale = when {
+            isUltraWide -> 1f
             video.aspectRatio <= 0.8f -> 0.82f // portrait/screen records
             video.aspectRatio >= 1.25f -> 0.9f // landscape/movies
             else -> 0.86f
@@ -495,11 +502,12 @@ class CardsAdapter(
         holder.progressBar.progress = progress
         if (isActive) {
             holder.videoInlineView.isVisible = true
+            holder.imageCard.isVisible = false
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
-            val normalizedRotation = ((video.rotationDegrees % 360) + 360) % 360
-            holder.videoInlineView.rotation = normalizedRotation.toFloat()
-            holder.imageCard.rotation = normalizedRotation.toFloat()
+            val normalizedRotation = effectiveVideoRotation(video)
+            configureVideoContainerHeight(holder, video, normalizedRotation, isUltraWide, isActive = true)
+            applyVideoTransform(holder, normalizedRotation)
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
                 player.isLooping = true
@@ -543,9 +551,11 @@ class CardsAdapter(
                         holder.itemView.context.getString(R.string.video_pause)
                 }
             }
+            holder.videoRotateButton.isVisible = isUltraWide
             holder.videoRotateButton.setOnClickListener {
                 showVideoControls(holder)
-                val nextRotation = (normalizedRotation + 90) % 360
+                val baseRotation = ((video.rotationDegrees % 360) + 360) % 360
+                val nextRotation = (baseRotation + 90) % 360
                 onVideoRotationChange?.invoke(item.id, nextRotation)
             }
             holder.videoInlineView.setOnClickListener { showVideoControls(holder) }
@@ -553,6 +563,8 @@ class CardsAdapter(
             holder.videoInlineView.setVideoURI(videoUri)
             attachedVideoHolders.add(holder)
         } else {
+            holder.imageCard.isVisible = true
+            configureVideoContainerHeight(holder, video, rotationDegrees = 0, isUltraWide = false, isActive = false)
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
             holder.videoInlineView.setOnClickListener(null)
@@ -560,10 +572,78 @@ class CardsAdapter(
             holder.videoPlaybackControls.isVisible = false
             holder.videoSeekBar.setOnSeekBarChangeListener(null)
             holder.videoPlayPauseButton.setOnClickListener(null)
+            holder.videoRotateButton.isVisible = false
             holder.videoRotateButton.setOnClickListener(null)
+            holder.videoInlineView.rotation = 0f
+            holder.imageCard.rotation = 0f
+            holder.videoInlineView.scaleX = 1f
+            holder.videoInlineView.scaleY = 1f
+            holder.imageCard.scaleX = 1f
+            holder.imageCard.scaleY = 1f
             attachedVideoHolders.remove(holder)
             hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
         }
+    }
+
+    private fun configureVideoContainerHeight(
+        holder: VH,
+        video: VideoCardData,
+        rotationDegrees: Int,
+        isUltraWide: Boolean,
+        isActive: Boolean
+    ) {
+        val params = holder.imageCardContainer.layoutParams as? ConstraintLayout.LayoutParams ?: return
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        val shouldUseTallContainer = isUltraWide && isActive && (normalized == 90 || normalized == 270)
+        val desiredHeight = if (shouldUseTallContainer) {
+            val cardWidth = holder.card.width.takeIf { it > 0 }
+                ?: holder.itemView.width.takeIf { it > 0 }
+                ?: (holder.itemView.resources.displayMetrics.widthPixels * 0.84f).roundToInt()
+            val rotatedAspect = rotatedVideoAspect(video, normalized).coerceAtLeast(0.01f)
+            val rawHeight = (cardWidth / rotatedAspect).roundToInt()
+            val minHeight = (holder.itemView.resources.displayMetrics.heightPixels * 0.45f).roundToInt()
+            val maxHeight = (holder.itemView.resources.displayMetrics.heightPixels * 0.74f).roundToInt()
+            rawHeight.coerceIn(minHeight, maxHeight)
+        } else {
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        }
+        if (params.height == desiredHeight) return
+        params.height = desiredHeight
+        holder.imageCardContainer.layoutParams = params
+    }
+
+    private fun rotatedVideoAspect(video: VideoCardData, rotationDegrees: Int): Float {
+        val natural = when {
+            video.width > 0 && video.height > 0 -> video.width.toFloat() / video.height.toFloat()
+            video.aspectRatio > 0f -> video.aspectRatio
+            else -> 16f / 9f
+        }.coerceAtLeast(0.01f)
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        return if (normalized == 90 || normalized == 270) 1f / natural else natural
+    }
+
+    private fun effectiveVideoRotation(video: VideoCardData): Int {
+        val base = ((video.rotationDegrees % 360) + 360) % 360
+        val forcedUltraWideTurn = if (isUltraWideVideo(video)) 90 else 0
+        return (base + forcedUltraWideTurn) % 360
+    }
+
+    private fun isUltraWideVideo(video: VideoCardData): Boolean {
+        val width = video.width.toFloat()
+        val height = video.height.toFloat()
+        val naturalAspect = when {
+            width > 0f && height > 0f -> max(width, height) / min(width, height)
+            video.aspectRatio > 0f -> max(video.aspectRatio, 1f / video.aspectRatio)
+            else -> 1f
+        }
+        return naturalAspect >= ULTRA_WIDE_ASPECT_THRESHOLD
+    }
+
+    private fun applyVideoTransform(holder: VH, rotationDegrees: Int) {
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        holder.videoInlineView.rotation = normalized.toFloat()
+        holder.videoInlineView.scaleX = 1f
+        holder.videoInlineView.scaleY = 1f
     }
 
     private fun formatDuration(durationMs: Long): String {
