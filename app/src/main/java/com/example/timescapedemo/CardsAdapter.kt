@@ -502,6 +502,7 @@ class CardsAdapter(
         holder.progressBar.progress = progress
         if (isActive) {
             holder.videoInlineView.isVisible = true
+            holder.imageCard.isVisible = false
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
             val normalizedRotation = effectiveVideoRotation(video)
@@ -562,6 +563,7 @@ class CardsAdapter(
             holder.videoInlineView.setVideoURI(videoUri)
             attachedVideoHolders.add(holder)
         } else {
+            holder.imageCard.isVisible = true
             configureVideoContainerHeight(holder, video, rotationDegrees = 0, isUltraWide = false, isActive = false)
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
@@ -640,11 +642,8 @@ class CardsAdapter(
     private fun applyVideoTransform(holder: VH, rotationDegrees: Int) {
         val normalized = ((rotationDegrees % 360) + 360) % 360
         holder.videoInlineView.rotation = normalized.toFloat()
-        holder.imageCard.rotation = normalized.toFloat()
         holder.videoInlineView.scaleX = 1f
         holder.videoInlineView.scaleY = 1f
-        holder.imageCard.scaleX = 1f
-        holder.imageCard.scaleY = 1f
     }
 
     private fun formatDuration(durationMs: Long): String {
