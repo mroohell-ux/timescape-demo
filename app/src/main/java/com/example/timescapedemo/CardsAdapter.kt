@@ -32,6 +32,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.VideoView
 import androidx.annotation.ColorInt
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
@@ -537,6 +538,7 @@ class CardsAdapter(
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
             val normalizedRotation = effectiveVideoRotation(video)
+            configureVideoContainerHeight(holder, video, normalizedRotation, isUltraWide, isActive = true)
             applyVideoTransform(holder, video, normalizedRotation, isUltraWide)
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
@@ -593,6 +595,7 @@ class CardsAdapter(
             holder.videoInlineView.setVideoURI(videoUri)
             attachedVideoHolders.add(holder)
         } else {
+            configureVideoContainerHeight(holder, video, rotationDegrees = 0, isUltraWide = false, isActive = false)
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
             holder.videoInlineView.setOnClickListener(null)
@@ -611,6 +614,43 @@ class CardsAdapter(
             attachedVideoHolders.remove(holder)
             hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
         }
+    }
+
+    private fun configureVideoContainerHeight(
+        holder: VH,
+        video: VideoCardData,
+        rotationDegrees: Int,
+        isUltraWide: Boolean,
+        isActive: Boolean
+    ) {
+        val params = holder.imageCardContainer.layoutParams as? ConstraintLayout.LayoutParams ?: return
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        val shouldUseTallContainer = isUltraWide && isActive && (normalized == 90 || normalized == 270)
+        val desiredHeight = if (shouldUseTallContainer) {
+            val cardWidth = holder.card.width.takeIf { it > 0 }
+                ?: holder.itemView.width.takeIf { it > 0 }
+                ?: (holder.itemView.resources.displayMetrics.widthPixels * 0.84f).roundToInt()
+            val rotatedAspect = rotatedVideoAspect(video, normalized).coerceAtLeast(0.01f)
+            val rawHeight = (cardWidth / rotatedAspect).roundToInt()
+            val minHeight = (holder.itemView.resources.displayMetrics.heightPixels * 0.45f).roundToInt()
+            val maxHeight = (holder.itemView.resources.displayMetrics.heightPixels * 0.74f).roundToInt()
+            rawHeight.coerceIn(minHeight, maxHeight)
+        } else {
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        }
+        if (params.height == desiredHeight) return
+        params.height = desiredHeight
+        holder.imageCardContainer.layoutParams = params
+    }
+
+    private fun rotatedVideoAspect(video: VideoCardData, rotationDegrees: Int): Float {
+        val natural = when {
+            video.width > 0 && video.height > 0 -> video.width.toFloat() / video.height.toFloat()
+            video.aspectRatio > 0f -> video.aspectRatio
+            else -> 16f / 9f
+        }.coerceAtLeast(0.01f)
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        return if (normalized == 90 || normalized == 270) 1f / natural else natural
     }
 
     private fun effectiveVideoRotation(video: VideoCardData): Int {
