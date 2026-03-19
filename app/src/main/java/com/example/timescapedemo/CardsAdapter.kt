@@ -645,8 +645,6 @@ class CardsAdapter(
         val normalized = ((rotationDegrees % 360) + 360) % 360
         holder.videoInlineView.rotation = 0f
         holder.videoInlineView.setVideoRotationDegrees(normalized)
-        holder.videoInlineView.scaleX = 1f
-        holder.videoInlineView.scaleY = 1f
     }
 
     private fun formatDuration(durationMs: Long): String {

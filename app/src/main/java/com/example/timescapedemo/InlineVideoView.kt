@@ -2,7 +2,6 @@ package com.example.timescapedemo
 
 import android.content.Context
 import android.graphics.Matrix
-import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
@@ -138,33 +137,25 @@ class InlineVideoView @JvmOverloads constructor(
         val videoW = videoWidthPx.toFloat().takeIf { it > 0f } ?: return
         val videoH = videoHeightPx.toFloat().takeIf { it > 0f } ?: return
         val normalizedRotation = ((videoRotationDegrees % 360) + 360) % 360
-        val src = RectF(0f, 0f, videoW, videoH)
-        val dst = RectF(0f, 0f, vw, vh)
         val cx = vw / 2f
         val cy = vh / 2f
         val matrix = Matrix()
-
-        // First, fit the unrotated frame inside the view bounds.
-        matrix.setRectToRect(src, dst, Matrix.ScaleToFit.CENTER)
-
-        // Then rotate around the view center when requested.
-        if (normalizedRotation != 0) {
-            matrix.postRotate(normalizedRotation.toFloat(), cx, cy)
-        }
-
-        // Finally, normalize scale/translation so rotated content remains centered and fully visible.
-        val mapped = RectF(src)
-        matrix.mapRect(mapped)
-        val fitScale = kotlin.math.min(vw / mapped.width(), vh / mapped.height())
-        if (fitScale.isFinite() && fitScale > 0f) {
-            matrix.postScale(fitScale, fitScale, cx, cy)
-        }
-        val adjusted = RectF(src)
-        matrix.mapRect(adjusted)
-        matrix.postTranslate(cx - adjusted.centerX(), cy - adjusted.centerY())
-        if (!adjusted.width().isFinite() || !adjusted.height().isFinite()) {
-            return
-        }
+        val scale = kotlin.math.max(vw / videoW, vh / videoH)
+        val scaledW = videoW * scale
+        val scaledH = videoH * scale
+        matrix.postScale(scale, scale)
+        matrix.postTranslate((vw - scaledW) / 2f, (vh - scaledH) / 2f)
         setTransform(matrix)
+
+        // Apply rotation at the view level and compensate scale so 90/270 fills the container.
+        rotation = normalizedRotation.toFloat()
+        val rotatedQuarterTurn = normalizedRotation == 90 || normalizedRotation == 270
+        val compensationScale = if (rotatedQuarterTurn) {
+            kotlin.math.max(vw / vh, vh / vw)
+        } else {
+            1f
+        }
+        scaleX = compensationScale
+        scaleY = compensationScale
     }
 }
