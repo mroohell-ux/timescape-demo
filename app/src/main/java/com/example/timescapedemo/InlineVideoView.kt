@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.content.Context
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
@@ -137,17 +138,30 @@ class InlineVideoView @JvmOverloads constructor(
         val videoW = videoWidthPx.toFloat().takeIf { it > 0f } ?: return
         val videoH = videoHeightPx.toFloat().takeIf { it > 0f } ?: return
         val normalizedRotation = ((videoRotationDegrees % 360) + 360) % 360
+        val cx = vw / 2f
+        val cy = vh / 2f
         val matrix = Matrix()
-        val quarterTurn = normalizedRotation == 90 || normalizedRotation == 270
-        val rotatedVideoW = if (quarterTurn) videoH else videoW
-        val rotatedVideoH = if (quarterTurn) videoW else videoH
-        val scale = kotlin.math.min(vw / rotatedVideoW, vh / rotatedVideoH)
-        val scaledW = videoW * scale
-        val scaledH = videoH * scale
-        matrix.postScale(scale, scale)
-        matrix.postTranslate((vw - scaledW) / 2f, (vh - scaledH) / 2f)
+        val srcRect = RectF(0f, 0f, videoW, videoH)
+        val viewRect = RectF(0f, 0f, vw, vh)
+        matrix.setRectToRect(srcRect, viewRect, Matrix.ScaleToFit.CENTER)
+
+        if (normalizedRotation != 0) {
+            matrix.postRotate(normalizedRotation.toFloat(), cx, cy)
+
+            val rotatedBounds = RectF(srcRect)
+            matrix.mapRect(rotatedBounds)
+            val fitScale = kotlin.math.min(
+                vw / rotatedBounds.width().coerceAtLeast(0.01f),
+                vh / rotatedBounds.height().coerceAtLeast(0.01f)
+            )
+            matrix.postScale(fitScale, fitScale, cx, cy)
+
+            val fittedBounds = RectF(srcRect)
+            matrix.mapRect(fittedBounds)
+            matrix.postTranslate(cx - fittedBounds.centerX(), cy - fittedBounds.centerY())
+        }
         setTransform(matrix)
-        rotation = normalizedRotation.toFloat()
+        rotation = 0f
         scaleX = 1f
         scaleY = 1f
     }
