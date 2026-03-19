@@ -140,7 +140,9 @@ class InlineVideoView @JvmOverloads constructor(
         val rotated = normalizedRotation == 90 || normalizedRotation == 270
         val sourceW = if (rotated) videoH else videoW
         val sourceH = if (rotated) videoW else videoH
-        val scale = kotlin.math.max(vw / sourceW, vh / sourceH)
+        // Keep the full frame visible after rotation (no cropping).
+        // This is a "fit center" transform against the current view bounds.
+        val scale = kotlin.math.min(vw / sourceW, vh / sourceH)
         val scaledW = sourceW * scale
         val scaledH = sourceH * scale
         val dx = (vw - scaledW) / 2f
