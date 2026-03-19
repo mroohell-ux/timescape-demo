@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.content.Context
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
@@ -137,21 +138,32 @@ class InlineVideoView @JvmOverloads constructor(
         val videoW = videoWidthPx.toFloat().takeIf { it > 0f } ?: return
         val videoH = videoHeightPx.toFloat().takeIf { it > 0f } ?: return
         val normalizedRotation = ((videoRotationDegrees % 360) + 360) % 360
-        val rotated = normalizedRotation == 90 || normalizedRotation == 270
-        val sourceW = if (rotated) videoH else videoW
-        val sourceH = if (rotated) videoW else videoH
-        // Keep the full frame visible after rotation (no cropping).
-        // This is a "fit center" transform against the current view bounds.
-        val scale = kotlin.math.min(vw / sourceW, vh / sourceH)
-        val scaledW = sourceW * scale
-        val scaledH = sourceH * scale
-        val dx = (vw - scaledW) / 2f
-        val dy = (vh - scaledH) / 2f
+        val src = RectF(0f, 0f, videoW, videoH)
+        val dst = RectF(0f, 0f, vw, vh)
+        val cx = vw / 2f
+        val cy = vh / 2f
         val matrix = Matrix()
-        matrix.postScale(scale, scale)
-        matrix.postTranslate(dx, dy)
+
+        // First, fit the unrotated frame inside the view bounds.
+        matrix.setRectToRect(src, dst, Matrix.ScaleToFit.CENTER)
+
+        // Then rotate around the view center when requested.
         if (normalizedRotation != 0) {
-            matrix.postRotate(normalizedRotation.toFloat(), vw / 2f, vh / 2f)
+            matrix.postRotate(normalizedRotation.toFloat(), cx, cy)
+        }
+
+        // Finally, normalize scale/translation so rotated content remains centered and fully visible.
+        val mapped = RectF(src)
+        matrix.mapRect(mapped)
+        val fitScale = kotlin.math.min(vw / mapped.width(), vh / mapped.height())
+        if (fitScale.isFinite() && fitScale > 0f) {
+            matrix.postScale(fitScale, fitScale, cx, cy)
+        }
+        val adjusted = RectF(src)
+        matrix.mapRect(adjusted)
+        matrix.postTranslate(cx - adjusted.centerX(), cy - adjusted.centerY())
+        if (!adjusted.width().isFinite() || !adjusted.height().isFinite()) {
+            return
         }
         setTransform(matrix)
     }
