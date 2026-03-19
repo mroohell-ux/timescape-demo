@@ -507,7 +507,7 @@ class CardsAdapter(
             val videoUri = Uri.parse(video.sourceUri)
             val normalizedRotation = effectiveVideoRotation(video)
             configureVideoContainerHeight(holder, video, normalizedRotation, isUltraWide, isActive = true)
-            applyVideoTransform(holder, video, normalizedRotation, isUltraWide)
+            applyVideoTransform(holder, normalizedRotation)
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
                 player.isLooping = true
@@ -638,42 +638,14 @@ class CardsAdapter(
         return naturalAspect >= ULTRA_WIDE_ASPECT_THRESHOLD
     }
 
-    private fun applyVideoTransform(holder: VH, video: VideoCardData, rotationDegrees: Int, isUltraWide: Boolean) {
-        if (!isUltraWide) {
-            holder.videoInlineView.rotation = rotationDegrees.toFloat()
-            holder.imageCard.rotation = rotationDegrees.toFloat()
-            holder.videoInlineView.scaleX = 1f
-            holder.videoInlineView.scaleY = 1f
-            holder.imageCard.scaleX = 1f
-            holder.imageCard.scaleY = 1f
-            return
-        }
+    private fun applyVideoTransform(holder: VH, rotationDegrees: Int) {
         val normalized = ((rotationDegrees % 360) + 360) % 360
-        val isQuarterTurn = normalized == 90 || normalized == 270
         holder.videoInlineView.rotation = normalized.toFloat()
         holder.imageCard.rotation = normalized.toFloat()
-        if (!isQuarterTurn) {
-            holder.videoInlineView.scaleX = 1f
-            holder.videoInlineView.scaleY = 1f
-            holder.imageCard.scaleX = 1f
-            holder.imageCard.scaleY = 1f
-            return
-        }
-        val applyScale = {
-            val containerWidth = holder.imageCardContainer.width.toFloat().coerceAtLeast(1f)
-            val containerHeight = holder.imageCardContainer.height.toFloat().coerceAtLeast(1f)
-            val swapScaleX = containerHeight / containerWidth
-            val swapScaleY = containerWidth / containerHeight
-            holder.videoInlineView.scaleX = swapScaleX
-            holder.videoInlineView.scaleY = swapScaleY
-            holder.imageCard.scaleX = swapScaleX
-            holder.imageCard.scaleY = swapScaleY
-        }
-        if (holder.imageCardContainer.width == 0 || holder.imageCardContainer.height == 0) {
-            holder.imageCardContainer.post { applyScale() }
-        } else {
-            applyScale()
-        }
+        holder.videoInlineView.scaleX = 1f
+        holder.videoInlineView.scaleY = 1f
+        holder.imageCard.scaleX = 1f
+        holder.imageCard.scaleY = 1f
     }
 
     private fun formatDuration(durationMs: Long): String {
