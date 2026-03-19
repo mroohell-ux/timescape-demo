@@ -140,22 +140,23 @@ class InlineVideoView @JvmOverloads constructor(
         val cx = vw / 2f
         val cy = vh / 2f
         val matrix = Matrix()
-        val scale = kotlin.math.max(vw / videoW, vh / videoH)
-        val scaledW = videoW * scale
-        val scaledH = videoH * scale
-        matrix.postScale(scale, scale)
-        matrix.postTranslate((vw - scaledW) / 2f, (vh - scaledH) / 2f)
-        setTransform(matrix)
+        val quarterTurn = normalizedRotation == 90 || normalizedRotation == 270
+        val rotatedVideoW = if (quarterTurn) videoH else videoW
+        val rotatedVideoH = if (quarterTurn) videoW else videoH
+        val scale = kotlin.math.min(vw / rotatedVideoW, vh / rotatedVideoH)
 
-        // Apply rotation at the view level and compensate scale so 90/270 fills the container.
-        rotation = normalizedRotation.toFloat()
-        val rotatedQuarterTurn = normalizedRotation == 90 || normalizedRotation == 270
-        val compensationScale = if (rotatedQuarterTurn) {
-            kotlin.math.max(vw / vh, vh / vw)
-        } else {
-            1f
-        }
-        scaleX = compensationScale
-        scaleY = compensationScale
+        // Transform order:
+        // 1) Move source-center to origin,
+        // 2) apply requested rotation,
+        // 3) fit-within scaling (no crop),
+        // 4) move back to view-center.
+        matrix.postTranslate(-videoW / 2f, -videoH / 2f)
+        matrix.postRotate(normalizedRotation.toFloat())
+        matrix.postScale(scale, scale)
+        matrix.postTranslate(cx, cy)
+        setTransform(matrix)
+        rotation = 0f
+        scaleX = 1f
+        scaleY = 1f
     }
 }
