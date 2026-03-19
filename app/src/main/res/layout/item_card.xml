@@ -58,7 +58,7 @@
                 android:tint="@android:color/white"
                 android:visibility="gone"/>
 
-            <VideoView
+            <com.example.timescapedemo.InlineVideoView
                 android:id="@+id/videoInlineView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

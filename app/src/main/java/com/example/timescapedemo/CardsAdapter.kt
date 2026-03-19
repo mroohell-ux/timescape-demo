@@ -29,7 +29,6 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
-import android.widget.VideoView
 import androidx.annotation.ColorInt
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
@@ -140,7 +139,7 @@ class CardsAdapter(
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
-        val videoInlineView: VideoView = v.findViewById(R.id.videoInlineView)
+        val videoInlineView: InlineVideoView = v.findViewById(R.id.videoInlineView)
         val videoPlaybackControls: View = v.findViewById(R.id.videoPlaybackControls)
         val videoPlayPauseButton: ImageButton = v.findViewById(R.id.videoPlayPauseButton)
         val videoRotateButton: ImageButton = v.findViewById(R.id.videoRotateButton)
