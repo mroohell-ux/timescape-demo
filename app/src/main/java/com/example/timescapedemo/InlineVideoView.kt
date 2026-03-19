@@ -26,6 +26,7 @@ class InlineVideoView @JvmOverloads constructor(
     private var isPrepared = false
     private var videoWidthPx: Int = 0
     private var videoHeightPx: Int = 0
+    private var videoRotationDegrees: Int = 0
 
     init {
         surfaceTextureListener = this
@@ -56,11 +57,17 @@ class InlineVideoView @JvmOverloads constructor(
         isPrepared = false
         videoWidthPx = 0
         videoHeightPx = 0
+        videoRotationDegrees = 0
         mediaPlayer?.setOnPreparedListener(null)
         mediaPlayer?.reset()
         mediaPlayer?.release()
         mediaPlayer = null
         setTransform(null)
+    }
+
+    fun setVideoRotationDegrees(rotationDegrees: Int) {
+        videoRotationDegrees = ((rotationDegrees % 360) + 360) % 360
+        applyAspectTransform()
     }
 
     val isPlaying: Boolean
@@ -129,15 +136,20 @@ class InlineVideoView @JvmOverloads constructor(
         val vh = height.toFloat().takeIf { it > 0f } ?: return
         val videoW = videoWidthPx.toFloat().takeIf { it > 0f } ?: return
         val videoH = videoHeightPx.toFloat().takeIf { it > 0f } ?: return
-        val viewAspect = vw / vh
-        val videoAspect = videoW / videoH
+        val normalizedRotation = ((videoRotationDegrees % 360) + 360) % 360
+        val rotated = normalizedRotation == 90 || normalizedRotation == 270
+        val sourceW = if (rotated) videoH else videoW
+        val sourceH = if (rotated) videoW else videoH
+        val scale = kotlin.math.max(vw / sourceW, vh / sourceH)
+        val scaledW = sourceW * scale
+        val scaledH = sourceH * scale
+        val dx = (vw - scaledW) / 2f
+        val dy = (vh - scaledH) / 2f
         val matrix = Matrix()
-        if (videoAspect > viewAspect) {
-            val scaleY = viewAspect / videoAspect
-            matrix.setScale(1f, scaleY, vw / 2f, vh / 2f)
-        } else {
-            val scaleX = videoAspect / viewAspect
-            matrix.setScale(scaleX, 1f, vw / 2f, vh / 2f)
+        matrix.postScale(scale, scale)
+        matrix.postTranslate(dx, dy)
+        if (normalizedRotation != 0) {
+            matrix.postRotate(normalizedRotation.toFloat(), vw / 2f, vh / 2f)
         }
         setTransform(matrix)
     }

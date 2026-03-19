@@ -347,6 +347,7 @@ class CardsAdapter(
         holder.videoInlineView.isVisible = false
         holder.videoPlaybackControls.isVisible = false
         holder.videoInlineView.rotation = 0f
+        holder.videoInlineView.setVideoRotationDegrees(0)
         holder.imageCard.rotation = 0f
         holder.videoInlineView.scaleX = 1f
         holder.videoInlineView.scaleY = 1f
@@ -575,6 +576,7 @@ class CardsAdapter(
             holder.videoRotateButton.isVisible = false
             holder.videoRotateButton.setOnClickListener(null)
             holder.videoInlineView.rotation = 0f
+            holder.videoInlineView.setVideoRotationDegrees(0)
             holder.imageCard.rotation = 0f
             holder.videoInlineView.scaleX = 1f
             holder.videoInlineView.scaleY = 1f
@@ -641,7 +643,8 @@ class CardsAdapter(
 
     private fun applyVideoTransform(holder: VH, rotationDegrees: Int) {
         val normalized = ((rotationDegrees % 360) + 360) % 360
-        holder.videoInlineView.rotation = normalized.toFloat()
+        holder.videoInlineView.rotation = 0f
+        holder.videoInlineView.setVideoRotationDegrees(normalized)
         holder.videoInlineView.scaleX = 1f
         holder.videoInlineView.scaleY = 1f
     }
