@@ -19,6 +19,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
+import android.view.OrientationEventListener
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -58,6 +59,7 @@ private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 80
 private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 30
 private const val DEFAULT_BG_WIDTH_FRACTION = 0.25f
 private const val MIN_BG_WIDTH_FRACTION = 0.1f
+private const val ULTRA_WIDE_ASPECT_THRESHOLD = 2.1f
 
 data class BackgroundSizingConfig(
     val maxLongEdgePx: Int = DEFAULT_MAX_BG_LONG_EDGE_PX,
@@ -177,6 +179,8 @@ class CardsAdapter(
     private val attachedVideoHolders = mutableSetOf<VH>()
     private val hideControlsRunnables = mutableMapOf<VH, Runnable>()
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
+    private var physicalLandscapeCompensationDegrees: Int = 0
+    private var orientationListener: OrientationEventListener? = null
     private enum class CardMode { TEXT, IMAGE, HANDWRITING }
     private val blurEffect: RenderEffect? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -187,6 +191,35 @@ class CardsAdapter(
 
     init {
         setHasStableIds(true)
+    }
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        if (orientationListener != null) return
+        val appContext = recyclerView.context.applicationContext
+        val listener = object : OrientationEventListener(appContext) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val nextCompensation = when (orientation) {
+                    in 60..120, in 240..300 -> 90
+                    else -> 0
+                }
+                if (nextCompensation == physicalLandscapeCompensationDegrees) return
+                physicalLandscapeCompensationDegrees = nextCompensation
+                activeVideoCardId?.let { activeId ->
+                    val idx = currentList.indexOfFirst { it.id == activeId }
+                    if (idx >= 0) notifyItemChanged(idx)
+                }
+            }
+        }
+        orientationListener = listener
+        if (listener.canDetectOrientation()) listener.enable()
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        orientationListener?.disable()
+        orientationListener = null
+        super.onDetachedFromRecyclerView(recyclerView)
     }
 
     override fun submitList(list: List<CardItem>?) {
@@ -347,6 +380,10 @@ class CardsAdapter(
         holder.videoPlaybackControls.isVisible = false
         holder.videoInlineView.rotation = 0f
         holder.imageCard.rotation = 0f
+        holder.videoInlineView.scaleX = 1f
+        holder.videoInlineView.scaleY = 1f
+        holder.imageCard.scaleX = 1f
+        holder.imageCard.scaleY = 1f
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
@@ -477,7 +514,9 @@ class CardsAdapter(
         }
         val isActive = activeVideoCardId == item.id
         holder.card.clearRatio()
+        val isUltraWide = isUltraWideVideo(video)
         val scale = when {
+            isUltraWide -> 1f
             video.aspectRatio <= 0.8f -> 0.82f // portrait/screen records
             video.aspectRatio >= 1.25f -> 0.9f // landscape/movies
             else -> 0.86f
@@ -497,9 +536,8 @@ class CardsAdapter(
             holder.videoInlineView.isVisible = true
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
-            val normalizedRotation = ((video.rotationDegrees % 360) + 360) % 360
-            holder.videoInlineView.rotation = normalizedRotation.toFloat()
-            holder.imageCard.rotation = normalizedRotation.toFloat()
+            val normalizedRotation = effectiveVideoRotation(video)
+            applyVideoTransform(holder, video, normalizedRotation, isUltraWide)
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
                 player.isLooping = true
@@ -543,9 +581,11 @@ class CardsAdapter(
                         holder.itemView.context.getString(R.string.video_pause)
                 }
             }
+            holder.videoRotateButton.isVisible = isUltraWide
             holder.videoRotateButton.setOnClickListener {
                 showVideoControls(holder)
-                val nextRotation = (normalizedRotation + 90) % 360
+                val baseRotation = ((video.rotationDegrees % 360) + 360) % 360
+                val nextRotation = (baseRotation + 90) % 360
                 onVideoRotationChange?.invoke(item.id, nextRotation)
             }
             holder.videoInlineView.setOnClickListener { showVideoControls(holder) }
@@ -560,9 +600,71 @@ class CardsAdapter(
             holder.videoPlaybackControls.isVisible = false
             holder.videoSeekBar.setOnSeekBarChangeListener(null)
             holder.videoPlayPauseButton.setOnClickListener(null)
+            holder.videoRotateButton.isVisible = false
             holder.videoRotateButton.setOnClickListener(null)
+            holder.videoInlineView.rotation = 0f
+            holder.imageCard.rotation = 0f
+            holder.videoInlineView.scaleX = 1f
+            holder.videoInlineView.scaleY = 1f
+            holder.imageCard.scaleX = 1f
+            holder.imageCard.scaleY = 1f
             attachedVideoHolders.remove(holder)
             hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
+        }
+    }
+
+    private fun effectiveVideoRotation(video: VideoCardData): Int {
+        val base = ((video.rotationDegrees % 360) + 360) % 360
+        val adaptive = if (isUltraWideVideo(video)) physicalLandscapeCompensationDegrees else 0
+        return (base + adaptive) % 360
+    }
+
+    private fun isUltraWideVideo(video: VideoCardData): Boolean {
+        val width = video.width.toFloat()
+        val height = video.height.toFloat()
+        val naturalAspect = when {
+            width > 0f && height > 0f -> max(width, height) / min(width, height)
+            video.aspectRatio > 0f -> max(video.aspectRatio, 1f / video.aspectRatio)
+            else -> 1f
+        }
+        return naturalAspect >= ULTRA_WIDE_ASPECT_THRESHOLD
+    }
+
+    private fun applyVideoTransform(holder: VH, video: VideoCardData, rotationDegrees: Int, isUltraWide: Boolean) {
+        if (!isUltraWide) {
+            holder.videoInlineView.rotation = rotationDegrees.toFloat()
+            holder.imageCard.rotation = rotationDegrees.toFloat()
+            holder.videoInlineView.scaleX = 1f
+            holder.videoInlineView.scaleY = 1f
+            holder.imageCard.scaleX = 1f
+            holder.imageCard.scaleY = 1f
+            return
+        }
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        val isQuarterTurn = normalized == 90 || normalized == 270
+        holder.videoInlineView.rotation = normalized.toFloat()
+        holder.imageCard.rotation = normalized.toFloat()
+        if (!isQuarterTurn) {
+            holder.videoInlineView.scaleX = 1f
+            holder.videoInlineView.scaleY = 1f
+            holder.imageCard.scaleX = 1f
+            holder.imageCard.scaleY = 1f
+            return
+        }
+        val applyScale = {
+            val containerWidth = holder.imageCardContainer.width.toFloat().coerceAtLeast(1f)
+            val containerHeight = holder.imageCardContainer.height.toFloat().coerceAtLeast(1f)
+            val swapScaleX = containerHeight / containerWidth
+            val swapScaleY = containerWidth / containerHeight
+            holder.videoInlineView.scaleX = swapScaleX
+            holder.videoInlineView.scaleY = swapScaleY
+            holder.imageCard.scaleX = swapScaleX
+            holder.imageCard.scaleY = swapScaleY
+        }
+        if (holder.imageCardContainer.width == 0 || holder.imageCardContainer.height == 0) {
+            holder.imageCardContainer.post { applyScale() }
+        } else {
+            applyScale()
         }
     }
 
