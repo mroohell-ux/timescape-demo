@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.content.Context
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
@@ -23,6 +24,8 @@ class InlineVideoView @JvmOverloads constructor(
     private var sourceUri: Uri? = null
     private var preparedListener: ((MediaPlayer) -> Unit)? = null
     private var isPrepared = false
+    private var videoWidthPx: Int = 0
+    private var videoHeightPx: Int = 0
 
     init {
         surfaceTextureListener = this
@@ -51,10 +54,13 @@ class InlineVideoView @JvmOverloads constructor(
 
     fun stopPlayback() {
         isPrepared = false
+        videoWidthPx = 0
+        videoHeightPx = 0
         mediaPlayer?.setOnPreparedListener(null)
         mediaPlayer?.reset()
         mediaPlayer?.release()
         mediaPlayer = null
+        setTransform(null)
     }
 
     val isPlaying: Boolean
@@ -77,7 +83,15 @@ class InlineVideoView @JvmOverloads constructor(
             player.setSurface(targetSurface)
             player.setOnPreparedListener { mp ->
                 isPrepared = true
+                videoWidthPx = mp.videoWidth
+                videoHeightPx = mp.videoHeight
+                applyAspectTransform()
                 preparedListener?.invoke(mp)
+            }
+            player.setOnVideoSizeChangedListener { _, width, height ->
+                videoWidthPx = width
+                videoHeightPx = height
+                applyAspectTransform()
             }
             player.setOnErrorListener { _, _, _ ->
                 isPrepared = false
@@ -96,6 +110,11 @@ class InlineVideoView @JvmOverloads constructor(
 
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        applyAspectTransform()
+    }
+
     override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
         stopPlayback()
         surface?.release()
@@ -104,4 +123,22 @@ class InlineVideoView @JvmOverloads constructor(
     }
 
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+
+    private fun applyAspectTransform() {
+        val vw = width.toFloat().takeIf { it > 0f } ?: return
+        val vh = height.toFloat().takeIf { it > 0f } ?: return
+        val videoW = videoWidthPx.toFloat().takeIf { it > 0f } ?: return
+        val videoH = videoHeightPx.toFloat().takeIf { it > 0f } ?: return
+        val viewAspect = vw / vh
+        val videoAspect = videoW / videoH
+        val matrix = Matrix()
+        if (videoAspect > viewAspect) {
+            val scaleY = viewAspect / videoAspect
+            matrix.setScale(1f, scaleY, vw / 2f, vh / 2f)
+        } else {
+            val scaleX = videoAspect / viewAspect
+            matrix.setScale(scaleX, 1f, vw / 2f, vh / 2f)
+        }
+        setTransform(matrix)
+    }
 }
