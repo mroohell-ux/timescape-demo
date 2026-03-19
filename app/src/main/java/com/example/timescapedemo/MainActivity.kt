@@ -28,6 +28,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
@@ -96,6 +97,7 @@ import com.google.android.material.slider.Slider
 import org.json.JSONArray
 import org.json.JSONObject
 import android.webkit.MimeTypeMap
+import android.media.MediaMetadataRetriever
 import java.io.FileNotFoundException
 import java.io.File
 import java.io.FileInputStream
@@ -164,6 +166,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
+    private lateinit var drawerVideoMuteToggleButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
@@ -215,6 +218,7 @@ class MainActivity : AppCompatActivity() {
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
     private var stickyNoteNotificationSequence = 0
+    private var isGlobalVideoMuted: Boolean = false
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -322,6 +326,19 @@ class MainActivity : AppCompatActivity() {
                 saveState()
                 snackbar("Added ${uris.size} image(s)")
             } else snackbar("No photos selected")
+        }
+
+    private val pickVideoFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri == null) {
+                snackbar(getString(R.string.snackbar_video_folder_missing))
+                return@registerForActivityResult
+            }
+            persistReadPermission(uri)
+            prefs.edit().putString(KEY_VIDEO_SOURCE_URI, uri.toString()).apply()
+            ensureVideoFlow()
+            refreshVideoFlow(showSnackbar = true)
+            snackbar(getString(R.string.snackbar_video_folder_saved))
         }
 
     private val pickImageCard =
@@ -451,6 +468,7 @@ class MainActivity : AppCompatActivity() {
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
+        drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -546,6 +564,9 @@ class MainActivity : AppCompatActivity() {
             toggleFlowReorderMode()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
+        drawerVideoMuteToggleButton.setOnClickListener {
+            setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
+        }
 
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
@@ -572,6 +593,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         loadState()
+        ensureVideoFlow()
+        refreshVideoFlow(showSnackbar = false)
+        setGlobalVideoMuted(prefs.getBoolean(KEY_VIDEO_GLOBAL_MUTED, false), persist = false)
 
         imagesAdapter.submit(selectedImages)
         refreshAllFlows()
@@ -683,10 +707,27 @@ class MainActivity : AppCompatActivity() {
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
                 R.id.action_export_flow -> { launchExportCurrentFlow(); true }
-                R.id.action_add_card -> { showAddCardDialog(); true }
-                R.id.action_add_image_card -> { showAddImageCardDialog(); true }
-                R.id.action_add_handwriting -> { showAddHandwritingDialog(); true }
+                R.id.action_add_card -> {
+                    if (currentFlow()?.id == VIDEO_FLOW_ID) {
+                        snackbar(getString(R.string.snackbar_video_folder_missing))
+                    } else showAddCardDialog()
+                    true
+                }
+                R.id.action_add_image_card -> {
+                    if (currentFlow()?.id == VIDEO_FLOW_ID) {
+                        snackbar(getString(R.string.snackbar_video_folder_missing))
+                    } else showAddImageCardDialog()
+                    true
+                }
+                R.id.action_add_handwriting -> {
+                    if (currentFlow()?.id == VIDEO_FLOW_ID) {
+                        snackbar(getString(R.string.snackbar_video_folder_missing))
+                    } else showAddHandwritingDialog()
+                    true
+                }
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
+                R.id.action_pick_video_folder -> { pickVideoFolder.launch(null); true }
+                R.id.action_refresh_video_folder -> { refreshVideoFlow(showSnackbar = true); true }
                 else -> false
             }
         }
@@ -1053,7 +1094,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateToolbarSubtitle() {
-        toolbar.subtitle = ""
+        val flow = currentFlow()
+        if (flow?.id == VIDEO_FLOW_ID) {
+            val source = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
+            val folder = source?.let { Uri.parse(it).lastPathSegment?.substringAfterLast(':') } ?: ""
+            toolbar.subtitle = folder
+        } else {
+            toolbar.subtitle = ""
+        }
     }
 
     private fun expandSearchViewToToolbarWidth(view: SearchView) {
@@ -1113,6 +1161,23 @@ class MainActivity : AppCompatActivity() {
         }
         if (::drawerToggleReorderFlowsButton.isInitialized) {
             drawerToggleReorderFlowsButton.text = getString(titleRes)
+        }
+    }
+
+    private fun setGlobalVideoMuted(muted: Boolean, persist: Boolean) {
+        isGlobalVideoMuted = muted
+        if (::drawerVideoMuteToggleButton.isInitialized) {
+            drawerVideoMuteToggleButton.text = if (muted) {
+                getString(R.string.drawer_video_unmute)
+            } else {
+                getString(R.string.drawer_video_mute)
+            }
+        }
+        flowControllers.values.forEach { controller ->
+            controller.adapter.setGlobalVideoMuted(muted)
+        }
+        if (persist) {
+            prefs.edit().putBoolean(KEY_VIDEO_GLOBAL_MUTED, muted).apply()
         }
     }
 
@@ -1664,6 +1729,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun showFlowActionsDialog(index: Int) {
         val flow = flows.getOrNull(index) ?: return
+        if (flow.id == VIDEO_FLOW_ID) {
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.video_flow_name))
+                .setItems(
+                    arrayOf(
+                        getString(R.string.menu_pick_video_folder),
+                        getString(R.string.menu_refresh_video_folder)
+                    )
+                ) { _, which ->
+                    when (which) {
+                        0 -> pickVideoFolder.launch(null)
+                        1 -> refreshVideoFlow(showSnackbar = true)
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            return
+        }
         val options = arrayOf(
             getString(R.string.dialog_flow_option_rename),
             getString(R.string.dialog_delete)
@@ -4465,6 +4548,41 @@ class MainActivity : AppCompatActivity() {
         return CardImage(Uri.parse(uriString), mimeType, owned)
     }
 
+    private fun parseVideoCardData(obj: JSONObject?): VideoCardData? {
+        if (obj == null) return null
+        val sourceUri = obj.optString("sourceUri").takeIf { it.isNotBlank() } ?: return null
+        val fileName = obj.optString("fileName").ifBlank { sourceUri.substringAfterLast('/') }
+        val durationMs = obj.optLong("durationMs", 0L)
+        val modifiedAt = obj.optLong("modifiedAt", 0L)
+        val width = obj.optInt("width", 0)
+        val height = obj.optInt("height", 0)
+        val aspect = obj.optDouble("aspectRatio", if (height > 0) width.toDouble() / height.toDouble() else 16.0 / 9.0).toFloat()
+        val fileSize = obj.optLong("fileSizeBytes", 0L)
+        val folderLabel = obj.optString("folderLabel").takeIf { it.isNotBlank() }
+        val coverPath = obj.optString("coverImagePath").takeIf { it.isNotBlank() }
+        val coverTimestamp = if (obj.has("coverTimestampMs")) obj.optLong("coverTimestampMs", 0L) else null
+        val fingerprint = obj.optString("sourceFingerprint")
+        return VideoCardData(
+            sourceUri = sourceUri,
+            fileName = fileName,
+            durationMs = durationMs,
+            modifiedAt = modifiedAt,
+            width = width,
+            height = height,
+            aspectRatio = aspect,
+            fileSizeBytes = fileSize,
+            folderLabel = folderLabel,
+            coverImagePath = coverPath,
+            coverTimestampMs = coverTimestamp,
+            sourceFingerprint = fingerprint,
+            rotationDegrees = obj.optInt("rotationDegrees", 0),
+            isFavorite = obj.optBoolean("isFavorite", false),
+            isHidden = obj.optBoolean("isHidden", false),
+            isPinned = obj.optBoolean("isPinned", false),
+            watchProgressMs = obj.optLong("watchProgressMs", 0L)
+        )
+    }
+
     private fun parseHandwritingSide(
         obj: JSONObject,
         baseOptions: HandwritingOptions
@@ -5589,7 +5707,8 @@ class MainActivity : AppCompatActivity() {
                                 imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
                                     parseHandwritingSide(it, baseHandwritingOptions)
                                 },
-                                stickyNotes = stickyNotes
+                                stickyNotes = stickyNotes,
+                                video = parseVideoCardData(cardObj.optJSONObject("video"))
                             )
                         }
                     }
@@ -5632,15 +5751,15 @@ class MainActivity : AppCompatActivity() {
                     legacyCards.clear()
                 }
             }
-            val flow = CardFlow(id = 0L, name = defaultFlowName())
+            val flow = CardFlow(id = VIDEO_FLOW_ID, name = getString(R.string.video_flow_name))
             flow.cards.addAll(legacyCards)
             flows += flow
             highestFlowId = max(highestFlowId, flow.id)
         }
 
         if (flows.isEmpty()) {
-            flows += CardFlow(id = 0L, name = defaultFlowName())
-            highestFlowId = max(highestFlowId, 0L)
+            flows += CardFlow(id = VIDEO_FLOW_ID, name = getString(R.string.video_flow_name))
+            highestFlowId = max(highestFlowId, VIDEO_FLOW_ID)
         }
 
         val savedNextCard = prefs.getLong(KEY_NEXT_CARD_ID, -1L)
@@ -5649,7 +5768,10 @@ class MainActivity : AppCompatActivity() {
         val savedNextFlow = prefs.getLong(KEY_NEXT_FLOW_ID, -1L)
         nextFlowId = if (savedNextFlow >= 0) savedNextFlow else (highestFlowId + 1).coerceAtLeast(0L)
 
-        val seeded = ensureSeedCards(flows.first())
+        ensureVideoFlow()
+        val primaryEditableFlow = flows.firstOrNull { it.id != VIDEO_FLOW_ID }
+            ?: CardFlow(id = nextFlowId++, name = defaultFlowName()).also { flows += it }
+        val seeded = ensureSeedCards(primaryEditableFlow)
         flows.forEach { prepareFlowCards(it) }
         if (seeded) saveState()
 
@@ -5749,6 +5871,27 @@ class MainActivity : AppCompatActivity() {
                 }
                 card.imageHandwriting?.let { back ->
                     obj.put("imageHandwriting", handwritingSideToJson(back))
+                }
+                card.video?.let { video ->
+                    obj.put("video", JSONObject().apply {
+                        put("sourceUri", video.sourceUri)
+                        put("fileName", video.fileName)
+                        put("durationMs", video.durationMs)
+                        put("modifiedAt", video.modifiedAt)
+                        put("width", video.width)
+                        put("height", video.height)
+                        put("aspectRatio", video.aspectRatio.toDouble())
+                        put("fileSizeBytes", video.fileSizeBytes)
+                        video.folderLabel?.let { put("folderLabel", it) }
+                        video.coverImagePath?.let { put("coverImagePath", it) }
+                        video.coverTimestampMs?.let { put("coverTimestampMs", it) }
+                        put("sourceFingerprint", video.sourceFingerprint)
+                        put("rotationDegrees", video.rotationDegrees)
+                        put("isFavorite", video.isFavorite)
+                        put("isHidden", video.isHidden)
+                        put("isPinned", video.isPinned)
+                        put("watchProgressMs", video.watchProgressMs)
+                    })
                 }
                 if (card.stickyNotes.isNotEmpty()) {
                     val notesArray = JSONArray()
@@ -5882,6 +6025,270 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    private fun ensureVideoFlow() {
+        val existingIndex = flows.indexOfFirst { it.id == VIDEO_FLOW_ID }
+        if (existingIndex >= 0) {
+            val flow = flows[existingIndex]
+            flow.name = getString(R.string.video_flow_name)
+            if (existingIndex != 0) {
+                flows.removeAt(existingIndex)
+                flows.add(0, flow)
+            }
+            return
+        }
+        flows.add(0, CardFlow(id = VIDEO_FLOW_ID, name = getString(R.string.video_flow_name)))
+    }
+
+    private fun refreshVideoFlow(showSnackbar: Boolean = false) {
+        val videoFlow = flows.firstOrNull { it.id == VIDEO_FLOW_ID } ?: return
+        val folderValue = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
+        if (folderValue.isNullOrBlank()) {
+            videoFlow.cards.clear()
+            videoFlow.cards += CardItem(
+                id = VIDEO_EMPTY_CARD_ID,
+                title = getString(R.string.video_empty_title),
+                snippet = getString(R.string.video_empty_snippet),
+                updatedAt = System.currentTimeMillis()
+            )
+            refreshFlow(videoFlow, scrollToTop = true)
+            if (showSnackbar) snackbar(getString(R.string.snackbar_video_folder_missing))
+            return
+        }
+        val folderUri = Uri.parse(folderValue)
+        val previousByUri = videoFlow.cards.mapNotNull { card ->
+            val source = card.video?.sourceUri ?: return@mapNotNull null
+            source to card
+        }.toMap()
+        val scanned = runCatching { scanVideoDocuments(folderUri) }.getOrElse {
+            if (showSnackbar) snackbar(getString(R.string.snackbar_video_refresh_failed))
+            return
+        }
+        val cards = scanned.map { meta ->
+            val previous = previousByUri[meta.sourceUri]
+            val stableId = stableVideoCardId(meta.sourceUri)
+            val priorVideo = previous?.video
+            val cover = ensureVideoCover(
+                sourceUri = Uri.parse(meta.sourceUri),
+                cardId = stableId,
+                durationMs = meta.durationMs,
+                previousCoverPath = priorVideo?.coverImagePath,
+                previousTimestamp = priorVideo?.coverTimestampMs
+            )
+            CardItem(
+                id = stableId,
+                title = meta.fileName.substringBeforeLast('.'),
+                snippet = meta.folderLabel ?: "",
+                textColor = Color.WHITE,
+                updatedAt = meta.modifiedAt,
+                video = VideoCardData(
+                    sourceUri = meta.sourceUri,
+                    fileName = meta.fileName,
+                    durationMs = meta.durationMs,
+                    modifiedAt = meta.modifiedAt,
+                    width = meta.width,
+                    height = meta.height,
+                    aspectRatio = meta.aspectRatio,
+                    fileSizeBytes = meta.fileSizeBytes,
+                    folderLabel = meta.folderLabel,
+                    coverImagePath = cover.first,
+                    coverTimestampMs = cover.second,
+                    sourceFingerprint = meta.sourceFingerprint,
+                    rotationDegrees = priorVideo?.rotationDegrees ?: 0,
+                    isFavorite = priorVideo?.isFavorite ?: false,
+                    isHidden = priorVideo?.isHidden ?: false,
+                    isPinned = priorVideo?.isPinned ?: false,
+                    watchProgressMs = priorVideo?.watchProgressMs ?: 0L
+                )
+            )
+        }.sortedByDescending { it.updatedAt }
+
+        videoFlow.cards.clear()
+        if (cards.isEmpty()) {
+            videoFlow.cards += CardItem(
+                id = VIDEO_EMPTY_CARD_ID,
+                title = getString(R.string.video_empty_title),
+                snippet = getString(R.string.video_empty_snippet),
+                updatedAt = System.currentTimeMillis()
+            )
+        } else {
+            videoFlow.cards += cards
+        }
+        refreshFlow(videoFlow, scrollToTop = true)
+        if (showSnackbar) {
+            val count = cards.size
+            snackbar(getString(R.string.snackbar_video_refresh_complete, count))
+        }
+        saveState()
+    }
+
+    private data class ScannedVideo(
+        val sourceUri: String,
+        val fileName: String,
+        val durationMs: Long,
+        val modifiedAt: Long,
+        val width: Int,
+        val height: Int,
+        val aspectRatio: Float,
+        val fileSizeBytes: Long,
+        val folderLabel: String?,
+        val sourceFingerprint: String
+    )
+
+    private fun scanVideoDocuments(rootUri: Uri): List<ScannedVideo> {
+        val includeSubfolders = prefs.getBoolean(KEY_VIDEO_INCLUDE_SUBFOLDERS, true)
+        val rootId = DocumentsContract.getTreeDocumentId(rootUri)
+        val queue = ArrayDeque<String>()
+        queue.add(rootId)
+        val out = mutableListOf<ScannedVideo>()
+        while (queue.isNotEmpty()) {
+            val parentId = queue.removeFirst()
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(rootUri, parentId)
+            contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                    DocumentsContract.Document.COLUMN_SIZE
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val modifiedCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                while (cursor.moveToNext()) {
+                    val docId = cursor.getString(idCol)
+                    val name = cursor.getString(nameCol) ?: continue
+                    val mime = cursor.getString(mimeCol).orEmpty()
+                    val isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR
+                    if (isDir) {
+                        if (includeSubfolders) queue.add(docId)
+                        continue
+                    }
+                    val documentUri = DocumentsContract.buildDocumentUriUsingTree(rootUri, docId)
+                    if (!isSupportedVideo(name, mime)) continue
+                    val modifiedAt = cursor.getLong(modifiedCol).coerceAtLeast(0L)
+                    val size = cursor.getLong(sizeCol).coerceAtLeast(0L)
+                    val retriever = MediaMetadataRetriever()
+                    val parsed = runCatching {
+                        retriever.setDataSource(this, documentUri)
+                        val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                        Triple(duration, width, height)
+                    }.getOrNull()
+                    runCatching { retriever.release() }
+                    if (parsed == null) continue
+                    val (durationMs, width, height) = parsed
+                    val aspect = if (width > 0 && height > 0) width.toFloat() / height.toFloat() else 16f / 9f
+                    out += ScannedVideo(
+                        sourceUri = documentUri.toString(),
+                        fileName = name,
+                        durationMs = durationMs,
+                        modifiedAt = modifiedAt,
+                        width = width,
+                        height = height,
+                        aspectRatio = aspect,
+                        fileSizeBytes = size,
+                        folderLabel = docId.substringBeforeLast('/').substringAfterLast('/'),
+                        sourceFingerprint = "$docId:$modifiedAt:$size"
+                    )
+                }
+            }
+        }
+        return out
+    }
+
+    private fun isSupportedVideo(fileName: String, mime: String): Boolean {
+        if (mime.startsWith("video/")) return true
+        val ext = fileName.substringAfterLast('.', "").lowercase(Locale.US)
+        return ext in SUPPORTED_VIDEO_EXTENSIONS
+    }
+
+    private fun stableVideoCardId(sourceUri: String): Long {
+        val raw = sourceUri.hashCode().toLong()
+        return VIDEO_CARD_ID_BASE + kotlin.math.abs(raw)
+    }
+
+    private fun ensureVideoCover(
+        sourceUri: Uri,
+        cardId: Long,
+        durationMs: Long,
+        previousCoverPath: String?,
+        previousTimestamp: Long?
+    ): Pair<String?, Long?> {
+        if (!previousCoverPath.isNullOrBlank() && previousTimestamp != null) {
+            val file = File(previousCoverPath)
+            if (file.exists()) return previousCoverPath to previousTimestamp
+        }
+        val retriever = MediaMetadataRetriever()
+        val coverDir = File(filesDir, "video_covers").apply { mkdirs() }
+        val coverFile = File(coverDir, "cover_$cardId.jpg")
+        return runCatching {
+            retriever.setDataSource(this, sourceUri)
+            val random = Random((cardId xor (cardId ushr 32)).toInt())
+            val safeStart = 3_000L
+            val safeEnd = (durationMs - 1_000L).coerceAtLeast(safeStart + 1L)
+            var selectedTimestamp = if (durationMs > safeStart) random.nextLong(safeStart, safeEnd) else 0L
+            var bitmap = retriever.getFrameAtTime(selectedTimestamp * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            repeat(3) {
+                if (bitmap != null && !isFrameTooDark(bitmap!!)) return@repeat
+                selectedTimestamp = if (durationMs > safeStart) random.nextLong(safeStart, safeEnd) else 0L
+                bitmap = retriever.getFrameAtTime(selectedTimestamp * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+            if (bitmap == null) return@runCatching null to null
+            FileOutputStream(coverFile).use { stream ->
+                bitmap!!.compress(Bitmap.CompressFormat.JPEG, 88, stream)
+            }
+            bitmap!!.recycle()
+            coverFile.absolutePath to selectedTimestamp
+        }.getOrElse { null to null }.also {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun isFrameTooDark(bitmap: Bitmap): Boolean {
+        val width = bitmap.width.coerceAtLeast(1)
+        val height = bitmap.height.coerceAtLeast(1)
+        val stepX = (width / 8).coerceAtLeast(1)
+        val stepY = (height / 8).coerceAtLeast(1)
+        var samples = 0
+        var luminance = 0.0
+        var x = 0
+        while (x < width) {
+            var y = 0
+            while (y < height) {
+                val pixel = bitmap.getPixel(x, y)
+                val r = Color.red(pixel)
+                val g = Color.green(pixel)
+                val b = Color.blue(pixel)
+                luminance += (0.2126 * r + 0.7152 * g + 0.0722 * b)
+                samples++
+                y += stepY
+            }
+            x += stepX
+        }
+        return samples == 0 || (luminance / samples) < 28.0
+    }
+
+    private fun updateVideoRotation(flowId: Long?, cardId: Long, rotationDegrees: Int) {
+        val id = flowId ?: return
+        val flow = flows.firstOrNull { it.id == id } ?: return
+        val index = flow.cards.indexOfFirst { it.id == cardId }
+        if (index < 0) return
+        val current = flow.cards[index]
+        val video = current.video ?: return
+        val normalized = ((rotationDegrees % 360) + 360) % 360
+        flow.cards[index] = current.copy(video = video.copy(rotationDegrees = normalized))
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+    }
+
     private fun defaultFlowName(): String {
         val baseName = SimpleDateFormat("M/d", Locale.getDefault()).format(Date())
         return getString(R.string.default_flow_name, baseName)
@@ -5905,7 +6312,10 @@ class MainActivity : AppCompatActivity() {
                         holder.onCardDoubleTapped(card, index) },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
-                    onTitleSpeakClick = { card -> speakCardTitle(card) }
+                    onTitleSpeakClick = { card -> speakCardTitle(card) },
+                    onVideoRotationChange = { cardId, rotation ->
+                        updateVideoRotation(flowId = holder.boundFlowId, cardId = cardId, rotationDegrees = rotation)
+                    }
                 )
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
@@ -5948,6 +6358,8 @@ class MainActivity : AppCompatActivity() {
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
+                adapter.setGlobalVideoMuted(isGlobalVideoMuted)
+                adapter.setActiveVideoCardId(null)
                 controller.updateDisplayedCards(
                     flow = flow,
                     query = flowSearchQueryNormalized,
@@ -6019,6 +6431,7 @@ class MainActivity : AppCompatActivity() {
         private val selectionCallback: (Int?) -> Unit = { index ->
             vibrateOnCardChange(index)
             updateCardCounter(index)
+            maybeAutoPlayCenteredVideo(index)
         }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
@@ -6130,7 +6543,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             ensureMainCard(flow)
-            updateCardCounter(layoutManager.currentSelectionIndex())
+            val selection = layoutManager.currentSelectionIndex()
+            updateCardCounter(selection)
+            maybeAutoPlayCenteredVideo(selection)
         }
 
         private fun ensureMainCard(flow: CardFlow) {
@@ -6164,6 +6579,19 @@ class MainActivity : AppCompatActivity() {
             if (selectionIndex == lastHapticSelection) return
             recycler.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             lastHapticSelection = selectionIndex
+        }
+
+        private fun maybeAutoPlayCenteredVideo(selectionIndex: Int?) {
+            if (flowId != VIDEO_FLOW_ID) {
+                adapter.setActiveVideoCardId(null)
+                return
+            }
+            val index = (selectionIndex ?: layoutManager.nearestIndex()).takeIf { it >= 0 } ?: run {
+                adapter.setActiveVideoCardId(null)
+                return
+            }
+            val item = adapter.getItemAt(index)
+            adapter.setActiveVideoCardId(item?.video?.let { item.id })
         }
     }
 
@@ -6243,6 +6671,15 @@ private const val KEY_HANDWRITING_DEFAULT_ERASER_SIZE_DP = "handwriting/default_
 private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_canvas_width"
 private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
 private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
+private const val KEY_VIDEO_SOURCE_URI = "video/source_uri"
+private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
+private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
+private const val VIDEO_FLOW_ID = 0L
+private const val VIDEO_EMPTY_CARD_ID = 1L
+private const val VIDEO_CARD_ID_BASE = 10_000L
+private val SUPPORTED_VIDEO_EXTENSIONS = setOf(
+    "mp4", "mkv", "webm", "mov", "avi", "m4v", "3gp", "ts"
+)
 private const val KEY_HANDWRITING_DEFAULT_PAPER_STYLE = "handwriting/default_paper_style"
 private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_type"
 private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
