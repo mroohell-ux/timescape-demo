@@ -19,7 +19,6 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
-import android.view.OrientationEventListener
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -180,8 +179,6 @@ class CardsAdapter(
     private val attachedVideoHolders = mutableSetOf<VH>()
     private val hideControlsRunnables = mutableMapOf<VH, Runnable>()
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
-    private var physicalLandscapeCompensationDegrees: Int = 0
-    private var orientationListener: OrientationEventListener? = null
     private enum class CardMode { TEXT, IMAGE, HANDWRITING }
     private val blurEffect: RenderEffect? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -192,35 +189,6 @@ class CardsAdapter(
 
     init {
         setHasStableIds(true)
-    }
-
-    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
-        super.onAttachedToRecyclerView(recyclerView)
-        if (orientationListener != null) return
-        val appContext = recyclerView.context.applicationContext
-        val listener = object : OrientationEventListener(appContext) {
-            override fun onOrientationChanged(orientation: Int) {
-                if (orientation == ORIENTATION_UNKNOWN) return
-                val nextCompensation = when (orientation) {
-                    in 60..120, in 240..300 -> 90
-                    else -> 0
-                }
-                if (nextCompensation == physicalLandscapeCompensationDegrees) return
-                physicalLandscapeCompensationDegrees = nextCompensation
-                activeVideoCardId?.let { activeId ->
-                    val idx = currentList.indexOfFirst { it.id == activeId }
-                    if (idx >= 0) notifyItemChanged(idx)
-                }
-            }
-        }
-        orientationListener = listener
-        if (listener.canDetectOrientation()) listener.enable()
-    }
-
-    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
-        orientationListener?.disable()
-        orientationListener = null
-        super.onDetachedFromRecyclerView(recyclerView)
     }
 
     override fun submitList(list: List<CardItem>?) {
@@ -655,8 +623,8 @@ class CardsAdapter(
 
     private fun effectiveVideoRotation(video: VideoCardData): Int {
         val base = ((video.rotationDegrees % 360) + 360) % 360
-        val adaptive = if (isUltraWideVideo(video)) physicalLandscapeCompensationDegrees else 0
-        return (base + adaptive) % 360
+        val forcedUltraWideTurn = if (isUltraWideVideo(video)) 90 else 0
+        return (base + forcedUltraWideTurn) % 360
     }
 
     private fun isUltraWideVideo(video: VideoCardData): Boolean {
