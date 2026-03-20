@@ -37,9 +37,15 @@
     <string name="drawer_export_sticky_notes">Export sticky notes JSON</string>
     <string name="drawer_watch_sync_title">Watch sync (LAN)</string>
     <string name="drawer_watch_sync_status_loading">Starting LAN bridge…</string>
-    <string name="drawer_watch_sync_status_ready">mDNS: %1$s\nManual: %2$s\nHandshake: POST /session/request → GET /session/status → GET /export?token=…</string>
-    <string name="drawer_watch_sync_status_unavailable">LAN bridge unavailable. Keep app open and ensure phone/watch are on the same Wi-Fi.</string>
+    <string name="drawer_watch_sync_status_ready">Ready to sync. On your watch, choose sync from phone. If auto-discovery fails, use the manual endpoint below.</string>
+    <string name="drawer_watch_sync_status_unavailable">Watch sync is unavailable right now. Keep this screen open and make sure phone + watch are on the same Wi-Fi.</string>
+    <string name="drawer_watch_sync_endpoint_loading">Manual endpoint: loading…</string>
+    <string name="drawer_watch_sync_endpoint_format">Manual endpoint: %1$s</string>
+    <string name="drawer_watch_sync_endpoint_unavailable">Manual endpoint: unavailable</string>
     <string name="drawer_watch_sync_copy_endpoint">Copy manual endpoint</string>
+    <string name="drawer_watch_sync_how_to_use">How to use</string>
+    <string name="drawer_watch_sync_help_title">How watch sync works</string>
+    <string name="drawer_watch_sync_help_message">1) Keep phone and watch on the same Wi-Fi.\n\n2) Open sync on your watch.\n\n3) The watch should find this phone automatically.\n\n4) If not, tap \"Copy manual endpoint\" here and enter it on the watch.\n\n5) Start sync on the watch to receive sticky notes.</string>
     <string name="snackbar_watch_endpoint_copied">Copied watch endpoint</string>
     <string name="snackbar_watch_endpoint_unavailable">Watch endpoint not available yet</string>
     <string name="drawer_import_notes">Import notes</string>

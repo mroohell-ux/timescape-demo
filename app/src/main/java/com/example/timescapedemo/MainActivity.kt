@@ -170,7 +170,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerWatchSyncStatus: TextView
+    private lateinit var drawerWatchSyncEndpoint: TextView
     private lateinit var drawerCopyWatchEndpointButton: MaterialButton
+    private lateinit var drawerWatchSyncHelpButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
     private lateinit var drawerVideoMuteToggleButton: MaterialButton
@@ -496,7 +498,9 @@ class MainActivity : AppCompatActivity() {
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerWatchSyncStatus = header.findViewById(R.id.textDrawerWatchSyncStatus)
+        drawerWatchSyncEndpoint = header.findViewById(R.id.textDrawerWatchSyncEndpoint)
         drawerCopyWatchEndpointButton = header.findViewById(R.id.buttonDrawerCopyWatchEndpoint)
+        drawerWatchSyncHelpButton = header.findViewById(R.id.buttonDrawerWatchSyncHelp)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
         drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
@@ -601,6 +605,13 @@ class MainActivity : AppCompatActivity() {
                 clipboard.setPrimaryClip(clip)
                 snackbar(getString(R.string.snackbar_watch_endpoint_copied))
             }
+        }
+        drawerWatchSyncHelpButton.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.drawer_watch_sync_help_title)
+                .setMessage(getString(R.string.drawer_watch_sync_help_message))
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
         }
         drawerToggleReorderFlowsButton.setOnClickListener {
             toggleFlowReorderMode()
@@ -4794,14 +4805,12 @@ class MainActivity : AppCompatActivity() {
         val endpoint = buildManualWatchEndpoint()
         if (endpoint == null) {
             drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_unavailable)
+            drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_unavailable)
             drawerCopyWatchEndpointButton.isEnabled = false
             return
         }
-        drawerWatchSyncStatus.text = getString(
-            R.string.drawer_watch_sync_status_ready,
-            WATCH_SYNC_SERVICE_TYPE,
-            endpoint
-        )
+        drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_ready)
+        drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_format, endpoint)
         drawerCopyWatchEndpointButton.isEnabled = true
     }
 
@@ -6867,7 +6876,6 @@ private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
 private const val VIDEO_WATCH_COMPLETE_THRESHOLD_MS = 2_000L
 private const val VIDEO_PROGRESS_PERSIST_DELAY_MS = 800L
 private const val LAN_EXPORT_TIMEOUT_MS = 2_000L
-private const val WATCH_SYNC_SERVICE_TYPE = "_timescape._tcp"
 private const val VIDEO_FLOW_ID = 0L
 private const val VIDEO_EMPTY_CARD_ID = 1L
 private const val VIDEO_CARD_ID_BASE = 10_000L
