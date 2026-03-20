@@ -217,6 +217,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingStickyNoteNotificationTarget: StickyNoteTarget? = null
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
+    private var videoProgressPersistJob: Job? = null
     private var stickyNoteNotificationSequence = 0
     private var isGlobalVideoMuted: Boolean = false
 
@@ -6007,6 +6008,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        videoProgressPersistJob?.cancel()
         saveState()
     }
 
@@ -6296,7 +6298,10 @@ class MainActivity : AppCompatActivity() {
                         holder.onCardDoubleTapped(card, index) },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
-                    onTitleSpeakClick = { card -> speakCardTitle(card) }
+                    onTitleSpeakClick = { card -> speakCardTitle(card) },
+                    onVideoProgressChanged = { cardId, progressMs, durationMs ->
+                        updateVideoWatchProgress(cardId, progressMs, durationMs)
+                    }
                 )
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
@@ -6578,6 +6583,37 @@ class MainActivity : AppCompatActivity() {
 
     private data class SearchResultEntry(val card: CardItem, val flowId: Long, val flowName: String)
 
+    private fun updateVideoWatchProgress(cardId: Long, progressMs: Long, durationMs: Long) {
+        val videoFlow = flows.firstOrNull { it.id == VIDEO_FLOW_ID } ?: return
+        val cardIndex = videoFlow.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex < 0) return
+        val card = videoFlow.cards[cardIndex]
+        val video = card.video ?: return
+        val safeDuration = durationMs.coerceAtLeast(0L)
+        val clampedProgress = progressMs.coerceAtLeast(0L).let { progress ->
+            if (safeDuration > 0L) progress.coerceAtMost(safeDuration) else progress
+        }
+        val normalizedProgress = if (
+            safeDuration > VIDEO_WATCH_COMPLETE_THRESHOLD_MS &&
+            (safeDuration - clampedProgress) <= VIDEO_WATCH_COMPLETE_THRESHOLD_MS
+        ) {
+            0L
+        } else {
+            clampedProgress
+        }
+        if (video.watchProgressMs == normalizedProgress) return
+        card.video = video.copy(watchProgressMs = normalizedProgress)
+        scheduleVideoProgressPersist()
+    }
+
+    private fun scheduleVideoProgressPersist() {
+        videoProgressPersistJob?.cancel()
+        videoProgressPersistJob = lifecycleScope.launch {
+            delay(VIDEO_PROGRESS_PERSIST_DELAY_MS)
+            saveState()
+        }
+    }
+
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
         fun syncWith(flow: CardFlow) {
             val currentIds = flow.cards.map { it.id }
@@ -6655,6 +6691,8 @@ private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
 private const val KEY_VIDEO_SOURCE_URI = "video/source_uri"
 private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
 private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
+private const val VIDEO_WATCH_COMPLETE_THRESHOLD_MS = 2_000L
+private const val VIDEO_PROGRESS_PERSIST_DELAY_MS = 800L
 private const val VIDEO_FLOW_ID = 0L
 private const val VIDEO_EMPTY_CARD_ID = 1L
 private const val VIDEO_CARD_ID_BASE = 10_000L
