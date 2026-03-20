@@ -275,12 +275,12 @@
         <item quantity="other">%d cards</item>
     </plurals>
     <string name="untitled_flow_name">Flow %1$d</string>
-    <string name="video_flow_name">Video Flow</string>
+    <string name="video_flow_name">Movies</string>
     <string name="menu_pick_video_folder">Choose video folder</string>
     <string name="menu_refresh_video_folder">Refresh videos</string>
-    <string name="snackbar_video_folder_missing">Pick a video folder to populate Video Flow.</string>
+    <string name="snackbar_video_folder_missing">Pick a video folder to populate Movies.</string>
     <string name="snackbar_video_folder_saved">Video source folder connected.</string>
-    <string name="snackbar_video_refresh_complete">Video Flow synced: %1$d videos.</string>
+    <string name="snackbar_video_refresh_complete">Movies synced: %1$d videos.</string>
     <string name="snackbar_video_refresh_failed">Could not scan the selected video folder.</string>
     <string name="snackbar_video_player_missing">No app available to play videos.</string>
     <string name="snackbar_video_play_failed">Could not open this video.</string>
@@ -291,5 +291,5 @@
     <string name="drawer_video_mute">Global video: Mute</string>
     <string name="drawer_video_unmute">Global video: Unmute</string>
     <string name="video_empty_title">No videos yet</string>
-    <string name="video_empty_snippet">Choose a source folder to build your Timescape video flow.</string>
+    <string name="video_empty_snippet">Choose a source folder to build your Movies flow.</string>
 </resources>
