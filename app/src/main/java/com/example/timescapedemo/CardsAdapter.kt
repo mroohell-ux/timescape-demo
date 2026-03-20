@@ -116,6 +116,7 @@ class CardsAdapter(
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
+    private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
@@ -161,6 +162,9 @@ class CardsAdapter(
                 if (vv.isVisible && vv.duration > 0) {
                     val pos = vv.currentPosition.coerceAtLeast(0)
                     val dur = vv.duration.coerceAtLeast(1)
+                    (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
+                        onVideoProgressChanged?.invoke(cardId, pos.toLong(), dur.toLong())
+                    }
                     holder.videoSeekBar.progress = ((pos.toDouble() / dur.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
                     holder.videoTimeLabel.text = "${formatDuration(pos.toLong())} / ${formatDuration(dur.toLong())}"
                     val icon = if (vv.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
@@ -496,9 +500,20 @@ class CardsAdapter(
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
                 player.isLooping = true
+                val resumeProgressMs = video.watchProgressMs
+                    .coerceAtLeast(0L)
+                    .coerceAtMost((player.duration - VIDEO_PROGRESS_RESUME_MARGIN_MS).coerceAtLeast(0))
+                if (resumeProgressMs > 0L) {
+                    holder.videoInlineView.seekTo(resumeProgressMs.toInt())
+                }
                 holder.videoInlineView.start()
-                holder.videoTimeLabel.text = "00:00 / ${formatDuration(player.duration.toLong())}"
-                holder.videoSeekBar.progress = 0
+                val startMs = if (resumeProgressMs > 0L) resumeProgressMs else 0L
+                holder.videoTimeLabel.text = "${formatDuration(startMs)} / ${formatDuration(player.duration.toLong())}"
+                holder.videoSeekBar.progress = if (player.duration > 0) {
+                    ((startMs.toDouble() / player.duration.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
+                } else {
+                    0
+                }
                 holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_pause)
                 holder.videoPlayPauseButton.contentDescription =
                     holder.itemView.context.getString(R.string.video_pause)
@@ -512,6 +527,9 @@ class CardsAdapter(
                     val dur = holder.videoInlineView.duration.takeIf { it > 0 } ?: return
                     val target = (dur * (progress / 1000f)).roundToInt()
                     holder.videoInlineView.seekTo(target)
+                    (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
+                        onVideoProgressChanged?.invoke(cardId, target.toLong(), dur.toLong())
+                    }
                 }
 
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {
@@ -526,6 +544,7 @@ class CardsAdapter(
                 showVideoControls(holder)
                 if (holder.videoInlineView.isPlaying) {
                     holder.videoInlineView.pause()
+                    persistVideoProgress(holder)
                     holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_play)
                     holder.videoPlayPauseButton.contentDescription =
                         holder.itemView.context.getString(R.string.video_play)
@@ -541,6 +560,7 @@ class CardsAdapter(
             holder.videoInlineView.setVideoURI(videoUri)
             attachedVideoHolders.add(holder)
         } else {
+            persistVideoProgress(holder)
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
             holder.videoInlineView.setOnClickListener(null)
@@ -585,6 +605,13 @@ class CardsAdapter(
         holder.itemView.setTag(R.id.tag_card_id, null)
         setCardMode(holder, CardMode.TEXT, holder.snippet.text ?: "")
         super.onViewRecycled(holder)
+    }
+
+    private fun persistVideoProgress(holder: VH) {
+        val cardId = holder.itemView.getTag(R.id.tag_card_id) as? Long ?: return
+        val duration = holder.videoInlineView.duration.takeIf { it > 0 } ?: return
+        val position = holder.videoInlineView.currentPosition.coerceAtLeast(0)
+        onVideoProgressChanged?.invoke(cardId, position.toLong(), duration.toLong())
     }
 
     private fun bindHandwriting(
@@ -1287,6 +1314,7 @@ class CardsAdapter(
 
 private const val HANDWRITING_PREFETCH_DISTANCE = 2
 private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 5_000L
+private const val VIDEO_PROGRESS_RESUME_MARGIN_MS = 1_000L
 
 private fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
