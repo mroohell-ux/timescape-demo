@@ -114,16 +114,6 @@
             app:iconGravity="textStart"
             app:iconTint="@color/flow_bar_stroke"/>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/buttonDrawerVideoMute"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/drawer_video_mute"
-            app:iconGravity="textStart"
-            app:iconTint="@color/flow_bar_stroke"/>
-
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
