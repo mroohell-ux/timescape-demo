@@ -75,4 +75,11 @@
         android:visible="false"
         app:showAsAction="always"/>
 
+    <item
+        android:id="@+id/action_toggle_video_mute"
+        android:title="@string/video_mute"
+        android:orderInCategory="3"
+        android:visible="false"
+        app:showAsAction="always"/>
+
 </menu>

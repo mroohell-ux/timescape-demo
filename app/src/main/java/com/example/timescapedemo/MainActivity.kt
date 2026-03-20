@@ -788,6 +788,11 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
                 R.id.action_pick_video_folder -> { pickVideoFolder.launch(null); true }
                 R.id.action_refresh_video_folder -> { refreshVideoFlow(showSnackbar = true); true }
+                R.id.action_toggle_video_mute -> {
+                    setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
+                    updateShuffleMenuState()
+                    true
+                }
                 else -> false
             }
         }
@@ -1210,6 +1215,15 @@ class MainActivity : AppCompatActivity() {
         val isVideoFlow = flow?.id == VIDEO_FLOW_ID
         menu.findItem(R.id.action_pick_video_folder)?.isVisible = isVideoFlow
         menu.findItem(R.id.action_refresh_video_folder)?.isVisible = isVideoFlow
+        menu.findItem(R.id.action_toggle_video_mute)?.let { muteItem ->
+            muteItem.isVisible = isVideoFlow
+            muteItem.title = getString(if (isGlobalVideoMuted) R.string.video_unmute else R.string.video_mute)
+            muteItem.icon = AppCompatResources.getDrawable(
+                this,
+                if (isGlobalVideoMuted) android.R.drawable.ic_lock_silent_mode_off
+                else android.R.drawable.ic_lock_silent_mode
+            )
+        }
         val isShuffled = flow?.let { flowShuffleStates.containsKey(it.id) } == true
         menuItem.isCheckable = true
         menuItem.isChecked = isShuffled
@@ -1243,6 +1257,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (persist) {
             prefs.edit().putBoolean(KEY_VIDEO_GLOBAL_MUTED, muted).apply()
+        }
+        if (::toolbar.isInitialized) {
+            updateShuffleMenuState()
         }
     }
 
