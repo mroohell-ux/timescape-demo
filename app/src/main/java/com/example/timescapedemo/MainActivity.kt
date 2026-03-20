@@ -166,7 +166,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerExportStickyNotesButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
-    private lateinit var drawerVideoMuteToggleButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
@@ -489,7 +488,6 @@ class MainActivity : AppCompatActivity() {
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
-        drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -585,10 +583,6 @@ class MainActivity : AppCompatActivity() {
             toggleFlowReorderMode()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
-        drawerVideoMuteToggleButton.setOnClickListener {
-            setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
-        }
-
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
             if (selectedImages.isEmpty()) {
@@ -749,6 +743,10 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_add_flow -> { showAddFlowDialog(); true }
                 R.id.action_pick_video_folder -> { pickVideoFolder.launch(null); true }
                 R.id.action_refresh_video_folder -> { refreshVideoFlow(showSnackbar = true); true }
+                R.id.action_toggle_video_mute -> {
+                    setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
+                    true
+                }
                 else -> false
             }
         }
@@ -1171,6 +1169,14 @@ class MainActivity : AppCompatActivity() {
         val isVideoFlow = flow?.id == VIDEO_FLOW_ID
         menu.findItem(R.id.action_pick_video_folder)?.isVisible = isVideoFlow
         menu.findItem(R.id.action_refresh_video_folder)?.isVisible = isVideoFlow
+        val muteItem = menu.findItem(R.id.action_toggle_video_mute)
+        muteItem?.isVisible = isVideoFlow
+        muteItem?.setIcon(
+            if (isGlobalVideoMuted) R.drawable.ic_volume_off else R.drawable.ic_volume_up
+        )
+        muteItem?.title = getString(
+            if (isGlobalVideoMuted) R.string.drawer_video_unmute else R.string.drawer_video_mute
+        )
         val isShuffled = flow?.let { flowShuffleStates.containsKey(it.id) } == true
         menuItem.isCheckable = true
         menuItem.isChecked = isShuffled
@@ -1192,13 +1198,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setGlobalVideoMuted(muted: Boolean, persist: Boolean) {
         isGlobalVideoMuted = muted
-        if (::drawerVideoMuteToggleButton.isInitialized) {
-            drawerVideoMuteToggleButton.text = if (muted) {
-                getString(R.string.drawer_video_unmute)
-            } else {
-                getString(R.string.drawer_video_mute)
-            }
-        }
+        updateShuffleMenuState()
         flowControllers.values.forEach { controller ->
             controller.adapter.setGlobalVideoMuted(muted)
         }
