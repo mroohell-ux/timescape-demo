@@ -164,7 +164,7 @@ class CardsAdapter(
                     val pos = vv.currentPosition.coerceAtLeast(0)
                     val dur = vv.duration.coerceAtLeast(1)
                     (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
-                        onVideoProgressChanged?.invoke(cardId, pos.toLong(), dur.toLong())
+                        dispatchVideoProgress(cardId, pos.toLong(), dur.toLong())
                     }
                     holder.videoSeekBar.progress = ((pos.toDouble() / dur.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
                     holder.videoTimeLabel.text = "${formatDuration(pos.toLong())} / ${formatDuration(dur.toLong())}"
@@ -180,6 +180,7 @@ class CardsAdapter(
     private val attachedVideoHolders = mutableSetOf<VH>()
     private val hideControlsRunnables = mutableMapOf<VH, Runnable>()
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
+    private val videoProgressOverridesMs = mutableMapOf<Long, Long>()
     private enum class CardMode { TEXT, IMAGE, HANDWRITING }
     private val blurEffect: RenderEffect? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -203,6 +204,7 @@ class CardsAdapter(
     private fun prepareList(list: List<CardItem>?): List<CardItem>? {
         if (list == null) {
             blockedUris.clear()
+            videoProgressOverridesMs.clear()
             return null
         }
         val now = System.currentTimeMillis()
@@ -227,6 +229,8 @@ class CardsAdapter(
             it.handwriting != null || it.imageHandwriting != null || !it.backSnippet.isNullOrBlank()
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
+        val currentCardIds = copies.map { it.id }.toSet()
+        videoProgressOverridesMs.keys.retainAll(currentCardIds)
         return copies
     }
 
@@ -502,9 +506,10 @@ class CardsAdapter(
         holder.playOverlay.isVisible = !isActive
         holder.durationBadge.isVisible = true
         holder.durationBadge.text = formatDuration(video.durationMs)
-        holder.progressBar.isVisible = video.watchProgressMs > 0L && video.durationMs > 0L
+        val effectiveWatchProgressMs = videoProgressOverridesMs[item.id] ?: video.watchProgressMs
+        holder.progressBar.isVisible = effectiveWatchProgressMs > 0L && video.durationMs > 0L
         val progress = if (video.durationMs > 0L) {
-            ((video.watchProgressMs.toDouble() / video.durationMs.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
+            ((effectiveWatchProgressMs.toDouble() / video.durationMs.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
         } else 0
         holder.progressBar.max = 1000
         holder.progressBar.progress = progress
@@ -517,7 +522,7 @@ class CardsAdapter(
             holder.videoInlineView.setOnPreparedListener { player ->
                 player.setVolume(if (inlineVideoMuted) 0f else 1f, if (inlineVideoMuted) 0f else 1f)
                 player.isLooping = true
-                val resumeProgressMs = video.watchProgressMs
+                val resumeProgressMs = (videoProgressOverridesMs[item.id] ?: video.watchProgressMs)
                     .coerceAtLeast(0L)
                     .coerceAtMost((player.duration - VIDEO_PROGRESS_RESUME_MARGIN_MS).coerceAtLeast(0))
                 if (resumeProgressMs > 0L) {
@@ -546,7 +551,7 @@ class CardsAdapter(
                     val target = (dur * (progress / 1000f)).roundToInt()
                     holder.videoInlineView.seekTo(target)
                     (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
-                        onVideoProgressChanged?.invoke(cardId, target.toLong(), dur.toLong())
+                        dispatchVideoProgress(cardId, target.toLong(), dur.toLong())
                     }
                 }
 
@@ -636,7 +641,13 @@ class CardsAdapter(
         val cardId = holder.itemView.getTag(R.id.tag_card_id) as? Long ?: return
         val duration = holder.videoInlineView.duration.takeIf { it > 0 } ?: return
         val position = holder.videoInlineView.currentPosition.coerceAtLeast(0)
-        onVideoProgressChanged?.invoke(cardId, position.toLong(), duration.toLong())
+        dispatchVideoProgress(cardId, position.toLong(), duration.toLong())
+    }
+
+    private fun dispatchVideoProgress(cardId: Long, progressMs: Long, durationMs: Long) {
+        val normalizedProgress = progressMs.coerceAtLeast(0L)
+        videoProgressOverridesMs[cardId] = normalizedProgress
+        onVideoProgressChanged?.invoke(cardId, normalizedProgress, durationMs)
     }
 
     private fun bindHandwriting(
