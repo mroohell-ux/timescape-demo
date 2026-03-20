@@ -14,37 +14,46 @@
         android:title="@string/menu_shuffle_cards"
         android:icon="@drawable/ic_shuffle"
         android:checkable="true"
-        app:showAsAction="always"/>
+        app:showAsAction="ifRoom"/>
+
+    <item
+        android:id="@+id/action_add_content"
+        android:title="@string/menu_add_content"
+        android:icon="@drawable/ic_add"
+        app:showAsAction="always">
+
+        <menu>
+            <item
+                android:id="@+id/action_add_card"
+                android:title="@string/menu_add_card"
+                android:icon="@drawable/ic_edit"
+                app:showAsAction="never"/>
+
+            <item
+                android:id="@+id/action_add_image_card"
+                android:title="@string/menu_add_image_card"
+                android:icon="@drawable/ic_gallery"
+                app:showAsAction="never"/>
+
+            <item
+                android:id="@+id/action_add_handwriting"
+                android:title="@string/menu_add_handwriting"
+                android:icon="@drawable/ic_handwriting"
+                app:showAsAction="never"/>
+
+            <item
+                android:id="@+id/action_add_flow"
+                android:title="@string/menu_add_flow"
+                android:icon="@drawable/ic_add"
+                app:showAsAction="never"/>
+        </menu>
+    </item>
 
     <item
         android:id="@+id/action_export_flow"
         android:title="@string/menu_export_flow"
         android:icon="@drawable/ic_save"
-        app:showAsAction="always"/>
-
-    <item
-        android:id="@+id/action_add_card"
-        android:title="@string/menu_add_card"
-        android:icon="@drawable/ic_edit"
-        app:showAsAction="always"/>
-
-    <item
-        android:id="@+id/action_add_image_card"
-        android:title="@string/menu_add_image_card"
-        android:icon="@drawable/ic_gallery"
-        app:showAsAction="always"/>
-
-    <item
-        android:id="@+id/action_add_handwriting"
-        android:title="@string/menu_add_handwriting"
-        android:icon="@drawable/ic_handwriting"
-        app:showAsAction="always"/>
-
-    <item
-        android:id="@+id/action_add_flow"
-        android:title="@string/menu_add_flow"
-        android:icon="@drawable/ic_add"
-        app:showAsAction="always"/>
+        app:showAsAction="ifRoom"/>
 
     <item
         android:id="@+id/action_pick_video_folder"
