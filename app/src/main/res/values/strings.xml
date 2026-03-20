@@ -11,6 +11,7 @@
     <string name="menu_add_image_card">Add image</string>
     <string name="menu_add_handwriting">Add handwriting</string>
     <string name="menu_add_flow">Add flow</string>
+    <string name="menu_add_content">Add</string>
     <string name="menu_export_flow">Export flow</string>
     <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
