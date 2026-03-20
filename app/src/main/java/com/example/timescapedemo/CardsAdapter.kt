@@ -509,7 +509,9 @@ class CardsAdapter(
         holder.progressBar.max = 1000
         holder.progressBar.progress = progress
         if (isActive) {
-            holder.videoInlineView.isVisible = false
+            holder.videoInlineView.animate().cancel()
+            holder.videoInlineView.alpha = 0f
+            holder.videoInlineView.isVisible = true
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
             holder.videoInlineView.setOnPreparedListener { player ->
@@ -522,8 +524,6 @@ class CardsAdapter(
                     holder.videoInlineView.seekTo(resumeProgressMs.toInt())
                 }
                 holder.videoInlineView.start()
-                holder.videoInlineView.alpha = 0f
-                holder.videoInlineView.isVisible = true
                 holder.videoInlineView.animate().alpha(1f).setDuration(120L).start()
                 val startMs = if (resumeProgressMs > 0L) resumeProgressMs else 0L
                 holder.videoTimeLabel.text = "${formatDuration(startMs)} / ${formatDuration(player.duration.toLong())}"
