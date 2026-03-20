@@ -198,7 +198,12 @@ class MainActivity : AppCompatActivity() {
     private var cardFontDisplayName: String? = null
     private var isFlowReorderModeEnabled: Boolean = false
     private var isFlowLabelsTemporarilyVisible: Boolean = false
+    private var isFlowLabelsWidgetInteractionActive: Boolean = false
     private val hideFlowLabelsRunnable = Runnable {
+        if (isFlowLabelsWidgetInteractionActive) {
+            flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_INTERACTION_RETRY_MS)
+            return@Runnable
+        }
         isFlowLabelsTemporarilyVisible = false
         updateFlowBarVisibility()
     }
@@ -1208,7 +1213,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleFlowChipTap(flowId: Long, index: Int) {
-        hideFlowLabelsWidget()
         val now = SystemClock.elapsedRealtime()
         val isDoubleTap = lastFlowChipTapId == flowId &&
             now - lastFlowChipTapTime <= FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS
@@ -1246,6 +1250,7 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> !isSelf
                 DragEvent.ACTION_DRAG_ENTERED -> {
+                    beginFlowLabelsWidgetInteraction()
                     if (!isSelf) {
                         targetChip.animate().scaleX(1.08f).scaleY(1.08f).setDuration(80).start()
                     }
@@ -1267,6 +1272,7 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 DragEvent.ACTION_DRAG_ENDED -> {
+                    endFlowLabelsWidgetInteraction()
                     resetFlowChipDragState()
                     true
                 }
@@ -1278,7 +1284,10 @@ class MainActivity : AppCompatActivity() {
             if (!isFlowReorder) return@OnDragListener false
             val sourceId = event.localState as? Long ?: return@OnDragListener false
             when (event.action) {
-                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    beginFlowLabelsWidgetInteraction()
+                    true
+                }
                 DragEvent.ACTION_DRAG_LOCATION -> {
                     val requestedIndex = flowInsertIndexForPosition(event.x)
                     if (requestedIndex != null && activeFlowReorderHoverIndex != requestedIndex) {
@@ -1289,6 +1298,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 DragEvent.ACTION_DROP -> true
                 DragEvent.ACTION_DRAG_ENDED -> {
+                    endFlowLabelsWidgetInteraction()
                     if (activeFlowReorderDragId != null) saveState()
                     resetFlowChipDragState()
                     true
@@ -1317,6 +1327,7 @@ class MainActivity : AppCompatActivity() {
                     override fun onTouch(v: View, event: MotionEvent): Boolean {
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
+                                beginFlowLabelsWidgetInteraction()
                                 downX = event.rawX
                                 downY = event.rawY
                                 interactionHandled = false
@@ -1345,6 +1356,7 @@ class MainActivity : AppCompatActivity() {
 
                             MotionEvent.ACTION_UP,
                             MotionEvent.ACTION_CANCEL -> {
+                                endFlowLabelsWidgetInteraction()
                                 mergeRunnable?.let(v::removeCallbacks)
                                 mergeRunnable = null
                                 v.parent?.requestDisallowInterceptTouchEvent(false)
@@ -1392,8 +1404,22 @@ class MainActivity : AppCompatActivity() {
         flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_VISIBLE_DURATION_MS)
     }
 
+    private fun beginFlowLabelsWidgetInteraction() {
+        isFlowLabelsWidgetInteractionActive = true
+        flowBar.removeCallbacks(hideFlowLabelsRunnable)
+    }
+
+    private fun endFlowLabelsWidgetInteraction() {
+        isFlowLabelsWidgetInteractionActive = false
+        if (isFlowLabelsTemporarilyVisible) {
+            flowBar.removeCallbacks(hideFlowLabelsRunnable)
+            flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_VISIBLE_DURATION_MS)
+        }
+    }
+
     private fun hideFlowLabelsWidget() {
         flowBar.removeCallbacks(hideFlowLabelsRunnable)
+        isFlowLabelsWidgetInteractionActive = false
         if (!isFlowLabelsTemporarilyVisible) return
         isFlowLabelsTemporarilyVisible = false
         updateFlowBarVisibility()
@@ -6771,6 +6797,7 @@ private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
+private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
 private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
