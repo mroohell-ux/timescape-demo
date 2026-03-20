@@ -96,6 +96,32 @@
             app:iconGravity="textStart"
             app:iconTint="@color/flow_bar_stroke"/>
 
+        <TextView
+            android:id="@+id/labelWatchSync"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/drawer_watch_sync_title"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"/>
+
+        <TextView
+            android:id="@+id/textDrawerWatchSyncStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/drawer_watch_sync_status_loading"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonDrawerCopyWatchEndpoint"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/drawer_watch_sync_copy_endpoint"
+            app:iconGravity="textStart"
+            app:iconTint="@color/flow_bar_stroke"/>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerImportNotes"
             android:layout_width="match_parent"
