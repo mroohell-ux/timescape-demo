@@ -197,6 +197,11 @@ class MainActivity : AppCompatActivity() {
     private var cardFontPath: String? = null
     private var cardFontDisplayName: String? = null
     private var isFlowReorderModeEnabled: Boolean = false
+    private var isFlowLabelsTemporarilyVisible: Boolean = false
+    private val hideFlowLabelsRunnable = Runnable {
+        isFlowLabelsTemporarilyVisible = false
+        updateFlowBarVisibility()
+    }
     private var lastFlowChipTapId: Long = -1L
     private var lastFlowChipTapTime: Long = 0L
     private var textToSpeech: TextToSpeech? = null
@@ -1203,6 +1208,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleFlowChipTap(flowId: Long, index: Int) {
+        hideFlowLabelsWidget()
         val now = SystemClock.elapsedRealtime()
         val isDoubleTap = lastFlowChipTapId == flowId &&
             now - lastFlowChipTapTime <= FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS
@@ -1375,7 +1381,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFlowBarVisibility() {
-        flowBar.isVisible = flows.size > 1
+        flowBar.isVisible = flows.size > 1 && isFlowLabelsTemporarilyVisible
+    }
+
+    private fun showFlowLabelsWidgetTemporarily() {
+        if (flows.size <= 1) return
+        isFlowLabelsTemporarilyVisible = true
+        updateFlowBarVisibility()
+        flowBar.removeCallbacks(hideFlowLabelsRunnable)
+        flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_VISIBLE_DURATION_MS)
+    }
+
+    private fun hideFlowLabelsWidget() {
+        flowBar.removeCallbacks(hideFlowLabelsRunnable)
+        if (!isFlowLabelsTemporarilyVisible) return
+        isFlowLabelsTemporarilyVisible = false
+        updateFlowBarVisibility()
     }
 
     private fun resetFlowChipDragState() {
@@ -6356,12 +6377,8 @@ class MainActivity : AppCompatActivity() {
 
             fun onCardTapped(index: Int) {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return
-                val card = adapter.getItemAt(index) ?: return
-                Toast.makeText(
-                    this@MainActivity,
-                    getString(R.string.tap_target_card, card.title.ifBlank { card.snippet }),
-                    Toast.LENGTH_SHORT
-                ).show()
+                if (adapter.getItemAt(index) == null) return
+                hideFlowLabelsWidget()
                 if (layoutManager.isFocused(index)) {
                     if (adapter.canFlipCardAt(index)) {
                         val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
@@ -6525,13 +6542,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun onEmptyAreaTapped() {
-            Toast.makeText(
-                this@MainActivity,
-                getString(R.string.tap_target_empty_area),
-                Toast.LENGTH_SHORT
-            ).show()
-            layoutManager.clearFocus()
-            owningFlow()?.let { captureState(it) }
+            showFlowLabelsWidgetTemporarily()
         }
 
         private fun handleListCommitted(
@@ -6759,6 +6770,7 @@ private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
+private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
 private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
