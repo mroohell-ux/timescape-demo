@@ -58,7 +58,7 @@
                 android:tint="@android:color/white"
                 android:visibility="gone"/>
 
-            <VideoView
+            <com.example.timescapedemo.InlineVideoView
                 android:id="@+id/videoInlineView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
@@ -88,6 +88,17 @@
                     android:contentDescription="@string/video_play"
                     android:padding="4dp"
                     android:src="@android:drawable/ic_media_play"
+                    android:tint="@android:color/white" />
+
+                <ImageButton
+                    android:id="@+id/videoRotateButton"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="4dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/video_rotate"
+                    android:padding="4dp"
+                    android:src="@android:drawable/ic_menu_rotate"
                     android:tint="@android:color/white" />
 
                 <SeekBar
