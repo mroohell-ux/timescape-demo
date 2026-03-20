@@ -199,7 +199,7 @@ class MainActivity : AppCompatActivity() {
     private var isFlowReorderModeEnabled: Boolean = false
     private var isFlowLabelsTemporarilyVisible: Boolean = false
     private var isFlowLabelsWidgetInteractionActive: Boolean = false
-    private val hideFlowLabelsRunnable = Runnable {
+    private val hideFlowLabelsRunnable: Runnable = Runnable {
         if (isFlowLabelsWidgetInteractionActive) {
             flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_INTERACTION_RETRY_MS)
             return@Runnable
