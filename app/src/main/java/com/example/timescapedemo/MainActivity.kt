@@ -109,6 +109,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -164,6 +169,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportStickyNotesButton: MaterialButton
+    private lateinit var drawerToggleWatchSyncButton: MaterialButton
+    private lateinit var drawerWatchSyncStatus: TextView
+    private lateinit var drawerWatchSyncEndpoint: TextView
+    private lateinit var drawerCopyWatchEndpointButton: MaterialButton
+    private lateinit var drawerWatchSyncHelpButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
     private lateinit var drawerVideoMuteToggleButton: MaterialButton
@@ -240,6 +250,8 @@ class MainActivity : AppCompatActivity() {
     private var videoProgressPersistJob: Job? = null
     private var stickyNoteNotificationSequence = 0
     private var isGlobalVideoMuted: Boolean = false
+    private var lanServer: TimescapeLanServer? = null
+    private var isWatchSyncEnabled: Boolean = false
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -487,6 +499,11 @@ class MainActivity : AppCompatActivity() {
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
+        drawerToggleWatchSyncButton = header.findViewById(R.id.buttonDrawerToggleWatchSync)
+        drawerWatchSyncStatus = header.findViewById(R.id.textDrawerWatchSyncStatus)
+        drawerWatchSyncEndpoint = header.findViewById(R.id.textDrawerWatchSyncEndpoint)
+        drawerCopyWatchEndpointButton = header.findViewById(R.id.buttonDrawerCopyWatchEndpoint)
+        drawerWatchSyncHelpButton = header.findViewById(R.id.buttonDrawerWatchSyncHelp)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
         drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
@@ -580,6 +597,27 @@ class MainActivity : AppCompatActivity() {
         drawerImportNotesButton.setOnClickListener {
             importNotesLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
             drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        drawerCopyWatchEndpointButton.setOnClickListener {
+            val endpoint = buildManualWatchEndpoint()
+            if (endpoint == null) {
+                snackbar(getString(R.string.snackbar_watch_endpoint_unavailable))
+            } else {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = ClipData.newPlainText("Timescape watch endpoint", endpoint)
+                clipboard.setPrimaryClip(clip)
+                snackbar(getString(R.string.snackbar_watch_endpoint_copied))
+            }
+        }
+        drawerToggleWatchSyncButton.setOnClickListener {
+            setWatchSyncEnabled(!isWatchSyncEnabled)
+        }
+        drawerWatchSyncHelpButton.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.drawer_watch_sync_help_title)
+                .setMessage(getString(R.string.drawer_watch_sync_help_message))
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
         }
         drawerToggleReorderFlowsButton.setOnClickListener {
             toggleFlowReorderMode()
@@ -680,6 +718,7 @@ class MainActivity : AppCompatActivity() {
         handleStickyNoteIntent(intent)
         maybeDispatchStartupStickyNoteNotification()
         restartStickyNoteNotificationSchedule()
+        refreshWatchSyncUi()
     }
 
     override fun onStart() {
@@ -4757,6 +4796,84 @@ class MainActivity : AppCompatActivity() {
         return "timescape_sticky_notes_${timestamp}.json"
     }
 
+    private fun startLanBridgeServer() {
+        if (lanServer != null) return
+        lanServer = TimescapeLanServer(
+            context = this,
+            exportPayloadProvider = { buildStickyNotesExportPayloadForLan() },
+            appLabelProvider = { getString(R.string.app_name) }
+        ).also { it.start() }
+        refreshWatchSyncUi()
+    }
+
+    private fun stopLanBridgeServer() {
+        lanServer?.stop()
+        lanServer = null
+        refreshWatchSyncUi()
+    }
+
+    private fun setWatchSyncEnabled(enabled: Boolean) {
+        if (isWatchSyncEnabled == enabled) return
+        isWatchSyncEnabled = enabled
+        if (enabled) startLanBridgeServer() else stopLanBridgeServer()
+    }
+
+    private fun refreshWatchSyncUi() {
+        drawerToggleWatchSyncButton.text = getString(
+            if (isWatchSyncEnabled) R.string.drawer_watch_sync_disable
+            else R.string.drawer_watch_sync_enable
+        )
+        if (!isWatchSyncEnabled) {
+            drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_disabled)
+            drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_unavailable)
+            drawerCopyWatchEndpointButton.isEnabled = false
+            return
+        }
+        val endpoint = buildManualWatchEndpoint()
+        if (endpoint == null) {
+            drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_unavailable)
+            drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_unavailable)
+            drawerCopyWatchEndpointButton.isEnabled = false
+            return
+        }
+        drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_ready)
+        drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_format, endpoint)
+        drawerCopyWatchEndpointButton.isEnabled = true
+    }
+
+    private fun buildManualWatchEndpoint(): String? {
+        val port = lanServer?.port ?: return null
+        if (port <= 0) return null
+        val host = findBestLanHostAddress() ?: return null
+        return "http://$host:$port"
+    }
+
+    private fun findBestLanHostAddress(): String? {
+        return runCatching {
+            Collections.list(NetworkInterface.getNetworkInterfaces())
+                .asSequence()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { Collections.list(it.inetAddresses).asSequence() }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress }
+                ?.hostAddress
+        }.getOrNull()
+    }
+
+    private fun buildStickyNotesExportPayloadForLan(): String {
+        val latch = CountDownLatch(1)
+        var payload = "{}"
+        runOnUiThread {
+            captureVisibleFlowStates()
+            payload = buildStickyNotesExportPayload(flows.toList()).json
+            latch.countDown()
+        }
+        if (!latch.await(LAN_EXPORT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            return JSONObject().put("stickyNotes", JSONArray()).put("totalStickyNotes", 0).toString()
+        }
+        return payload
+    }
+
     private fun exportNotes(uri: Uri, fileName: String) {
         exportFlows(uri, flows.toList(), fileName)
     }
@@ -6083,6 +6200,8 @@ class MainActivity : AppCompatActivity() {
         dismissSearchResultsDialog()
         stickyNoteNotificationJob?.cancel()
         stickyNoteNotificationJob = null
+        lanServer?.stop()
+        lanServer = null
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
@@ -6783,6 +6902,7 @@ private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
 private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
 private const val VIDEO_WATCH_COMPLETE_THRESHOLD_MS = 2_000L
 private const val VIDEO_PROGRESS_PERSIST_DELAY_MS = 800L
+private const val LAN_EXPORT_TIMEOUT_MS = 2_000L
 private const val VIDEO_FLOW_ID = 0L
 private const val VIDEO_EMPTY_CARD_ID = 1L
 private const val VIDEO_CARD_ID_BASE = 10_000L
