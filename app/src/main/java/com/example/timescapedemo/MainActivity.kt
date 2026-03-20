@@ -1106,6 +1106,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateToolbarSubtitle() {
         val flow = currentFlow()
+        toolbar.title = flow?.name ?: getString(R.string.app_name)
         if (flow?.id == VIDEO_FLOW_ID) {
             val source = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
             val folder = source?.let { Uri.parse(it).lastPathSegment?.substringAfterLast(':') } ?: ""
