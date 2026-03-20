@@ -199,9 +199,19 @@ class MainActivity : AppCompatActivity() {
     private var isFlowReorderModeEnabled: Boolean = false
     private var isFlowLabelsTemporarilyVisible: Boolean = false
     private var isFlowLabelsWidgetInteractionActive: Boolean = false
+    private var flowLabelsInteractionStartedAtMs: Long = 0L
     private val hideFlowLabelsRunnable: Runnable = Runnable {
         if (isFlowLabelsWidgetInteractionActive) {
-            flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_INTERACTION_RETRY_MS)
+            val activeDuration = SystemClock.elapsedRealtime() - flowLabelsInteractionStartedAtMs
+            if (activeDuration >= FLOW_LABELS_INTERACTION_MAX_DURATION_MS) {
+                isFlowLabelsWidgetInteractionActive = false
+            } else {
+                flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_INTERACTION_RETRY_MS)
+                return@Runnable
+            }
+        }
+        if (!isFlowLabelsTemporarilyVisible) {
+            updateFlowBarVisibility()
             return@Runnable
         }
         isFlowLabelsTemporarilyVisible = false
@@ -1410,12 +1420,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun beginFlowLabelsWidgetInteraction() {
+        if (!isFlowLabelsWidgetInteractionActive) {
+            flowLabelsInteractionStartedAtMs = SystemClock.elapsedRealtime()
+        }
         isFlowLabelsWidgetInteractionActive = true
         flowBar.removeCallbacks(hideFlowLabelsRunnable)
     }
 
     private fun endFlowLabelsWidgetInteraction() {
         isFlowLabelsWidgetInteractionActive = false
+        flowLabelsInteractionStartedAtMs = 0L
         if (isFlowLabelsTemporarilyVisible) {
             flowBar.removeCallbacks(hideFlowLabelsRunnable)
             flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_VISIBLE_DURATION_MS)
@@ -1425,6 +1439,7 @@ class MainActivity : AppCompatActivity() {
     private fun hideFlowLabelsWidget() {
         flowBar.removeCallbacks(hideFlowLabelsRunnable)
         isFlowLabelsWidgetInteractionActive = false
+        flowLabelsInteractionStartedAtMs = 0L
         if (!isFlowLabelsTemporarilyVisible) return
         isFlowLabelsTemporarilyVisible = false
         updateFlowBarVisibility()
@@ -6803,6 +6818,7 @@ private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
 private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
+private const val FLOW_LABELS_INTERACTION_MAX_DURATION_MS = 20_000L
 private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
