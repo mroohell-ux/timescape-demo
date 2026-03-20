@@ -169,6 +169,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerResetAppBackgroundButton: MaterialButton
     private lateinit var drawerExportNotesButton: MaterialButton
     private lateinit var drawerExportStickyNotesButton: MaterialButton
+    private lateinit var drawerToggleWatchSyncButton: MaterialButton
     private lateinit var drawerWatchSyncStatus: TextView
     private lateinit var drawerWatchSyncEndpoint: TextView
     private lateinit var drawerCopyWatchEndpointButton: MaterialButton
@@ -250,6 +251,7 @@ class MainActivity : AppCompatActivity() {
     private var stickyNoteNotificationSequence = 0
     private var isGlobalVideoMuted: Boolean = false
     private var lanServer: TimescapeLanServer? = null
+    private var isWatchSyncEnabled: Boolean = false
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -497,6 +499,7 @@ class MainActivity : AppCompatActivity() {
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
+        drawerToggleWatchSyncButton = header.findViewById(R.id.buttonDrawerToggleWatchSync)
         drawerWatchSyncStatus = header.findViewById(R.id.textDrawerWatchSyncStatus)
         drawerWatchSyncEndpoint = header.findViewById(R.id.textDrawerWatchSyncEndpoint)
         drawerCopyWatchEndpointButton = header.findViewById(R.id.buttonDrawerCopyWatchEndpoint)
@@ -606,6 +609,9 @@ class MainActivity : AppCompatActivity() {
                 snackbar(getString(R.string.snackbar_watch_endpoint_copied))
             }
         }
+        drawerToggleWatchSyncButton.setOnClickListener {
+            setWatchSyncEnabled(!isWatchSyncEnabled)
+        }
         drawerWatchSyncHelpButton.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle(R.string.drawer_watch_sync_help_title)
@@ -712,7 +718,6 @@ class MainActivity : AppCompatActivity() {
         handleStickyNoteIntent(intent)
         maybeDispatchStartupStickyNoteNotification()
         restartStickyNoteNotificationSchedule()
-        startLanBridgeServer()
         refreshWatchSyncUi()
     }
 
@@ -4801,7 +4806,29 @@ class MainActivity : AppCompatActivity() {
         refreshWatchSyncUi()
     }
 
+    private fun stopLanBridgeServer() {
+        lanServer?.stop()
+        lanServer = null
+        refreshWatchSyncUi()
+    }
+
+    private fun setWatchSyncEnabled(enabled: Boolean) {
+        if (isWatchSyncEnabled == enabled) return
+        isWatchSyncEnabled = enabled
+        if (enabled) startLanBridgeServer() else stopLanBridgeServer()
+    }
+
     private fun refreshWatchSyncUi() {
+        drawerToggleWatchSyncButton.text = getString(
+            if (isWatchSyncEnabled) R.string.drawer_watch_sync_disable
+            else R.string.drawer_watch_sync_enable
+        )
+        if (!isWatchSyncEnabled) {
+            drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_disabled)
+            drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_unavailable)
+            drawerCopyWatchEndpointButton.isEnabled = false
+            return
+        }
         val endpoint = buildManualWatchEndpoint()
         if (endpoint == null) {
             drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_unavailable)

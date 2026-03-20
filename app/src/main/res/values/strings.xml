@@ -36,7 +36,10 @@
     <string name="drawer_export_notes">Export notes</string>
     <string name="drawer_export_sticky_notes">Export sticky notes JSON</string>
     <string name="drawer_watch_sync_title">Watch sync (LAN)</string>
+    <string name="drawer_watch_sync_enable">Enable watch sync</string>
+    <string name="drawer_watch_sync_disable">Disable watch sync</string>
     <string name="drawer_watch_sync_status_loading">Starting LAN bridge…</string>
+    <string name="drawer_watch_sync_status_disabled">Watch sync is off. Tap \"Enable watch sync\" to start local sharing for your watch.</string>
     <string name="drawer_watch_sync_status_ready">Ready to sync. On your watch, choose sync from phone. If auto-discovery fails, use the manual endpoint below.</string>
     <string name="drawer_watch_sync_status_unavailable">Watch sync is unavailable right now. Keep this screen open and make sure phone + watch are on the same Wi-Fi.</string>
     <string name="drawer_watch_sync_endpoint_loading">Manual endpoint: loading…</string>
