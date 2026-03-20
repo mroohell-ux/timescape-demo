@@ -75,12 +75,4 @@
         android:visible="false"
         app:showAsAction="always"/>
 
-    <item
-        android:id="@+id/action_toggle_video_mute"
-        android:title="@string/drawer_video_mute"
-        android:icon="@drawable/ic_volume_up"
-        android:orderInCategory="3"
-        android:visible="false"
-        app:showAsAction="ifRoom"/>
-
 </menu>
