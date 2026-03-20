@@ -1155,8 +1155,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateShuffleMenuState() {
-        val menuItem = toolbar.menu.findItem(R.id.action_shuffle_cards) ?: return
+        val menu = toolbar.menu
+        val menuItem = menu.findItem(R.id.action_shuffle_cards) ?: return
         val flow = currentFlow()
+        val isVideoFlow = flow?.id == VIDEO_FLOW_ID
+        menu.findItem(R.id.action_pick_video_folder)?.isVisible = isVideoFlow
+        menu.findItem(R.id.action_refresh_video_folder)?.isVisible = isVideoFlow
         val isShuffled = flow?.let { flowShuffleStates.containsKey(it.id) } == true
         menuItem.isCheckable = true
         menuItem.isChecked = isShuffled
