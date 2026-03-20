@@ -276,4 +276,6 @@
     <string name="drawer_video_unmute">Global video: Unmute</string>
     <string name="video_empty_title">No videos yet</string>
     <string name="video_empty_snippet">Choose a source folder to build your Timescape video flow.</string>
+    <string name="tap_target_card">Card tapped: %1$s</string>
+    <string name="tap_target_empty_area">Empty area tapped</string>
 </resources>

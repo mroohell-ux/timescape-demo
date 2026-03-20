@@ -6357,6 +6357,11 @@ class MainActivity : AppCompatActivity() {
             fun onCardTapped(index: Int) {
                 if (bindingAdapterPosition == RecyclerView.NO_POSITION) return
                 val card = adapter.getItemAt(index) ?: return
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.tap_target_card, card.title.ifBlank { card.snippet }),
+                    Toast.LENGTH_SHORT
+                ).show()
                 if (layoutManager.isFocused(index)) {
                     if (adapter.canFlipCardAt(index)) {
                         val vh = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
@@ -6428,9 +6433,26 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        private val emptyAreaTapDetector = GestureDetectorCompat(
+            this@MainActivity,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapUp(e: MotionEvent): Boolean {
+                    val child = recycler.findChildViewUnder(e.x, e.y)
+                    if (child != null) return false
+                    onEmptyAreaTapped()
+                    return true
+                }
+            }
+        )
+        private val emptyAreaTouchListener = object : RecyclerView.SimpleOnItemTouchListener() {
+            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                return emptyAreaTapDetector.onTouchEvent(e)
+            }
+        }
 
         init {
             recycler.addOnScrollListener(scrollListener)
+            recycler.addOnItemTouchListener(emptyAreaTouchListener)
             layoutManager.selectionListener = selectionCallback
             cardCountView.isVisible = false
         }
@@ -6496,9 +6518,20 @@ class MainActivity : AppCompatActivity() {
 
         fun dispose() {
             recycler.removeOnScrollListener(scrollListener)
+            recycler.removeOnItemTouchListener(emptyAreaTouchListener)
             if (layoutManager.selectionListener === selectionCallback) {
                 layoutManager.selectionListener = null
             }
+        }
+
+        private fun onEmptyAreaTapped() {
+            Toast.makeText(
+                this@MainActivity,
+                getString(R.string.tap_target_empty_area),
+                Toast.LENGTH_SHORT
+            ).show()
+            layoutManager.clearFocus()
+            owningFlow()?.let { captureState(it) }
         }
 
         private fun handleListCommitted(
