@@ -35,7 +35,7 @@ class TimescapeLanServer(
             }
         }
         try {
-            server.start(SOCKET_READ_TIMEOUT, false)
+            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         } catch (e: IOException) {
             return
         }
