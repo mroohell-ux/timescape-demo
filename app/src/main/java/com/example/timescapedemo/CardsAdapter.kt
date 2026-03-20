@@ -42,6 +42,7 @@ import androidx.core.view.isVisible
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import androidx.core.net.toUri
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -471,7 +472,21 @@ class CardsAdapter(
         val coverPath = video.coverImagePath
         val coverFile = coverPath?.let { java.io.File(it) }
         if (coverFile != null && coverFile.exists()) {
-            holder.imageCard.setImageBitmap(android.graphics.BitmapFactory.decodeFile(coverFile.absolutePath))
+            val (targetWidth, targetHeight) = estimateImageTargetSize(holder)
+            BackgroundImageLoader.load(
+                context = holder.itemView.context,
+                imageView = holder.imageCard,
+                uri = coverFile.toUri(),
+                targetWidth = targetWidth,
+                targetHeight = targetHeight
+            ) { result ->
+                val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+                if (!isSameCard) return@load
+                when (result) {
+                    is BackgroundImageLoader.Result.Success -> holder.imageCard.setImageBitmap(result.bitmap)
+                    else -> holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+                }
+            }
         } else {
             holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
         }
@@ -494,7 +509,7 @@ class CardsAdapter(
         holder.progressBar.max = 1000
         holder.progressBar.progress = progress
         if (isActive) {
-            holder.videoInlineView.isVisible = true
+            holder.videoInlineView.isVisible = false
             showVideoControls(holder)
             val videoUri = Uri.parse(video.sourceUri)
             holder.videoInlineView.setOnPreparedListener { player ->
@@ -507,6 +522,9 @@ class CardsAdapter(
                     holder.videoInlineView.seekTo(resumeProgressMs.toInt())
                 }
                 holder.videoInlineView.start()
+                holder.videoInlineView.alpha = 0f
+                holder.videoInlineView.isVisible = true
+                holder.videoInlineView.animate().alpha(1f).setDuration(120L).start()
                 val startMs = if (resumeProgressMs > 0L) resumeProgressMs else 0L
                 holder.videoTimeLabel.text = "${formatDuration(startMs)} / ${formatDuration(player.duration.toLong())}"
                 holder.videoSeekBar.progress = if (player.duration > 0) {
@@ -561,6 +579,9 @@ class CardsAdapter(
             attachedVideoHolders.add(holder)
         } else {
             persistVideoProgress(holder)
+            holder.videoInlineView.animate().cancel()
+            holder.videoInlineView.alpha = 1f
+            holder.videoInlineView.isVisible = false
             holder.videoInlineView.stopPlayback()
             holder.videoInlineView.setOnPreparedListener(null)
             holder.videoInlineView.setOnClickListener(null)
@@ -590,6 +611,10 @@ class CardsAdapter(
         holder.imageCard.setImageDrawable(null)
         holder.imageCard.contentDescription = null
         holder.handwriting.contentDescription = null
+        persistVideoProgress(holder)
+        holder.videoInlineView.animate().cancel()
+        holder.videoInlineView.alpha = 1f
+        holder.videoInlineView.isVisible = false
         holder.videoInlineView.stopPlayback()
         holder.videoInlineView.setOnPreparedListener(null)
         holder.videoSeekBar.setOnSeekBarChangeListener(null)
