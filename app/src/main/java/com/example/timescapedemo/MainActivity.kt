@@ -217,6 +217,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingStickyNoteNotificationTarget: StickyNoteTarget? = null
     private var hasDispatchedStartupStickyNote = false
     private var stickyNoteNotificationJob: Job? = null
+    private var videoProgressPersistJob: Job? = null
     private var stickyNoteNotificationSequence = 0
     private var isGlobalVideoMuted: Boolean = false
 
@@ -6007,6 +6008,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        videoProgressPersistJob?.cancel()
         saveState()
     }
 
@@ -6601,6 +6603,15 @@ class MainActivity : AppCompatActivity() {
         }
         if (video.watchProgressMs == normalizedProgress) return
         card.video = video.copy(watchProgressMs = normalizedProgress)
+        scheduleVideoProgressPersist()
+    }
+
+    private fun scheduleVideoProgressPersist() {
+        videoProgressPersistJob?.cancel()
+        videoProgressPersistJob = lifecycleScope.launch {
+            delay(VIDEO_PROGRESS_PERSIST_DELAY_MS)
+            saveState()
+        }
     }
 
     private data class FlowShuffleState(val originalOrder: MutableList<Long>) {
@@ -6681,6 +6692,7 @@ private const val KEY_VIDEO_SOURCE_URI = "video/source_uri"
 private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
 private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
 private const val VIDEO_WATCH_COMPLETE_THRESHOLD_MS = 2_000L
+private const val VIDEO_PROGRESS_PERSIST_DELAY_MS = 800L
 private const val VIDEO_FLOW_ID = 0L
 private const val VIDEO_EMPTY_CARD_ID = 1L
 private const val VIDEO_CARD_ID_BASE = 10_000L
