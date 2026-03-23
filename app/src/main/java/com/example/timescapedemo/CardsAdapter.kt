@@ -159,6 +159,7 @@ class CardsAdapter(
         override fun run() {
             val holders = attachedVideoHolders.toList()
             holders.forEach { holder ->
+                syncVideoControlRotation(holder)
                 val vv = holder.videoInlineView
                 if (vv.isVisible && vv.duration > 0) {
                     val pos = vv.currentPosition.coerceAtLeast(0)
@@ -260,6 +261,7 @@ class CardsAdapter(
     }
 
     private fun showVideoControls(holder: VH) {
+        syncVideoControlRotation(holder)
         holder.videoPlaybackControls.isVisible = true
         val existing = hideControlsRunnables.remove(holder)
         if (existing != null) holder.itemView.removeCallbacks(existing)
@@ -270,6 +272,11 @@ class CardsAdapter(
         }
         hideControlsRunnables[holder] = runnable
         holder.itemView.postDelayed(runnable, VIDEO_CONTROLS_AUTO_HIDE_MS)
+    }
+
+    private fun hideVideoControls(holder: VH) {
+        holder.videoPlaybackControls.isVisible = false
+        hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -299,6 +306,15 @@ class CardsAdapter(
         })
         v.isClickable = true
         v.setOnTouchListener { view, event ->
+            if (
+                event.action == MotionEvent.ACTION_UP &&
+                vh.videoInlineView.isVisible &&
+                vh.videoPlaybackControls.isVisible &&
+                !isTouchInsideView(vh.videoPlaybackControls, event)
+            ) {
+                hideVideoControls(vh)
+                return@setOnTouchListener true
+            }
             val handled = vh.gestureDetector.onTouchEvent(event)
             if (!handled && event.action == MotionEvent.ACTION_UP) {
                 view.performClick()
@@ -465,6 +481,7 @@ class CardsAdapter(
         position: Int
     ) {
         setCardMode(holder, CardMode.IMAGE, fallbackText)
+        syncVideoControlRotation(holder)
         val video = item.video
         if (video == null) {
             holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
@@ -578,7 +595,13 @@ class CardsAdapter(
                         holder.itemView.context.getString(R.string.video_pause)
                 }
             }
-            holder.videoInlineView.setOnClickListener { showVideoControls(holder) }
+            holder.videoInlineView.setOnClickListener {
+                if (holder.videoPlaybackControls.isVisible) {
+                    hideVideoControls(holder)
+                } else {
+                    showVideoControls(holder)
+                }
+            }
             holder.videoPlaybackControls.setOnClickListener { showVideoControls(holder) }
             holder.videoInlineView.setVideoURI(videoUri)
             attachedVideoHolders.add(holder)
@@ -591,12 +614,27 @@ class CardsAdapter(
             holder.videoInlineView.setOnPreparedListener(null)
             holder.videoInlineView.setOnClickListener(null)
             holder.videoPlaybackControls.setOnClickListener(null)
-            holder.videoPlaybackControls.isVisible = false
+            hideVideoControls(holder)
             holder.videoSeekBar.setOnSeekBarChangeListener(null)
             holder.videoPlayPauseButton.setOnClickListener(null)
             attachedVideoHolders.remove(holder)
-            hideControlsRunnables.remove(holder)?.let(holder.itemView::removeCallbacks)
         }
+    }
+
+    private fun syncVideoControlRotation(holder: VH) {
+        val systemRotation = -holder.itemView.rotation
+        holder.playOverlay.rotation = systemRotation
+        holder.videoPlaybackControls.rotation = systemRotation
+        holder.durationBadge.rotation = systemRotation
+        holder.progressBar.rotation = systemRotation
+    }
+
+    private fun isTouchInsideView(target: View, event: MotionEvent): Boolean {
+        val left = target.x
+        val top = target.y
+        val right = left + target.width
+        val bottom = top + target.height
+        return event.x >= left && event.x <= right && event.y >= top && event.y <= bottom
     }
 
     private fun formatDuration(durationMs: Long): String {
