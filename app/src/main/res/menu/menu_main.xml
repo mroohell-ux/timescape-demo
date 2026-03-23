@@ -62,7 +62,7 @@
     <item
         android:id="@+id/action_pick_video_folder"
         android:title="@string/menu_pick_video_folder"
-        android:icon="@drawable/ic_gallery"
+        android:icon="@drawable/ic_folder_open"
         android:orderInCategory="1"
         android:visible="false"
         app:showAsAction="always"/>
@@ -70,7 +70,7 @@
     <item
         android:id="@+id/action_refresh_video_folder"
         android:title="@string/menu_refresh_video_folder"
-        android:icon="@drawable/ic_shuffle"
+        android:icon="@drawable/ic_refresh"
         android:orderInCategory="2"
         android:visible="false"
         app:showAsAction="always"/>
