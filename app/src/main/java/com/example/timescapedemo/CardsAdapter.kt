@@ -12,6 +12,7 @@ import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
@@ -630,11 +631,11 @@ class CardsAdapter(
     }
 
     private fun isTouchInsideView(target: View, event: MotionEvent): Boolean {
-        val left = target.x
-        val top = target.y
-        val right = left + target.width
-        val bottom = top + target.height
-        return event.x >= left && event.x <= right && event.y >= top && event.y <= bottom
+        if (!target.isShown) return false
+        val globalRect = Rect()
+        val hasRect = target.getGlobalVisibleRect(globalRect)
+        if (!hasRect) return false
+        return globalRect.contains(event.rawX.toInt(), event.rawY.toInt())
     }
 
     private fun formatDuration(durationMs: Long): String {
