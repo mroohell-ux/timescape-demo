@@ -1220,8 +1220,8 @@ class MainActivity : AppCompatActivity() {
             muteItem.title = getString(if (isGlobalVideoMuted) R.string.video_unmute else R.string.video_mute)
             muteItem.icon = AppCompatResources.getDrawable(
                 this,
-                if (isGlobalVideoMuted) android.R.drawable.ic_lock_silent_mode_off
-                else android.R.drawable.ic_lock_silent_mode
+                if (isGlobalVideoMuted) android.R.drawable.ic_lock_silent_mode
+                else android.R.drawable.ic_lock_silent_mode_off
             )
         }
         val isShuffled = flow?.let { flowShuffleStates.containsKey(it.id) } == true
