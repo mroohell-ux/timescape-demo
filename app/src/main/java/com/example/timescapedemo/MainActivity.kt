@@ -1791,24 +1791,82 @@ class MainActivity : AppCompatActivity() {
 
     private fun showFlowLibraryDialog() {
         if (flows.isEmpty()) return
-        val titles = flows.mapIndexed { index, flow ->
-            val cardCountLabel = resources.getQuantityString(
-                R.plurals.flow_library_card_count,
-                flow.cards.size,
-                flow.cards.size
-            )
-            val selectedMarker = if (index == selectedFlowIndex) "  • ${getString(R.string.flow_library_current)}" else ""
-            "${flow.name}  ·  $cardCountLabel$selectedMarker"
-        }.toTypedArray()
+        val recyclerView = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+        }
+        var dialog: AlertDialog? = null
+        var orderChanged = false
+        val adapter = object : RecyclerView.Adapter<FlowLibraryViewHolder>() {
+            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FlowLibraryViewHolder {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(android.R.layout.simple_list_item_1, parent, false)
+                return FlowLibraryViewHolder(view)
+            }
 
-        AlertDialog.Builder(this)
+            override fun onBindViewHolder(holder: FlowLibraryViewHolder, position: Int) {
+                val flow = flows[position]
+                val cardCountLabel = resources.getQuantityString(
+                    R.plurals.flow_library_card_count,
+                    flow.cards.size,
+                    flow.cards.size
+                )
+                val selectedMarker = if (position == selectedFlowIndex) {
+                    "  • ${getString(R.string.flow_library_current)}"
+                } else {
+                    ""
+                }
+                holder.text.text = "${flow.name}  ·  $cardCountLabel$selectedMarker"
+                holder.itemView.setOnClickListener {
+                    val bindingPosition = holder.bindingAdapterPosition
+                    if (bindingPosition == RecyclerView.NO_POSITION) return@setOnClickListener
+                    flowPager.setCurrentItem(bindingPosition, true)
+                    dialog?.dismiss()
+                }
+            }
+
+            override fun getItemCount(): Int = flows.size
+        }
+        recyclerView.adapter = adapter
+
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+            0
+        ) {
+            override fun isLongPressDragEnabled(): Boolean = true
+
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val from = viewHolder.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION || from == to) {
+                    return false
+                }
+                val movedFlowId = flows.getOrNull(from)?.id ?: return false
+                moveFlowToIndex(movedFlowId, to, shouldPersist = false)
+                adapter.notifyItemMoved(from, to)
+                orderChanged = true
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+        })
+        itemTouchHelper.attachToRecyclerView(recyclerView)
+
+        dialog = AlertDialog.Builder(this)
             .setTitle(R.string.flow_library_title)
-            .setItems(titles) { _, which ->
-                val target = which.coerceIn(0, flows.lastIndex)
-                flowPager.setCurrentItem(target, true)
+            .setView(recyclerView)
+            .setOnDismissListener {
+                if (orderChanged) saveState()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private class FlowLibraryViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val text: TextView = view.findViewById(android.R.id.text1)
     }
 
     private fun showAddFlowDialog() {
