@@ -6244,6 +6244,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshVideoFlow(showSnackbar: Boolean = false) {
         val videoFlow = flows.firstOrNull { it.id == VIDEO_FLOW_ID } ?: return
+        val shouldScrollToTop = showSnackbar
         val folderValue = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
         if (folderValue.isNullOrBlank()) {
             videoFlow.cards.clear()
@@ -6253,7 +6254,7 @@ class MainActivity : AppCompatActivity() {
                 snippet = getString(R.string.video_empty_snippet),
                 updatedAt = System.currentTimeMillis()
             )
-            refreshFlow(videoFlow, scrollToTop = true)
+            refreshFlow(videoFlow, scrollToTop = shouldScrollToTop)
             if (showSnackbar) snackbar(getString(R.string.snackbar_video_folder_missing))
             return
         }
@@ -6315,7 +6316,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             videoFlow.cards += cards
         }
-        refreshFlow(videoFlow, scrollToTop = true)
+        refreshFlow(videoFlow, scrollToTop = shouldScrollToTop)
         if (showSnackbar) {
             val count = cards.size
             snackbar(getString(R.string.snackbar_video_refresh_complete, count))
