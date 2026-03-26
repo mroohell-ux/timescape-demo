@@ -285,6 +285,14 @@
                 android:background="@drawable/bg_card_flip_side"
                 android:visibility="gone" />
 
+            <View
+                android:id="@+id/cardFlipSeam"
+                android:layout_width="2dp"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:background="#44000000"
+                android:visibility="gone" />
+
             <ImageView
                 android:id="@+id/cardFlipBackFace"
                 android:layout_width="match_parent"

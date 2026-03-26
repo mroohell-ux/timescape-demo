@@ -141,6 +141,7 @@ class CardsAdapter(
         val cardFlipFrontFace: ImageView = v.findViewById(R.id.cardFlipFrontFace)
         val cardFlipBackFace: ImageView = v.findViewById(R.id.cardFlipBackFace)
         val cardFlipSide: View = v.findViewById(R.id.cardFlipSide)
+        val cardFlipSeam: View = v.findViewById(R.id.cardFlipSeam)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -925,31 +926,49 @@ class CardsAdapter(
         val frontFace = holder.cardFlipFrontFace
         val backFace = holder.cardFlipBackFace
         val sideFace = holder.cardFlipSide
+        val seam = holder.cardFlipSeam
+        val cardWidth = holder.card.width.toFloat().coerceAtLeast(1f)
+        val cardHeight = holder.card.height.toFloat().coerceAtLeast(1f)
+        val hingePivotX = if (sign > 0f) cardWidth * 0.18f else cardWidth * 0.82f
         frontFace.setImageBitmap(frontBitmap)
         backFace.setImageBitmap(backBitmap)
         layer.isVisible = true
         layer.cameraDistance = holder.itemView.resources.displayMetrics.density * FLIP_3D_CAMERA_DISTANCE
         frontFace.cameraDistance = layer.cameraDistance
         backFace.cameraDistance = layer.cameraDistance
+        frontFace.pivotX = hingePivotX
+        backFace.pivotX = hingePivotX
+        frontFace.pivotY = cardHeight * 0.5f
+        backFace.pivotY = cardHeight * 0.5f
+        layer.pivotX = hingePivotX
+        layer.pivotY = cardHeight * 0.5f
         holder.cardContent.alpha = 0f
         holder.handwritingContainer.alpha = 0f
         holder.imageCardContainer.alpha = 0f
         holder.bg.alpha = 0f
         holder.textScrim.alpha = 0f
         sideFace.isVisible = true
-        val easing = PathInterpolator(0.22f, 0.65f, 0.16f, 1f)
-        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+        seam.isVisible = true
+        val easing = PathInterpolator(0.18f, 0.86f, 0.22f, 1f)
+        val animator = ValueAnimator.ofFloat(0f, 1.035f, 1f).apply {
             duration = CARD_FLIP_DURATION
             interpolator = easing
             addUpdateListener { valueAnimator ->
-                val t = valueAnimator.animatedValue as Float
-                val angle = 180f * t
+                val t = (valueAnimator.animatedValue as Float).coerceIn(0f, 1.05f)
+                val angle = (180f * t).coerceIn(0f, 186f)
                 val radians = Math.toRadians(angle.toDouble())
                 val thickness = holder.itemView.resources.displayMetrics.density * CARD_THICKNESS_DP
-                val sideWidth = max(1f, (sin(radians).toFloat() * thickness))
-                val depthCompression = 1f - (sin(radians).toFloat() * 0.08f)
-                val verticalCompression = 1f - (sin(radians).toFloat() * 0.04f)
-                val lateral = cos(radians).toFloat()
+                val edgeExposure = sin(radians).toFloat().coerceAtLeast(0f)
+                val perspectiveDepth = abs(cos(radians).toFloat())
+                val sideWidth = max(1f, edgeExposure * thickness * 1.35f)
+                val depthCompression = 1f - edgeExposure * 0.11f
+                val verticalCompression = 1f - edgeExposure * 0.05f
+                val freeEdgeX = if (sign > 0f) {
+                    hingePivotX + cos(radians).toFloat() * (cardWidth - hingePivotX)
+                } else {
+                    hingePivotX - cos(radians).toFloat() * hingePivotX
+                }
+                val sideCenterOffset = freeEdgeX - (cardWidth * 0.5f)
 
                 frontFace.rotationY = -angle * sign
                 backFace.rotationY = (180f - angle) * sign
@@ -957,13 +976,19 @@ class CardsAdapter(
                 backFace.isVisible = angle >= 90f
                 sideFace.layoutParams = sideFace.layoutParams.apply { width = sideWidth.roundToInt() }
                 sideFace.requestLayout()
-                sideFace.translationX = sign * lateral * sideWidth * 0.4f
-                sideFace.alpha = (sin(radians).toFloat() * 0.95f).coerceIn(0f, 1f)
+                sideFace.translationX = sideCenterOffset
+                sideFace.scaleY = 1f + edgeExposure * 0.08f
+                sideFace.alpha = (edgeExposure * 0.97f).coerceIn(0f, 1f)
+                seam.translationX = sideCenterOffset + (if (sign > 0f) sideWidth * 0.5f else -sideWidth * 0.5f)
+                seam.alpha = (edgeExposure * 0.6f).coerceIn(0f, 1f)
 
                 layer.scaleX = depthCompression
                 layer.scaleY = verticalCompression
-                layer.translationX = -sign * sin(radians).toFloat() * holder.itemView.resources.displayMetrics.density * PARALLAX_MAX_SHIFT_DP
-                layer.alpha = 0.92f + (sin(radians).toFloat() * 0.08f)
+                layer.translationX = -sign * edgeExposure * holder.itemView.resources.displayMetrics.density * PARALLAX_MAX_SHIFT_DP
+                layer.translationY = edgeExposure * holder.itemView.resources.displayMetrics.density * 1.4f
+                layer.alpha = 0.9f + edgeExposure * 0.1f
+                frontFace.alpha = (0.84f + (1f - perspectiveDepth) * 0.16f).coerceIn(0.75f, 1f)
+                backFace.alpha = (0.84f + perspectiveDepth * 0.16f).coerceIn(0.75f, 1f)
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
@@ -1188,12 +1213,17 @@ class CardsAdapter(
         holder.cardFlip3dLayer.scaleX = 1f
         holder.cardFlip3dLayer.scaleY = 1f
         holder.cardFlip3dLayer.translationX = 0f
+        holder.cardFlip3dLayer.translationY = 0f
         holder.cardFlipFrontFace.rotationY = 0f
         holder.cardFlipBackFace.rotationY = 180f
         holder.cardFlipFrontFace.setImageDrawable(null)
         holder.cardFlipBackFace.setImageDrawable(null)
         holder.cardFlipSide.isVisible = false
         holder.cardFlipSide.alpha = 0f
+        holder.cardFlipSide.scaleY = 1f
+        holder.cardFlipSeam.isVisible = false
+        holder.cardFlipSeam.alpha = 0f
+        holder.cardFlipSeam.translationX = 0f
     }
 
     private fun resetCardTransform(holder: VH) {
@@ -1395,9 +1425,9 @@ class CardsAdapter(
         private const val BG_BLUR_RADIUS = 12f
         private const val CARD_FLIP_DURATION = 420L
         private const val HANDWRITING_CAMERA_DISTANCE = 12000f
-        private const val FLIP_3D_CAMERA_DISTANCE = 18000f
-        private const val CARD_THICKNESS_DP = 10f
-        private const val PARALLAX_MAX_SHIFT_DP = 8f
+        private const val FLIP_3D_CAMERA_DISTANCE = 4200f
+        private const val CARD_THICKNESS_DP = 13f
+        private const val PARALLAX_MAX_SHIFT_DP = 11f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
