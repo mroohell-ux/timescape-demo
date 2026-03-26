@@ -2,8 +2,7 @@ package com.example.timescapedemo
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -40,14 +39,13 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
 import androidx.core.view.isVisible
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
+import android.view.animation.PathInterpolator
 import androidx.core.net.toUri
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 // Default sizing limits used when callers do not provide their own
 // `BackgroundSizingConfig`. The adapter will never decode a background bitmap with a
@@ -137,6 +135,9 @@ class CardsAdapter(
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
+        val cardFlipShadow: View = v.findViewById(R.id.cardFlipShadow)
+        val cardFlipLight: View = v.findViewById(R.id.cardFlipLight)
+        val cardFlipEdge: View = v.findViewById(R.id.cardFlipEdge)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -369,7 +370,12 @@ class CardsAdapter(
         holder.progressBar.isVisible = false
         holder.videoInlineView.isVisible = false
         holder.videoPlaybackControls.isVisible = false
+        resetFlipEffects(holder)
         holder.handwritingContainer.cameraDistance =
+            holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
+        holder.cardContent.cameraDistance =
+            holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
+        holder.imageCardContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
@@ -672,6 +678,7 @@ class CardsAdapter(
         holder.card.scaleX = 1f
         holder.card.scaleY = 1f
         holder.itemView.setTag(R.id.tag_card_id, null)
+        resetFlipEffects(holder)
         setCardMode(holder, CardMode.TEXT, holder.snippet.text ?: "")
         super.onViewRecycled(holder)
     }
@@ -863,10 +870,10 @@ class CardsAdapter(
         if (position == RecyclerView.NO_POSITION) return null
         val item = getItem(position)
         val handwritingContent = item.handwriting
+        val hasHandwritingBack = handwritingContent?.back != null
         val hasImageBack = item.imageHandwriting != null
         val hasTextBack = !item.backSnippet.isNullOrBlank()
-        val hasHandwriting = handwritingContent != null
-        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack) return null
+        if (!hasHandwritingBack && (!hasImageBack || item.image == null) && !hasTextBack) return null
         val current = currentCardFace(item.id)
         val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
         handwritingFaces[item.id] = next
@@ -875,10 +882,12 @@ class CardsAdapter(
             item.image != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.image_card_missing)
             else -> item.snippet
         }
-        when {
-            handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
-            hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
-            hasTextBack -> bindTextCard(holder, item, next)
+        animateCardFlip(holder, direction = if (next == HandwritingFace.BACK) 1 else -1) {
+            when {
+                handwritingContent != null -> bindHandwriting(holder, item, handwritingContent, next, fallbackText, position)
+                hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
+                hasTextBack -> bindTextCard(holder, item, next)
+            }
         }
         return next
     }
@@ -892,85 +901,53 @@ class CardsAdapter(
 
     fun canFlipCardAt(index: Int): Boolean {
         val item = getItemAt(index) ?: return false
-        if (item.handwriting != null) return true
+        if (item.handwriting?.back != null) return true
         if (item.imageHandwriting != null && item.image != null) return true
         return !item.backSnippet.isNullOrBlank()
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
 
-    private fun animateHandwritingFlip(
+    private fun animateCardFlip(
         holder: VH,
-        item: CardItem,
-        toFace: HandwritingFace,
-        fallbackText: CharSequence,
-        position: Int
+        direction: Int,
+        onMidFlip: () -> Unit
     ) {
-        val container = holder.handwritingContainer
-        cancelOngoingFlip(container)
-        val fold = AnimatorSet().apply {
-            playTogether(
-                ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 1f, 0.88f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_Y, 1f, 0.94f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.ALPHA, 1f, 0.75f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
+        cancelOngoingFlip(holder)
+        prepareFlipEffects(holder)
+        val easing = PathInterpolator(0.22f, 0.65f, 0.16f, 1f)
+        var switched = false
+        val sign = if (direction >= 0) 1f else -1f
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = CARD_FLIP_DURATION
+            interpolator = easing
+            addUpdateListener { valueAnimator ->
+                val t = valueAnimator.animatedValue as Float
+                if (!switched && t >= 0.5f) {
+                    switched = true
+                    onMidFlip()
                 }
-            )
-        }
-        val unfold = AnimatorSet().apply {
-            playTogether(
-                ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = DecelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 0.88f, 1.04f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = OvershootInterpolator(1.1f)
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_Y, 0.94f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = OvershootInterpolator(0.9f)
-                },
-                ObjectAnimator.ofFloat(container, View.ALPHA, 0.75f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = DecelerateInterpolator()
-                }
-            )
-        }
-        val animationPair = fold to unfold
-        fold.addListener(object : AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: Animator) {
-                container.rotationY = -90f
-                val handwritingContent = item.handwriting ?: return
-                bindHandwriting(holder, item, handwritingContent, toFace, fallbackText, position) {
-                    if (container.getTag(R.id.tag_handwriting_flip_animator) == animationPair) {
-                        unfold.start()
-                    }
-                }
+                val phase = if (t < 0.5f) t * 2f else (t - 0.5f) * 2f
+                val fold = t < 0.5f
+                val angle = if (fold) (phase * 88f) else ((1f - phase) * -88f)
+                applyCardTransform(holder, angle * sign, fold, phase, sign)
             }
-        })
-        unfold.addListener(object : AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: Animator) {
-                container.rotationY = 0f
-                container.scaleX = 1f
-                container.scaleY = 1f
-                container.alpha = 1f
-                container.setTag(R.id.tag_handwriting_flip_animator, null)
-            }
-        })
-        container.setTag(R.id.tag_handwriting_flip_animator, animationPair)
-        fold.start()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    resetCardTransform(holder)
+                    resetFlipEffects(holder)
+                    holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, null)
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    resetCardTransform(holder)
+                    resetFlipEffects(holder)
+                    holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, null)
+                }
+            })
+        }
+        holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, animator)
+        animator.start()
     }
 
     private fun prefetchNeighbors(holder: VH, position: Int, referenceOptions: HandwritingOptions) {
@@ -1165,15 +1142,61 @@ class CardsAdapter(
         holder.titleSpeakButton.contentDescription = null
     }
 
-    private fun cancelOngoingFlip(container: View) {
-        val running = container.getTag(R.id.tag_handwriting_flip_animator) as? Pair<AnimatorSet, AnimatorSet>
-        running?.first?.cancel()
-        running?.second?.cancel()
-        container.setTag(R.id.tag_handwriting_flip_animator, null)
-        container.rotationY = 0f
-        container.scaleX = 1f
-        container.scaleY = 1f
-        container.alpha = 1f
+    private fun cancelOngoingFlip(holder: VH) {
+        (holder.cardContent.getTag(R.id.tag_handwriting_flip_animator) as? Animator)?.cancel()
+        holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, null)
+        resetCardTransform(holder)
+        resetFlipEffects(holder)
+    }
+
+    private fun prepareFlipEffects(holder: VH) {
+        holder.cardFlipShadow.isVisible = true
+        holder.cardFlipLight.isVisible = true
+        holder.cardFlipEdge.isVisible = true
+    }
+
+    private fun resetFlipEffects(holder: VH) {
+        holder.cardFlipShadow.isVisible = false
+        holder.cardFlipLight.isVisible = false
+        holder.cardFlipEdge.isVisible = false
+        holder.cardFlipShadow.alpha = 0f
+        holder.cardFlipLight.alpha = 0f
+        holder.cardFlipEdge.alpha = 0f
+        holder.cardFlipShadow.translationX = 0f
+        holder.cardFlipLight.translationX = 0f
+        holder.cardFlipEdge.translationX = 0f
+        holder.cardFlipEdge.scaleX = 1f
+    }
+
+    private fun applyCardTransform(holder: VH, angle: Float, fold: Boolean, phase: Float, sign: Float) {
+        val containers = arrayOf(holder.cardContent, holder.handwritingContainer, holder.imageCardContainer)
+        val height = holder.itemView.height.takeIf { it > 0 }?.toFloat() ?: 1f
+        val parallax = (if (fold) phase else (1f - phase)) * PARALLAX_MAX_SHIFT_DP * holder.itemView.resources.displayMetrics.density
+        containers.forEach { view ->
+            view.rotationY = angle
+            view.scaleX = 1f - (if (fold) phase else (1f - phase)) * 0.07f
+            view.scaleY = 1f - (if (fold) phase else (1f - phase)) * 0.03f
+            view.translationX = -sign * parallax
+        }
+        val angleFactor = (abs(angle) / 88f).coerceIn(0f, 1f)
+        holder.cardFlipShadow.alpha = 0.1f + angleFactor * 0.4f
+        holder.cardFlipShadow.translationX = sign * angleFactor * height * 0.08f
+        holder.cardFlipLight.alpha = (1f - angleFactor) * 0.22f + 0.05f
+        holder.cardFlipLight.translationX = -sign * angleFactor * height * 0.06f
+        holder.cardFlipEdge.alpha = sin(angleFactor * Math.PI).toFloat().coerceIn(0f, 1f) * 0.95f
+        holder.cardFlipEdge.scaleX = 1f + angleFactor * 1.7f
+        holder.cardFlipEdge.translationX = sign * angleFactor * height * 0.03f
+    }
+
+    private fun resetCardTransform(holder: VH) {
+        val containers = arrayOf(holder.cardContent, holder.handwritingContainer, holder.imageCardContainer)
+        containers.forEach { view ->
+            view.rotationY = 0f
+            view.scaleX = 1f
+            view.scaleY = 1f
+            view.alpha = 1f
+            view.translationX = 0f
+        }
     }
 
     // ---------- Tint implementations ----------
@@ -1360,8 +1383,9 @@ class CardsAdapter(
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
-        private const val HANDWRITING_FLIP_HALF_DURATION = 140L
+        private const val CARD_FLIP_DURATION = 420L
         private const val HANDWRITING_CAMERA_DISTANCE = 8000f
+        private const val PARALLAX_MAX_SHIFT_DP = 8f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
