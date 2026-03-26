@@ -34,6 +34,7 @@ import androidx.annotation.ColorInt
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.GestureDetectorCompat
+import androidx.core.view.drawToBitmap
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -42,6 +43,7 @@ import androidx.core.view.isVisible
 import android.view.animation.PathInterpolator
 import androidx.core.net.toUri
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -135,9 +137,10 @@ class CardsAdapter(
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
-        val cardFlipShadow: View = v.findViewById(R.id.cardFlipShadow)
-        val cardFlipLight: View = v.findViewById(R.id.cardFlipLight)
-        val cardFlipEdge: View = v.findViewById(R.id.cardFlipEdge)
+        val cardFlip3dLayer: View = v.findViewById(R.id.cardFlip3dLayer)
+        val cardFlipFrontFace: ImageView = v.findViewById(R.id.cardFlipFrontFace)
+        val cardFlipBackFace: ImageView = v.findViewById(R.id.cardFlipBackFace)
+        val cardFlipSide: View = v.findViewById(R.id.cardFlipSide)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -370,7 +373,7 @@ class CardsAdapter(
         holder.progressBar.isVisible = false
         holder.videoInlineView.isVisible = false
         holder.videoPlaybackControls.isVisible = false
-        resetFlipEffects(holder)
+        resetFlip3dLayer(holder)
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         holder.cardContent.cameraDistance =
@@ -678,7 +681,7 @@ class CardsAdapter(
         holder.card.scaleX = 1f
         holder.card.scaleY = 1f
         holder.itemView.setTag(R.id.tag_card_id, null)
-        resetFlipEffects(holder)
+        resetFlip3dLayer(holder)
         setCardMode(holder, CardMode.TEXT, holder.snippet.text ?: "")
         super.onViewRecycled(holder)
     }
@@ -914,34 +917,64 @@ class CardsAdapter(
         onMidFlip: () -> Unit
     ) {
         cancelOngoingFlip(holder)
-        prepareFlipEffects(holder)
-        val easing = PathInterpolator(0.22f, 0.65f, 0.16f, 1f)
-        var switched = false
+        val frontBitmap = holder.card.drawToBitmap()
+        onMidFlip()
+        val backBitmap = holder.card.drawToBitmap()
         val sign = if (direction >= 0) 1f else -1f
+        val layer = holder.cardFlip3dLayer
+        val frontFace = holder.cardFlipFrontFace
+        val backFace = holder.cardFlipBackFace
+        val sideFace = holder.cardFlipSide
+        frontFace.setImageBitmap(frontBitmap)
+        backFace.setImageBitmap(backBitmap)
+        layer.isVisible = true
+        layer.cameraDistance = holder.itemView.resources.displayMetrics.density * FLIP_3D_CAMERA_DISTANCE
+        frontFace.cameraDistance = layer.cameraDistance
+        backFace.cameraDistance = layer.cameraDistance
+        holder.cardContent.alpha = 0f
+        holder.handwritingContainer.alpha = 0f
+        holder.imageCardContainer.alpha = 0f
+        holder.bg.alpha = 0f
+        holder.textScrim.alpha = 0f
+        sideFace.isVisible = true
+        val easing = PathInterpolator(0.22f, 0.65f, 0.16f, 1f)
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = CARD_FLIP_DURATION
             interpolator = easing
             addUpdateListener { valueAnimator ->
                 val t = valueAnimator.animatedValue as Float
-                if (!switched && t >= 0.5f) {
-                    switched = true
-                    onMidFlip()
-                }
-                val phase = if (t < 0.5f) t * 2f else (t - 0.5f) * 2f
-                val fold = t < 0.5f
-                val angle = if (fold) (phase * 88f) else ((1f - phase) * -88f)
-                applyCardTransform(holder, angle * sign, fold, phase, sign)
+                val angle = 180f * t
+                val radians = Math.toRadians(angle.toDouble())
+                val thickness = holder.itemView.resources.displayMetrics.density * CARD_THICKNESS_DP
+                val sideWidth = max(1f, (sin(radians).toFloat() * thickness))
+                val depthCompression = 1f - (sin(radians).toFloat() * 0.08f)
+                val verticalCompression = 1f - (sin(radians).toFloat() * 0.04f)
+                val lateral = cos(radians).toFloat()
+
+                frontFace.rotationY = -angle * sign
+                backFace.rotationY = (180f - angle) * sign
+                frontFace.isVisible = angle <= 90f
+                backFace.isVisible = angle >= 90f
+                sideFace.layoutParams = sideFace.layoutParams.apply { width = sideWidth.roundToInt() }
+                sideFace.requestLayout()
+                sideFace.translationX = sign * lateral * sideWidth * 0.4f
+                sideFace.alpha = (sin(radians).toFloat() * 0.95f).coerceIn(0f, 1f)
+
+                layer.scaleX = depthCompression
+                layer.scaleY = verticalCompression
+                layer.translationX = -sign * sin(radians).toFloat() * holder.itemView.resources.displayMetrics.density * PARALLAX_MAX_SHIFT_DP
+                layer.alpha = 0.92f + (sin(radians).toFloat() * 0.08f)
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     resetCardTransform(holder)
-                    resetFlipEffects(holder)
+                    resetFlip3dLayer(holder)
                     holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, null)
                 }
 
                 override fun onAnimationCancel(animation: Animator) {
                     resetCardTransform(holder)
-                    resetFlipEffects(holder)
+                    resetFlip3dLayer(holder)
                     holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, null)
                 }
             })
@@ -1146,46 +1179,21 @@ class CardsAdapter(
         (holder.cardContent.getTag(R.id.tag_handwriting_flip_animator) as? Animator)?.cancel()
         holder.cardContent.setTag(R.id.tag_handwriting_flip_animator, null)
         resetCardTransform(holder)
-        resetFlipEffects(holder)
+        resetFlip3dLayer(holder)
     }
 
-    private fun prepareFlipEffects(holder: VH) {
-        holder.cardFlipShadow.isVisible = true
-        holder.cardFlipLight.isVisible = true
-        holder.cardFlipEdge.isVisible = true
-    }
-
-    private fun resetFlipEffects(holder: VH) {
-        holder.cardFlipShadow.isVisible = false
-        holder.cardFlipLight.isVisible = false
-        holder.cardFlipEdge.isVisible = false
-        holder.cardFlipShadow.alpha = 0f
-        holder.cardFlipLight.alpha = 0f
-        holder.cardFlipEdge.alpha = 0f
-        holder.cardFlipShadow.translationX = 0f
-        holder.cardFlipLight.translationX = 0f
-        holder.cardFlipEdge.translationX = 0f
-        holder.cardFlipEdge.scaleX = 1f
-    }
-
-    private fun applyCardTransform(holder: VH, angle: Float, fold: Boolean, phase: Float, sign: Float) {
-        val containers = arrayOf(holder.cardContent, holder.handwritingContainer, holder.imageCardContainer)
-        val height = holder.itemView.height.takeIf { it > 0 }?.toFloat() ?: 1f
-        val parallax = (if (fold) phase else (1f - phase)) * PARALLAX_MAX_SHIFT_DP * holder.itemView.resources.displayMetrics.density
-        containers.forEach { view ->
-            view.rotationY = angle
-            view.scaleX = 1f - (if (fold) phase else (1f - phase)) * 0.07f
-            view.scaleY = 1f - (if (fold) phase else (1f - phase)) * 0.03f
-            view.translationX = -sign * parallax
-        }
-        val angleFactor = (abs(angle) / 88f).coerceIn(0f, 1f)
-        holder.cardFlipShadow.alpha = 0.1f + angleFactor * 0.4f
-        holder.cardFlipShadow.translationX = sign * angleFactor * height * 0.08f
-        holder.cardFlipLight.alpha = (1f - angleFactor) * 0.22f + 0.05f
-        holder.cardFlipLight.translationX = -sign * angleFactor * height * 0.06f
-        holder.cardFlipEdge.alpha = sin(angleFactor * Math.PI).toFloat().coerceIn(0f, 1f) * 0.95f
-        holder.cardFlipEdge.scaleX = 1f + angleFactor * 1.7f
-        holder.cardFlipEdge.translationX = sign * angleFactor * height * 0.03f
+    private fun resetFlip3dLayer(holder: VH) {
+        holder.cardFlip3dLayer.isVisible = false
+        holder.cardFlip3dLayer.rotationY = 0f
+        holder.cardFlip3dLayer.scaleX = 1f
+        holder.cardFlip3dLayer.scaleY = 1f
+        holder.cardFlip3dLayer.translationX = 0f
+        holder.cardFlipFrontFace.rotationY = 0f
+        holder.cardFlipBackFace.rotationY = 180f
+        holder.cardFlipFrontFace.setImageDrawable(null)
+        holder.cardFlipBackFace.setImageDrawable(null)
+        holder.cardFlipSide.isVisible = false
+        holder.cardFlipSide.alpha = 0f
     }
 
     private fun resetCardTransform(holder: VH) {
@@ -1197,6 +1205,8 @@ class CardsAdapter(
             view.alpha = 1f
             view.translationX = 0f
         }
+        holder.bg.alpha = 1f
+        holder.textScrim.alpha = 0.45f
     }
 
     // ---------- Tint implementations ----------
@@ -1384,7 +1394,9 @@ class CardsAdapter(
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
         private const val CARD_FLIP_DURATION = 420L
-        private const val HANDWRITING_CAMERA_DISTANCE = 8000f
+        private const val HANDWRITING_CAMERA_DISTANCE = 12000f
+        private const val FLIP_3D_CAMERA_DISTANCE = 18000f
+        private const val CARD_THICKNESS_DP = 10f
         private const val PARALLAX_MAX_SHIFT_DP = 8f
 
         private const val DUOTONE_SHADER = """
