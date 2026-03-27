@@ -53,7 +53,7 @@ class FilamentCardFlipRenderer(private val context: Context) {
 
     fun renderFrame() {
         val chain = swapChain ?: return
-        if (renderer.beginFrame(chain)) {
+        if (renderer.beginFrame(chain, System.nanoTime())) {
             renderer.render(view)
             renderer.endFrame()
         }
@@ -62,7 +62,11 @@ class FilamentCardFlipRenderer(private val context: Context) {
     private fun configureCamera() {
         // Strong perspective per product requirement.
         camera.setProjection(40.0, 1.0, 0.05, 10.0, Camera.Fov.VERTICAL)
-        camera.lookAt(0.0, 0.0, 1.8, 0.0, 0.0, 0.0)
+        camera.lookAt(
+            0.0, 0.0, 1.8,
+            0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0
+        )
     }
 
     fun detachSurface() {
