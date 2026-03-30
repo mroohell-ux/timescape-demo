@@ -1116,6 +1116,10 @@ class MainActivity : AppCompatActivity() {
         val noteId = intent.getLongExtra(EXTRA_TARGET_STICKY_NOTE_ID, Long.MIN_VALUE)
         val showBack = intent.getBooleanExtra(EXTRA_TARGET_STICKY_NOTE_SHOW_BACK, false)
         if (flowId == Long.MIN_VALUE || cardId == Long.MIN_VALUE || noteId == Long.MIN_VALUE) return
+        intent.removeExtra(EXTRA_TARGET_FLOW_ID)
+        intent.removeExtra(EXTRA_TARGET_CARD_ID)
+        intent.removeExtra(EXTRA_TARGET_STICKY_NOTE_ID)
+        intent.removeExtra(EXTRA_TARGET_STICKY_NOTE_SHOW_BACK)
         openCardFromNotification(flowId, cardId, noteId, showBack)
     }
 
