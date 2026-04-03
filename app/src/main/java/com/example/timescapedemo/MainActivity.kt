@@ -4966,11 +4966,7 @@ class MainActivity : AppCompatActivity() {
             val payload = withContext(Dispatchers.IO) {
                 runCatching {
                     val exportPayload = buildStickyNotesExportPayload(flows.toList())
-                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
-                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            writer.write(exportPayload.json)
-                        }
-                    } ?: error("Unable to open output stream")
+                    writeExportPayloadToUri(uri, exportPayload.json)
                     exportPayload
                 }
             }.getOrElse {
@@ -5001,11 +4997,7 @@ class MainActivity : AppCompatActivity() {
             val payload = withContext(Dispatchers.IO) {
                 runCatching {
                     val exportPayload = buildExportPayload(flowsToExport)
-                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
-                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            writer.write(exportPayload.json)
-                        }
-                    } ?: error("Unable to open output stream")
+                    writeExportPayloadToUri(uri, exportPayload.json)
                     Log.d(
                         EXPORT_LOG_TAG,
                         "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards"
@@ -5035,6 +5027,18 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     shareExportPayload(payload, fileName)
                 }
+            }
+        }
+    }
+
+    private fun writeExportPayloadToUri(uri: Uri, payloadJson: String) {
+        val stream = contentResolver.openOutputStream(uri, "wt")
+            ?: contentResolver.openOutputStream(uri, "w")
+            ?: contentResolver.openOutputStream(uri)
+            ?: error("Unable to open output stream")
+        stream.use { output ->
+            OutputStreamWriter(output, StandardCharsets.UTF_8).use { writer ->
+                writer.write(payloadJson)
             }
         }
     }
