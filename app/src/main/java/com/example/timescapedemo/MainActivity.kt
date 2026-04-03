@@ -2413,15 +2413,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun maybeDispatchStartupStickyNoteNotification() {
-        if (hasDispatchedStartupStickyNote) return
-        val target = chooseRandomStickyNoteTarget() ?: return
+        if (hasDispatchedStartupStickyNote) {
+            Log.d(TAG, "StickyNote: startup dispatch skipped (already dispatched)")
+            return
+        }
+        val target = chooseRandomStickyNoteTarget()
+        if (target == null) {
+            Log.d(TAG, "StickyNote: startup dispatch skipped (no available targets)")
+            return
+        }
+        Log.d(TAG, "StickyNote: startup dispatch -> flowId=${target.flowId}, cardId=${target.cardId}, noteId=${target.noteId}")
         dispatchStickyNoteNotification(target)
     }
 
     private fun dispatchStickyNoteNotification(target: StickyNoteTarget) {
+        Log.d(TAG, "StickyNote: dispatch requested -> flowId=${target.flowId}, cardId=${target.cardId}, noteId=${target.noteId}, sdk=${Build.VERSION.SDK_INT}")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
+            Log.d(TAG, "StickyNote: notification permission missing, requesting POST_NOTIFICATIONS")
             pendingStickyNoteNotificationTarget = target
             ActivityCompat.requestPermissions(
                 this,
@@ -2433,17 +2443,28 @@ class MainActivity : AppCompatActivity() {
         showStickyNoteNotification(target)
         hasDispatchedStartupStickyNote = true
         pendingStickyNoteNotificationTarget = null
+        Log.d(TAG, "StickyNote: dispatch completed -> noteId=${target.noteId}")
     }
 
     private fun restartStickyNoteNotificationSchedule() {
         stickyNoteNotificationJob?.cancel()
         stickyNoteNotificationJob = null
         val perHour = notificationFrequencyPerHour
-        if (perHour <= 0) return
+        if (perHour <= 0) {
+            Log.d(TAG, "StickyNote: schedule disabled (notificationFrequencyPerHour=$perHour)")
+            return
+        }
         val intervalMillis = max(1_000L, 3_600_000L / perHour)
+        Log.d(TAG, "StickyNote: schedule started -> perHour=$perHour, intervalMillis=$intervalMillis")
         stickyNoteNotificationJob = lifecycleScope.launch {
             while (isActive) {
-                chooseRandomStickyNoteTarget()?.let { dispatchStickyNoteNotification(it) }
+                val target = chooseRandomStickyNoteTarget()
+                if (target == null) {
+                    Log.d(TAG, "StickyNote: schedule tick skipped (no available targets)")
+                } else {
+                    Log.d(TAG, "StickyNote: schedule tick dispatch -> flowId=${target.flowId}, cardId=${target.cardId}, noteId=${target.noteId}")
+                    dispatchStickyNoteNotification(target)
+                }
                 delay(intervalMillis)
             }
         }
@@ -2465,13 +2486,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (targets.isEmpty()) return null
-        return targets.random()
+        val chosen = targets.random()
+        Log.d(TAG, "StickyNote: chooseRandom target selected from ${targets.size} options -> flowId=${chosen.flowId}, cardId=${chosen.cardId}, noteId=${chosen.noteId}")
+        return chosen
     }
 
 
     //private var stickyNoteNotificationSequence = 0
 
     private fun showStickyNoteNotification(target: StickyNoteTarget) {
+        Log.d(TAG, "StickyNote: preparing notification -> flowId=${target.flowId}, cardId=${target.cardId}, noteId=${target.noteId}")
         createStickyNoteChannelIfNeeded()
 
         val contentText = target.frontText.ifBlank {
@@ -2513,8 +2537,10 @@ class MainActivity : AppCompatActivity() {
             .setShowWhen(true)
             .build()
 
+        val notificationId = nextStickyNoteNotificationId()
         NotificationManagerCompat.from(this)
-            .notify(nextStickyNoteNotificationId(), notification)
+            .notify(notificationId, notification)
+        Log.d(TAG, "StickyNote: notification posted -> notificationId=$notificationId, noteId=${target.noteId}")
     }
 
     private fun nextStickyNoteNotificationId(): Int {
@@ -2525,12 +2551,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createStickyNoteChannelIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Log.d(TAG, "StickyNote: notification channel not required on sdk=${Build.VERSION.SDK_INT}")
+            return
+        }
 
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         // If it already exists, do nothing.
-        if (nm.getNotificationChannel(STICKY_NOTE_NOTIFICATION_CHANNEL_ID) != null) return
+        if (nm.getNotificationChannel(STICKY_NOTE_NOTIFICATION_CHANNEL_ID) != null) {
+            Log.d(TAG, "StickyNote: notification channel already exists")
+            return
+        }
 
         val channelName = getString(R.string.sticky_note_notification_channel_name)
         val channelDesc = getString(R.string.sticky_note_notification_channel_description)
@@ -2551,6 +2583,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         nm.createNotificationChannel(channel)
+        Log.d(TAG, "StickyNote: notification channel created -> id=$STICKY_NOTE_NOTIFICATION_CHANNEL_ID")
     }
 //    private fun showStickyNoteNotification(target: StickyNoteTarget) {
 //        createStickyNoteChannel()
@@ -4818,23 +4851,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startLanBridgeServer() {
-        if (lanServer != null) return
+        if (lanServer != null) {
+            Log.d(TAG, "WatchSync: start requested, but LAN server already running on port=${lanServer?.port}")
+            return
+        }
+        Log.d(TAG, "WatchSync: starting LAN bridge server")
         lanServer = TimescapeLanServer(
             context = this,
             exportPayloadProvider = { buildStickyNotesExportPayloadForLan() },
             appLabelProvider = { getString(R.string.app_name) }
         ).also { it.start() }
+        Log.d(TAG, "WatchSync: LAN bridge server start completed, port=${lanServer?.port}")
         refreshWatchSyncUi()
     }
 
     private fun stopLanBridgeServer() {
+        Log.d(TAG, "WatchSync: stopping LAN bridge server, currentPort=${lanServer?.port}")
         lanServer?.stop()
         lanServer = null
+        Log.d(TAG, "WatchSync: LAN bridge server stopped")
         refreshWatchSyncUi()
     }
 
     private fun setWatchSyncEnabled(enabled: Boolean) {
-        if (isWatchSyncEnabled == enabled) return
+        if (isWatchSyncEnabled == enabled) {
+            Log.d(TAG, "WatchSync: toggle ignored, already enabled=$enabled")
+            return
+        }
+        Log.d(TAG, "WatchSync: set enabled=$enabled (previous=$isWatchSyncEnabled)")
         isWatchSyncEnabled = enabled
         if (enabled) startLanBridgeServer() else stopLanBridgeServer()
     }
@@ -4848,6 +4892,7 @@ class MainActivity : AppCompatActivity() {
             drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_disabled)
             drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_unavailable)
             drawerCopyWatchEndpointButton.isEnabled = false
+            Log.d(TAG, "WatchSync: UI -> disabled")
             return
         }
         val endpoint = buildManualWatchEndpoint()
@@ -4855,18 +4900,22 @@ class MainActivity : AppCompatActivity() {
             drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_unavailable)
             drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_unavailable)
             drawerCopyWatchEndpointButton.isEnabled = false
+            Log.d(TAG, "WatchSync: UI -> enabled but endpoint unavailable (port=${lanServer?.port})")
             return
         }
         drawerWatchSyncStatus.text = getString(R.string.drawer_watch_sync_status_ready)
         drawerWatchSyncEndpoint.text = getString(R.string.drawer_watch_sync_endpoint_format, endpoint)
         drawerCopyWatchEndpointButton.isEnabled = true
+        Log.d(TAG, "WatchSync: UI -> ready, endpoint=$endpoint")
     }
 
     private fun buildManualWatchEndpoint(): String? {
         val port = lanServer?.port ?: return null
         if (port <= 0) return null
         val host = findBestLanHostAddress() ?: return null
-        return "http://$host:$port"
+        val endpoint = "http://$host:$port"
+        Log.d(TAG, "WatchSync: built manual endpoint=$endpoint")
+        return endpoint
     }
 
     private fun findBestLanHostAddress(): String? {
@@ -4882,16 +4931,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildStickyNotesExportPayloadForLan(): String {
+        Log.d(TAG, "WatchSync: building sticky notes payload for LAN request")
         val latch = CountDownLatch(1)
         var payload = "{}"
         runOnUiThread {
             captureVisibleFlowStates()
-            payload = buildStickyNotesExportPayload(flows.toList()).json
+            val exportPayload = buildStickyNotesExportPayload(flows.toList())
+            payload = exportPayload.json
+            Log.d(
+                TAG,
+                "WatchSync: payload prepared on UI thread with stickyNoteCount=${exportPayload.stickyNoteCount}"
+            )
             latch.countDown()
         }
         if (!latch.await(LAN_EXPORT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            Log.w(TAG, "WatchSync: payload build timed out after ${LAN_EXPORT_TIMEOUT_MS}ms, returning empty payload")
             return JSONObject().put("stickyNotes", JSONArray()).put("totalStickyNotes", 0).toString()
         }
+        Log.d(TAG, "WatchSync: payload build completed, jsonLength=${payload.length}")
         return payload
     }
 

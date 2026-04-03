@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.content.Context
+import android.util.Log
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Handler
@@ -28,7 +29,10 @@ class TimescapeLanServer(
         private set
 
     fun start() {
-        if (httpServer != null) return
+        if (httpServer != null) {
+            Log.d(LOG_TAG, "start() ignored; server already running on port=$port")
+            return
+        }
         val server = object : NanoHTTPD("0.0.0.0", 0) {
             override fun serve(session: IHTTPSession): Response {
                 return handleRequest(session)
@@ -37,24 +41,32 @@ class TimescapeLanServer(
         try {
             server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         } catch (e: IOException) {
+            Log.e(LOG_TAG, "Failed to start HTTP server", e)
             return
         }
         httpServer = server
         port = server.listeningPort
+        Log.d(LOG_TAG, "HTTP server started on port=$port")
         registerNsd()
     }
 
     fun stop() {
+        Log.d(LOG_TAG, "Stopping server on port=$port")
         unregisterNsd()
         httpServer?.stop()
         httpServer = null
         port = -1
         sessions.clear()
         tokens.clear()
+        Log.d(LOG_TAG, "Server stopped and session/token state cleared")
     }
 
     private fun handleRequest(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
         val path = session.uri.orEmpty()
+        Log.d(
+            LOG_TAG,
+            "Request: method=${session.method}, path=$path, remoteIp=${session.remoteIpAddress}, params=${session.parameters.keys}"
+        )
         return when {
             session.method == NanoHTTPD.Method.GET && path == "/meta" -> {
                 jsonOk(
@@ -72,6 +84,10 @@ class TimescapeLanServer(
                 val clientId = request.optString("clientId")
                 val clientName = request.optString("clientName")
                 val sessionId = UUID.randomUUID().toString()
+                Log.d(
+                    LOG_TAG,
+                    "Session request: clientId=${clientId.ifBlank { "<empty>" }}, clientName=${clientName.ifBlank { "<empty>" }}, sessionId=$sessionId"
+                )
                 sessions[sessionId] = SessionState(
                     sessionId = sessionId,
                     clientId = clientId,
@@ -86,8 +102,10 @@ class TimescapeLanServer(
                 val sessionId = session.parameters["sessionId"]?.firstOrNull().orEmpty()
                 val state = sessions[sessionId]
                 if (state == null) {
+                    Log.w(LOG_TAG, "Session status requested for unknown sessionId=$sessionId")
                     jsonError(NanoHTTPD.Response.Status.NOT_FOUND, "unknown_session")
                 } else {
+                    Log.d(LOG_TAG, "Session status: sessionId=$sessionId, status=${state.status}")
                     when (state.status) {
                         SessionStatus.PENDING -> jsonOk(JSONObject().put("status", "PENDING"))
                         SessionStatus.DENIED -> jsonOk(JSONObject().put("status", "DENIED"))
@@ -104,12 +122,15 @@ class TimescapeLanServer(
             session.method == NanoHTTPD.Method.GET && path == "/export" -> {
                 val token = session.parameters["token"]?.firstOrNull().orEmpty()
                 if (token.isBlank() || !tokens.containsKey(token)) {
+                    Log.w(LOG_TAG, "Export denied due to invalid token")
                     jsonError(NanoHTTPD.Response.Status.FORBIDDEN, "invalid_token")
                 } else {
                     val payload = runCatching { exportPayloadProvider() }
                         .getOrElse {
+                            Log.e(LOG_TAG, "Export payload provider failed", it)
                             return jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR, "export_failed")
                         }
+                    Log.d(LOG_TAG, "Export success: payloadLength=${payload.length}, tokenSessionId=${tokens[token]}")
                     NanoHTTPD.newFixedLengthResponse(
                         NanoHTTPD.Response.Status.OK,
                         "application/json; charset=utf-8",
@@ -118,7 +139,10 @@ class TimescapeLanServer(
                 }
             }
 
-            else -> jsonError(NanoHTTPD.Response.Status.NOT_FOUND, "not_found")
+            else -> {
+                Log.w(LOG_TAG, "Unhandled route: method=${session.method}, path=$path")
+                jsonError(NanoHTTPD.Response.Status.NOT_FOUND, "not_found")
+            }
         }
     }
 
@@ -128,6 +152,7 @@ class TimescapeLanServer(
         val token = "tok_${UUID.randomUUID().toString().replace("-", "")}" // keep URL safe
         sessions[sessionId] = state.copy(status = SessionStatus.APPROVED, token = token)
         tokens[token] = sessionId
+        Log.d(LOG_TAG, "Session approved: sessionId=$sessionId, tokenPrefix=${token.take(12)}")
     }
 
     private fun readPostBody(session: NanoHTTPD.IHTTPSession): String {
@@ -143,27 +168,44 @@ class TimescapeLanServer(
     private fun registerNsd() {
         val manager = nsdManager ?: return
         if (port <= 0) return
+        val advertisedPort = this@TimescapeLanServer.port
         val serviceInfo = NsdServiceInfo().apply {
             serviceName = DEFAULT_SERVICE_NAME
             serviceType = SERVICE_TYPE
-            setPort(port)
+            port = advertisedPort
         }
         val listener = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) = Unit
-            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
-            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                Log.d(LOG_TAG, "NSD service registered: ${serviceInfo.serviceName} ${serviceInfo.serviceType}:${serviceInfo.port}")
+            }
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                Log.w(LOG_TAG, "NSD registration failed: code=$errorCode")
+            }
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                Log.d(LOG_TAG, "NSD service unregistered: ${serviceInfo.serviceName}")
+            }
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                Log.w(LOG_TAG, "NSD unregistration failed: code=$errorCode")
+            }
         }
         registrationListener = listener
         runCatching {
             manager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, listener)
+            Log.d(LOG_TAG, "NSD registration requested for ${serviceInfo.serviceType}:${serviceInfo.port}")
+        }.onFailure {
+            Log.e(LOG_TAG, "NSD registration threw an exception (advertisedPort=$advertisedPort)", it)
         }
     }
 
     private fun unregisterNsd() {
         val manager = nsdManager ?: return
         val listener = registrationListener ?: return
-        runCatching { manager.unregisterService(listener) }
+        runCatching {
+            manager.unregisterService(listener)
+            Log.d(LOG_TAG, "NSD unregistration requested")
+        }.onFailure {
+            Log.w(LOG_TAG, "NSD unregistration threw an exception", it)
+        }
         registrationListener = null
     }
 
@@ -188,6 +230,7 @@ class TimescapeLanServer(
     private enum class SessionStatus { PENDING, APPROVED, DENIED }
 
     companion object {
+        private const val LOG_TAG = "WatchSyncLanServer"
         private const val SERVICE_TYPE = "_timescape._tcp"
         private const val DEFAULT_SERVICE_NAME = "Timescape"
         private const val AUTO_APPROVE_DELAY_MS = 800L
