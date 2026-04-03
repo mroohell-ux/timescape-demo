@@ -433,10 +433,24 @@ class MainActivity : AppCompatActivity() {
                 val flow = flows.firstOrNull { it.id == flowId }
                 if (flow != null) {
                     exportSingleFlow(flow, uri, fileName)
-                } else snackbar(getString(R.string.snackbar_flow_not_found_for_export))
+                } else {
+                    Log.w(
+                        EXPORT_LOG_TAG,
+                        "Flow export failed: selected flow not found (flowId=$flowId, fileName=$fileName)"
+                    )
+                    snackbar(getString(R.string.snackbar_flow_not_found_for_export))
+                }
             } else if (uri == null) {
+                Log.d(
+                    EXPORT_LOG_TAG,
+                    "Flow export cancelled: CreateDocument returned null uri (flowId=$flowId, fileName=$fileName)"
+                )
                 snackbar(getString(R.string.snackbar_export_cancelled))
             } else {
+                Log.w(
+                    EXPORT_LOG_TAG,
+                    "Flow export failed: missing pending flow id while uri was returned (uri=$uri, fileName=$fileName)"
+                )
                 snackbar(getString(R.string.snackbar_flow_not_found_for_export))
             }
         }
@@ -4819,12 +4833,14 @@ class MainActivity : AppCompatActivity() {
     private fun launchExportCurrentFlow() {
         val flow = currentFlow()
         if (flow == null) {
+            Log.w(EXPORT_LOG_TAG, "Flow export failed: no current flow selected")
             snackbar(getString(R.string.snackbar_no_flow_to_export))
             return
         }
         pendingExportFlowId = flow.id
         val defaultName = buildExportFileName(flow.name)
         pendingExportFileName = defaultName
+        Log.d(EXPORT_LOG_TAG, "Launching flow export picker for flowId=${flow.id}, fileName=$defaultName")
         exportFlowLauncher.launch(defaultName)
     }
 
@@ -4957,6 +4973,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun exportSingleFlow(flow: CardFlow, uri: Uri, fileName: String) {
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Starting single flow export for flowId=${flow.id}, flowName=${flow.name}, uri=$uri, fileName=$fileName"
+        )
         exportFlows(uri, listOf(flow), fileName)
     }
 
@@ -4993,6 +5013,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun exportFlows(uri: Uri, flowsToExport: List<CardFlow>, fileName: String) {
         if (flowsToExport.isEmpty()) {
+            Log.w(EXPORT_LOG_TAG, "Export aborted: requested flow list is empty (uri=$uri, fileName=$fileName)")
             snackbar(getString(R.string.snackbar_no_flow_to_export))
             return
         }
@@ -5013,6 +5034,11 @@ class MainActivity : AppCompatActivity() {
                     exportPayload
                 }
             }.getOrElse {
+                Log.e(
+                    EXPORT_LOG_TAG,
+                    "Flow export failed while writing payload (uri=$uri, fileName=$fileName, flowCount=${flowsToExport.size})",
+                    it
+                )
                 snackbar(getString(R.string.snackbar_export_failed))
                 return@launch
             }
