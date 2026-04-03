@@ -5195,8 +5195,9 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
             )
         }
-        logExportJson(root)
-        return ExportPayload(root.toString(2), flowsToExport.size, cardCount, warnings)
+        val exportJson = root.toString()
+        logExportJson(exportJson)
+        return ExportPayload(exportJson, flowsToExport.size, cardCount, warnings)
     }
 
     private fun buildStickyNotesExportPayload(flowsToExport: List<CardFlow>): StickyNotesExportPayload {
@@ -5369,11 +5370,19 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun logExportJson(root: JSONObject) {
-        val formatted = root.toString(2)
-        val truncated =
-            if (formatted.length > MAX_LOG_JSON_LENGTH) formatted.take(MAX_LOG_JSON_LENGTH) + "…" else formatted
-        Log.d(EXPORT_LOG_TAG, "Export payload JSON (${formatted.length} chars):\n$truncated")
+    private fun logExportJson(payload: String) {
+        if (payload.length > MAX_LOG_JSON_LENGTH) {
+            Log.d(
+                EXPORT_LOG_TAG,
+                "Export payload JSON is large (${payload.length} chars); logging first $MAX_LOG_JSON_LENGTH chars only"
+            )
+        }
+        val truncated = if (payload.length > MAX_LOG_JSON_LENGTH) {
+            payload.take(MAX_LOG_JSON_LENGTH) + "…"
+        } else {
+            payload
+        }
+        Log.d(EXPORT_LOG_TAG, "Export payload JSON (${payload.length} chars):\n$truncated")
     }
 
     private fun logImportJson(root: JSONObject) {
