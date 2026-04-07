@@ -5026,6 +5026,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val payload = withContext(Dispatchers.IO) {
                 runCatching {
+                    val exportStartedAt = SystemClock.elapsedRealtime()
+                    val inputCardCount = flowsToExport.sumOf { flow -> flow.cards.size }
+                    Log.d(
+                        EXPORT_LOG_TAG,
+                        "Starting flow export (uri=$uri, fileName=$fileName, flows=${flowsToExport.size}, cards=$inputCardCount)"
+                    )
                     val exportPayload = contentResolver.openOutputStream(uri, "w")?.use { stream ->
                         OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
                             JsonWriter(writer).use { jsonWriter ->
@@ -5036,7 +5042,7 @@ class MainActivity : AppCompatActivity() {
                     } ?: error("Unable to open output stream")
                     Log.d(
                         EXPORT_LOG_TAG,
-                        "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards"
+                        "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards in ${SystemClock.elapsedRealtime() - exportStartedAt}ms"
                     )
                     exportPayload
                 }
@@ -5113,6 +5119,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildExportPayload(writer: JsonWriter, flowsToExport: List<CardFlow>): ExportPayload {
+        val startedAt = SystemClock.elapsedRealtime()
         writer.beginObject()
         writer.name("version").value(NOTES_EXPORT_VERSION.toLong())
         writer.name("generatedAt").value(System.currentTimeMillis())
@@ -5123,6 +5130,7 @@ class MainActivity : AppCompatActivity() {
         val warnings = mutableListOf<String>()
         var cardCount = 0
         flowsToExport.forEachIndexed { flowIndex, flow ->
+            val flowStartedAt = SystemClock.elapsedRealtime()
             writer.beginObject()
             writer.name("name").value(flow.name)
             writer.name("cards")
@@ -5181,6 +5189,10 @@ class MainActivity : AppCompatActivity() {
             }
             writer.endArray()
             writer.endObject()
+            Log.d(
+                EXPORT_LOG_TAG,
+                "Exported flow ${flowIndex + 1}/${flowsToExport.size} (${flow.name}) with ${cardsForExport.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
+            )
         }
         writer.endArray()
         duplicateImageBacks.forEach { (original, matches) ->
@@ -5194,6 +5206,10 @@ class MainActivity : AppCompatActivity() {
             Log.w(EXPORT_LOG_TAG, "Export generated ${warnings.size} warning(s)")
         }
         writer.endObject()
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Finished building export payload for ${flowsToExport.size} flow(s), $cardCount card(s) in ${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
         return ExportPayload(flowsToExport.size, cardCount, warnings)
     }
 
@@ -5565,6 +5581,12 @@ class MainActivity : AppCompatActivity() {
         val warnings = mutableListOf<String>()
         val imageBackPayloads = mutableMapOf<String, String>()
         return try {
+            val startedAt = SystemClock.elapsedRealtime()
+            val sourceSizeBytes = contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+            Log.d(
+                IMPORT_LOG_TAG,
+                "Starting import parse (uri=$uri, sizeBytes=$sourceSizeBytes)"
+            )
             val importedFlows = mutableListOf<ImportedFlow>()
             var totalCards = 0
             contentResolver.openInputStream(uri)?.use { stream ->
@@ -5576,6 +5598,7 @@ class MainActivity : AppCompatActivity() {
                             "flows" -> {
                                 reader.beginArray()
                                 while (reader.hasNext()) {
+                                    val flowStartedAt = SystemClock.elapsedRealtime()
                                     val flowObj = readJsonObject(reader)
                                     val flowName = flowObj.optString("name")
                                     val cardsArray = flowObj.optJSONArray("cards") ?: JSONArray()
@@ -5627,6 +5650,10 @@ class MainActivity : AppCompatActivity() {
                                     }
                                     totalCards += cards.size
                                     importedFlows += ImportedFlow(flowName, cards)
+                                    Log.d(
+                                        IMPORT_LOG_TAG,
+                                        "Parsed flow ${flowIndex + 1} (${flowName}) with ${cards.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
+                                    )
                                     flowIndex++
                                 }
                                 reader.endArray()
@@ -5639,7 +5666,7 @@ class MainActivity : AppCompatActivity() {
             } ?: throw IllegalStateException("Unable to open input stream")
             Log.d(
                 IMPORT_LOG_TAG,
-                "Parsed import payload with ${importedFlows.size} flows and $totalCards cards"
+                "Parsed import payload with ${importedFlows.size} flows and $totalCards cards in ${SystemClock.elapsedRealtime() - startedAt}ms"
             )
             ImportPayload(importedFlows, totalCards, warnings)
         } catch (e: Exception) {
