@@ -106,6 +106,9 @@
     <string name="snackbar_import_cancelled">Import cancelled</string>
     <string name="snackbar_export_success">%1$s across %2$s.</string>
     <string name="snackbar_import_success">Imported %1$s across %2$s.</string>
+    <string name="export_progress_cards_message">Exported cards %1$d/%2$d</string>
+    <string name="import_progress_counting_message">Counting cards for import…</string>
+    <string name="import_progress_cards_message">Imported cards %1$d/%2$d</string>
     <string name="dialog_import_error_title">Import failed</string>
     <string name="dialog_import_error_message">We couldnt finish the import because: %1$s</string>
     <string name="dialog_import_warnings_title">Import warnings</string>

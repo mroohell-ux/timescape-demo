@@ -32,6 +32,9 @@ import android.provider.DocumentsContract
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.util.JsonReader
+import android.util.JsonToken
+import android.util.JsonWriter
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -48,7 +51,9 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.PopupWindow
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
@@ -103,6 +108,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
@@ -4753,7 +4759,8 @@ class MainActivity : AppCompatActivity() {
             isFavorite = obj.optBoolean("isFavorite", false),
             isHidden = obj.optBoolean("isHidden", false),
             isPinned = obj.optBoolean("isPinned", false),
-            watchProgressMs = obj.optLong("watchProgressMs", 0L)
+            watchProgressMs = obj.optLong("watchProgressMs", 0L),
+            isPlaying = obj.optBoolean("isPlaying", true)
         )
     }
 
@@ -4828,6 +4835,55 @@ class MainActivity : AppCompatActivity() {
         if (flowBar.isVisible) snack.anchorView = flowBar
         snack.setAction(actionText) { action() }
         snack.show()
+    }
+
+    private fun showOperationProgressDialog(
+        title: String,
+        message: String,
+        indeterminate: Boolean
+    ): OperationProgressDialog {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * resources.displayMetrics.density).roundToInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val messageView = TextView(this).apply {
+            text = message
+            setPadding(0, 0, 0, (12 * resources.displayMetrics.density).roundToInt())
+        }
+        val progressBar = ProgressBar(
+            this,
+            null,
+            if (indeterminate) android.R.attr.progressBarStyle else android.R.attr.progressBarStyleHorizontal
+        ).apply {
+            isIndeterminate = indeterminate
+            max = 100
+        }
+        container.addView(messageView)
+        container.addView(progressBar)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(container)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        return OperationProgressDialog(dialog, progressBar, messageView)
+    }
+
+    private fun updateOperationProgress(
+        progress: OperationProgressDialog,
+        message: String,
+        current: Int,
+        total: Int?
+    ) {
+        progress.messageView.text = message
+        if (total == null || total <= 0) {
+            progress.progressBar.isIndeterminate = true
+            return
+        }
+        progress.progressBar.isIndeterminate = false
+        progress.progressBar.max = total
+        progress.progressBar.progress = current.coerceIn(0, total)
     }
 
     private fun launchExportCurrentFlow() {
@@ -5019,81 +5075,89 @@ class MainActivity : AppCompatActivity() {
         }
         captureVisibleFlowStates()
         lifecycleScope.launch {
-            val payload = withContext(Dispatchers.IO) {
-                runCatching {
-                    val exportPayload = buildExportPayload(flowsToExport)
-                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
-                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            writer.write(exportPayload.json)
-                        }
-                    } ?: error("Unable to open output stream")
-                    Log.d(
+            val progressUi = showOperationProgressDialog(
+                title = getString(R.string.menu_export_flow),
+                message = getString(
+                    R.string.export_progress_cards_message,
+                    0,
+                    flowsToExport.sumOf { it.cards.size }
+                ),
+                indeterminate = false
+            )
+            val payload = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val exportStartedAt = SystemClock.elapsedRealtime()
+                        val inputCardCount = flowsToExport.sumOf { flow -> flow.cards.size }
+                        Log.d(
+                            EXPORT_LOG_TAG,
+                            "Starting flow export (uri=$uri, fileName=$fileName, flows=${flowsToExport.size}, cards=$inputCardCount)"
+                        )
+                        val exportPayload = contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                            OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
+                                JsonWriter(writer).use { jsonWriter ->
+                                    jsonWriter.setIndent("  ")
+                                    buildExportPayload(jsonWriter, flowsToExport) { done, total ->
+                                        runOnUiThread {
+                                            updateOperationProgress(
+                                                progressUi,
+                                                message = getString(R.string.export_progress_cards_message, done, total),
+                                                current = done,
+                                                total = total
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } ?: error("Unable to open output stream")
+                        Log.d(
+                            EXPORT_LOG_TAG,
+                            "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards in ${SystemClock.elapsedRealtime() - exportStartedAt}ms"
+                        )
+                        exportPayload
+                    }
+                }.getOrElse {
+                    Log.e(
                         EXPORT_LOG_TAG,
-                        "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards"
+                        "Flow export failed while writing payload (uri=$uri, fileName=$fileName, flowCount=${flowsToExport.size})",
+                        it
                     )
-                    exportPayload
+                    snackbar(getString(R.string.snackbar_export_failed))
+                    return@launch
                 }
-            }.getOrElse {
-                Log.e(
-                    EXPORT_LOG_TAG,
-                    "Flow export failed while writing payload (uri=$uri, fileName=$fileName, flowCount=${flowsToExport.size})",
-                    it
-                )
-                snackbar(getString(R.string.snackbar_export_failed))
-                return@launch
+            } finally {
+                progressUi.dismiss()
             }
             val notesText = resources.getQuantityString(R.plurals.count_notes, payload.cardCount, payload.cardCount)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
             if (payload.warnings.isNotEmpty()) {
                 showExportWarnings(payload.warnings) {
-                    shareExportPayload(payload, fileName)
+                    shareExportPayload(uri)
                 }
                 snackbarWithAction(
                     getString(R.string.snackbar_export_success_with_warnings, notesText, flowsText),
                     getString(R.string.snackbar_action_share)
                 ) {
-                    shareExportPayload(payload, fileName)
+                    shareExportPayload(uri)
                 }
             } else {
                 snackbarWithAction(
                     getString(R.string.snackbar_export_success, notesText, flowsText),
                     getString(R.string.snackbar_action_share)
                 ) {
-                    shareExportPayload(payload, fileName)
+                    shareExportPayload(uri)
                 }
             }
         }
     }
 
-    private fun shareExportPayload(payload: ExportPayload, fileName: String) {
-        lifecycleScope.launch {
-            val exportUri = withContext(Dispatchers.IO) {
-                runCatching {
-                    val exportDir = File(cacheDir, "exports").apply { mkdirs() }
-                    val exportFile = File(exportDir, fileName)
-                    FileOutputStream(exportFile).use { stream ->
-                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            writer.write(payload.json)
-                        }
-                    }
-                    FileProvider.getUriForFile(
-                        this@MainActivity,
-                        "${applicationContext.packageName}.fileprovider",
-                        exportFile
-                    )
-                }.getOrNull()
-            }
-            if (exportUri == null) {
-                snackbar(getString(R.string.snackbar_share_failed))
-                return@launch
-            }
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/json"
-                putExtra(Intent.EXTRA_STREAM, exportUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(shareIntent, getString(R.string.share_export_chooser_title)))
+    private fun shareExportPayload(exportUri: Uri) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_STREAM, exportUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        startActivity(Intent.createChooser(shareIntent, getString(R.string.share_export_chooser_title)))
     }
 
     private fun shareStickyNotesExportPayload(payload: StickyNotesExportPayload, fileName: String) {
@@ -5127,40 +5191,59 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildExportPayload(flowsToExport: List<CardFlow>): ExportPayload {
-        val root = JSONObject()
-        root.put("version", NOTES_EXPORT_VERSION)
-        root.put("generatedAt", System.currentTimeMillis())
-        val flowsArray = JSONArray()
-        val warnings = mutableListOf<String>()
+    private fun buildExportPayload(
+        writer: JsonWriter,
+        flowsToExport: List<CardFlow>,
+        onCardProgress: ((done: Int, total: Int) -> Unit)? = null
+    ): ExportPayload {
+        val startedAt = SystemClock.elapsedRealtime()
+        writer.beginObject()
+        writer.name("version").value(NOTES_EXPORT_VERSION.toLong())
+        writer.name("generatedAt").value(System.currentTimeMillis())
+        writer.name("flows")
+        writer.beginArray()
         val imageBackPayloads = mutableMapOf<String, String>()
         val duplicateImageBacks = mutableMapOf<String, MutableList<String>>()
+        val warnings = mutableListOf<String>()
         var cardCount = 0
+        val totalCards = flowsToExport.sumOf { flow ->
+            val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
+            (shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards).size
+        }
         flowsToExport.forEachIndexed { flowIndex, flow ->
-            val flowObj = JSONObject()
-            flowObj.put("name", flow.name)
-            val cardsArray = JSONArray()
+            val flowStartedAt = SystemClock.elapsedRealtime()
+            writer.beginObject()
+            writer.name("name").value(flow.name)
+            writer.name("cards")
+            writer.beginArray()
             val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
             val cardsForExport = shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards
             cardsForExport.forEachIndexed { cardIndex, card ->
-                val cardObj = JSONObject()
-                cardObj.put("title", card.title)
-                cardObj.put("snippet", card.snippet)
-                card.backSnippet?.let { cardObj.put("backSnippet", it) }
-                card.recognizedText?.let { cardObj.put("recognizedText", it) }
-                cardObj.put("textColor", colorToString(card.textColor))
-                cardObj.put("updatedAt", card.updatedAt)
+                writer.beginObject()
+                writer.name("title").value(card.title)
+                writer.name("snippet").value(card.snippet)
+                card.backSnippet?.let { writer.name("backSnippet").value(it) }
+                card.recognizedText?.let { writer.name("recognizedText").value(it) }
+                writer.name("textColor").value(colorToString(card.textColor))
+                writer.name("updatedAt").value(card.updatedAt)
                 val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
                 card.handwriting?.let { handwriting ->
-                    handwritingToJson(handwriting, warnings, cardLabel)?.let { cardObj.put("handwriting", it) }
+                    handwritingToJson(handwriting, warnings, cardLabel)?.let {
+                        writer.name("handwriting")
+                        writeJsonValue(writer, it)
+                    }
                 }
                 card.image?.let { image ->
-                    imageToExportJson(image)?.let { cardObj.put("image", it) }
+                    imageToExportJson(image)?.let {
+                        writer.name("image")
+                        writeJsonValue(writer, it)
+                    }
                 }
                 card.imageHandwriting?.let { back ->
                     val missingBackWarning = getString(R.string.debug_export_missing_image_back, cardLabel)
                     handwritingSideToExportPayload(back, warnings, missingBackWarning)?.let { export ->
-                        cardObj.put("imageHandwriting", export.json)
+                        writer.name("imageHandwriting")
+                        writeJsonValue(writer, export.json)
                         logExportedImageBack(cardLabel, export.data)
                         val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
                         if (duplicate != null && duplicate != cardLabel) {
@@ -5169,25 +5252,31 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 if (card.stickyNotes.isNotEmpty()) {
-                    val notesArray = JSONArray()
+                    writer.name("stickyNotes")
+                    writer.beginArray()
                     card.stickyNotes.forEach { note ->
-                        notesArray.put(JSONObject().apply {
-                            put("id", note.id)
-                            put("front", note.frontText)
-                            put("back", note.backText)
-                            put("color", colorToString(note.color))
-                            put("rotation", note.rotation.toDouble())
-                        })
+                        writer.beginObject()
+                        writer.name("id").value(note.id)
+                        writer.name("front").value(note.frontText)
+                        writer.name("back").value(note.backText)
+                        writer.name("color").value(colorToString(note.color))
+                        writer.name("rotation").value(note.rotation.toDouble())
+                        writer.endObject()
                     }
-                    cardObj.put("stickyNotes", notesArray)
+                    writer.endArray()
                 }
-                cardsArray.put(cardObj)
+                writer.endObject()
                 cardCount++
+                onCardProgress?.invoke(cardCount, totalCards)
             }
-            flowObj.put("cards", cardsArray)
-            flowsArray.put(flowObj)
+            writer.endArray()
+            writer.endObject()
+            Log.d(
+                EXPORT_LOG_TAG,
+                "Exported flow ${flowIndex + 1}/${flowsToExport.size} (${flow.name}) with ${cardsForExport.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
+            )
         }
-        root.put("flows", flowsArray)
+        writer.endArray()
         duplicateImageBacks.forEach { (original, matches) ->
             val matchList = matches.joinToString(separator = "\n")
             addExportWarning(
@@ -5195,9 +5284,15 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
             )
         }
-        val exportJson = root.toString()
-        logExportJson(exportJson)
-        return ExportPayload(exportJson, flowsToExport.size, cardCount, warnings)
+        if (warnings.isNotEmpty()) {
+            Log.w(EXPORT_LOG_TAG, "Export generated ${warnings.size} warning(s)")
+        }
+        writer.endObject()
+        Log.d(
+            EXPORT_LOG_TAG,
+            "Finished building export payload for ${flowsToExport.size} flow(s), $cardCount card(s) in ${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
+        return ExportPayload(flowsToExport.size, cardCount, warnings)
     }
 
     private fun buildStickyNotesExportPayload(flowsToExport: List<CardFlow>): StickyNotesExportPayload {
@@ -5234,6 +5329,37 @@ class MainActivity : AppCompatActivity() {
         root.put("totalStickyNotes", stickyCount)
         root.put("totalFlows", flowsToExport.size)
         return StickyNotesExportPayload(root.toString(2), stickyCount)
+    }
+
+    private fun writeJsonValue(writer: JsonWriter, value: Any?) {
+        when (value) {
+            null, JSONObject.NULL -> writer.nullValue()
+            is JSONObject -> {
+                writer.beginObject()
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    writer.name(key)
+                    writeJsonValue(writer, value.opt(key))
+                }
+                writer.endObject()
+            }
+            is JSONArray -> {
+                writer.beginArray()
+                for (index in 0 until value.length()) {
+                    writeJsonValue(writer, value.opt(index))
+                }
+                writer.endArray()
+            }
+            is String -> writer.value(value)
+            is Boolean -> writer.value(value)
+            is Int -> writer.value(value.toLong())
+            is Long -> writer.value(value)
+            is Float -> writer.value(value.toDouble())
+            is Double -> writer.value(value)
+            is Number -> writer.value(value.toDouble())
+            else -> writer.value(value.toString())
+        }
     }
 
     private fun handwritingOptionsToJson(options: HandwritingOptions): JSONObject = JSONObject().apply {
@@ -5336,15 +5462,17 @@ class MainActivity : AppCompatActivity() {
         runCatching { openImageUriStream(uri)?.use { it.readBytes() } }.getOrNull()
 
     private fun logExportedImageBack(cardLabel: String, data: String) {
-        Log.d(
+        if (!Log.isLoggable(EXPORT_LOG_TAG, Log.VERBOSE)) return
+        Log.v(
             EXPORT_LOG_TAG,
             "Exported image back handwriting for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
         )
     }
 
     private fun logExportedHandwritingBack(cardLabel: String, backObj: JSONObject) {
+        if (!Log.isLoggable(EXPORT_LOG_TAG, Log.VERBOSE)) return
         val data = backObj.optString("data")
-        Log.d(
+        Log.v(
             EXPORT_LOG_TAG,
             "Exported handwriting back for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
         )
@@ -5469,12 +5597,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun importNotes(uri: Uri) {
         lifecycleScope.launch {
-            val payload = withContext(Dispatchers.IO) {
-                runCatching { readImportPayload(uri) }
-            }.getOrElse {
-                showImportErrorDialog(it)
-                snackbar(getString(R.string.snackbar_import_failed))
-                return@launch
+            val progressUi = showOperationProgressDialog(
+                title = getString(R.string.drawer_import_notes),
+                message = getString(R.string.import_progress_counting_message),
+                indeterminate = false
+            )
+            val payload = try {
+                withContext(Dispatchers.IO) {
+                    val totalCards = countImportCards(uri)
+                    runOnUiThread {
+                        updateOperationProgress(
+                            progressUi,
+                            message = getString(R.string.import_progress_cards_message, 0, totalCards),
+                            current = 0,
+                            total = totalCards
+                        )
+                    }
+                    runCatching {
+                        readImportPayload(uri, totalCards) { done, total ->
+                            runOnUiThread {
+                                updateOperationProgress(
+                                    progressUi,
+                                    message = getString(R.string.import_progress_cards_message, done, total),
+                                    current = done,
+                                    total = total
+                                )
+                            }
+                        }
+                    }
+                }.getOrElse {
+                    showImportErrorDialog(it)
+                    snackbar(getString(R.string.snackbar_import_failed))
+                    return@launch
+                }
+            } finally {
+                progressUi.dismiss()
             }
             if (payload.flows.isEmpty()) {
                 snackbar(getString(R.string.snackbar_import_empty))
@@ -5530,77 +5687,106 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun readImportPayload(uri: Uri): ImportPayload {
+    private fun readImportPayload(
+        uri: Uri,
+        totalCards: Int,
+        onCardProgress: ((done: Int, total: Int) -> Unit)? = null
+    ): ImportPayload {
         val createdFiles = mutableListOf<CreatedFile>()
         val warnings = mutableListOf<String>()
         val imageBackPayloads = mutableMapOf<String, String>()
         return try {
-            val jsonText = contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { reader ->
-                reader.readText()
-            } ?: throw IllegalStateException("Unable to open input stream")
-            val root = JSONObject(jsonText)
-            logImportJson(root)
-            val flowsArray = root.optJSONArray("flows") ?: JSONArray()
-            val importedFlows = mutableListOf<ImportedFlow>()
-            var totalCards = 0
-            for (i in 0 until flowsArray.length()) {
-                val flowObj = flowsArray.optJSONObject(i) ?: continue
-                val flowName = flowObj.optString("name")
-                val cardsArray = flowObj.optJSONArray("cards") ?: JSONArray()
-                val cards = mutableListOf<ImportedCard>()
-                for (j in 0 until cardsArray.length()) {
-                    val cardObj = cardsArray.optJSONObject(j) ?: continue
-                    val title = cardObj.optString("title")
-                    val snippet = cardObj.optString("snippet")
-                    val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
-                    val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
-                    val cardLabel = buildImportCardLabel(flowName, i, j, title)
-                    val handwriting = decodeHandwritingFromExport(
-                        cardObj.optJSONObject("handwriting"),
-                        createdFiles,
-                        warnings,
-                        cardLabel
-                    )
-                    val image = decodeImageFromExport(
-                        cardObj.optJSONObject("image"),
-                        createdFiles,
-                        warnings,
-                        cardLabel
-                    )
-                    val imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
-                        decodeHandwritingSideFromExport(
-                            it,
-                            createdFiles,
-                            warnings,
-                            cardLabel,
-                            isImageBack = true,
-                            duplicateTracker = imageBackPayloads
-                        )
-                    }
-                    val stickyNotes = parseStickyNotes(cardObj)
-                    val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
-                    val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
-                    cards += ImportedCard(
-                        title,
-                        snippet,
-                        backSnippet,
-                        updatedAt,
-                        textColor,
-                        handwriting,
-                        image,
-                        imageHandwriting,
-                        recognizedText,
-                        stickyNotes
-                    )
-                }
-                totalCards += cards.size
-                importedFlows += ImportedFlow(flowName, cards)
-            }
+            val startedAt = SystemClock.elapsedRealtime()
+            val sourceSizeBytes = contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
             Log.d(
                 IMPORT_LOG_TAG,
-                "Parsed import payload with ${importedFlows.size} flows and $totalCards cards"
+                "Starting import parse (uri=$uri, sizeBytes=$sourceSizeBytes)"
             )
-            ImportPayload(importedFlows, totalCards, warnings)
+            val importedFlows = mutableListOf<ImportedFlow>()
+            var importedCardTotal = 0
+            var parsedCards = 0
+            contentResolver.openInputStream(uri)?.use { stream ->
+                JsonReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
+                    reader.beginObject()
+                    var flowIndex = 0
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "flows" -> {
+                                reader.beginArray()
+                                while (reader.hasNext()) {
+                                    val flowStartedAt = SystemClock.elapsedRealtime()
+                                    val flowObj = readJsonObject(reader)
+                                    val flowName = flowObj.optString("name")
+                                    val cardsArray = flowObj.optJSONArray("cards") ?: JSONArray()
+                                    val cards = mutableListOf<ImportedCard>()
+                                    for (cardIndex in 0 until cardsArray.length()) {
+                                        val cardObj = cardsArray.optJSONObject(cardIndex) ?: continue
+                                        val title = cardObj.optString("title")
+                                        val snippet = cardObj.optString("snippet")
+                                        val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
+                                        val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
+                                        val cardLabel = buildImportCardLabel(flowName, flowIndex, cardIndex, title)
+                                        val handwriting = decodeHandwritingFromExport(
+                                            cardObj.optJSONObject("handwriting"),
+                                            createdFiles,
+                                            warnings,
+                                            cardLabel
+                                        )
+                                        val image = decodeImageFromExport(
+                                            cardObj.optJSONObject("image"),
+                                            createdFiles,
+                                            warnings,
+                                            cardLabel
+                                        )
+                                        val imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
+                                            decodeHandwritingSideFromExport(
+                                                it,
+                                                createdFiles,
+                                                warnings,
+                                                cardLabel,
+                                                isImageBack = true,
+                                                duplicateTracker = imageBackPayloads
+                                            )
+                                        }
+                                        val stickyNotes = parseStickyNotes(cardObj)
+                                        val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
+                                        val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
+                                        cards += ImportedCard(
+                                            title,
+                                            snippet,
+                                            backSnippet,
+                                            updatedAt,
+                                            textColor,
+                                            handwriting,
+                                            image,
+                                            imageHandwriting,
+                                            recognizedText,
+                                            stickyNotes
+                                        )
+                                        parsedCards++
+                                        onCardProgress?.invoke(parsedCards, totalCards)
+                                    }
+                                    importedCardTotal += cards.size
+                                    importedFlows += ImportedFlow(flowName, cards)
+                                    Log.d(
+                                        IMPORT_LOG_TAG,
+                                        "Parsed flow ${flowIndex + 1} (${flowName}) with ${cards.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
+                                    )
+                                    flowIndex++
+                                }
+                                reader.endArray()
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+            } ?: throw IllegalStateException("Unable to open input stream")
+            Log.d(
+                IMPORT_LOG_TAG,
+                "Parsed import payload with ${importedFlows.size} flows and $importedCardTotal cards in ${SystemClock.elapsedRealtime() - startedAt}ms"
+            )
+            ImportPayload(importedFlows, importedCardTotal, warnings)
         } catch (e: Exception) {
             createdFiles.forEach { created ->
                 when (created) {
@@ -5611,6 +5797,84 @@ class MainActivity : AppCompatActivity() {
             throw e
         }
     }
+
+    private fun countImportCards(uri: Uri): Int {
+        var count = 0
+        contentResolver.openInputStream(uri)?.use { stream ->
+            JsonReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    when (reader.nextName()) {
+                        "flows" -> {
+                            reader.beginArray()
+                            while (reader.hasNext()) {
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "cards" -> {
+                                            reader.beginArray()
+                                            while (reader.hasNext()) {
+                                                reader.skipValue()
+                                                count++
+                                            }
+                                            reader.endArray()
+                                        }
+                                        else -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                            }
+                            reader.endArray()
+                        }
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+            }
+        }
+        return count
+    }
+
+    private fun readJsonObject(reader: JsonReader): JSONObject {
+        val result = JSONObject()
+        reader.beginObject()
+        while (reader.hasNext()) {
+            val key = reader.nextName()
+            result.put(key, readJsonValue(reader))
+        }
+        reader.endObject()
+        return result
+    }
+
+    private fun readJsonArray(reader: JsonReader): JSONArray {
+        val result = JSONArray()
+        reader.beginArray()
+        while (reader.hasNext()) {
+            result.put(readJsonValue(reader))
+        }
+        reader.endArray()
+        return result
+    }
+
+    private fun readJsonValue(reader: JsonReader): Any? =
+        when (reader.peek()) {
+            JsonToken.BEGIN_OBJECT -> readJsonObject(reader)
+            JsonToken.BEGIN_ARRAY -> readJsonArray(reader)
+            JsonToken.STRING -> reader.nextString()
+            JsonToken.BOOLEAN -> reader.nextBoolean()
+            JsonToken.NUMBER -> {
+                val asString = reader.nextString()
+                asString.toLongOrNull() ?: asString.toDoubleOrNull() ?: asString
+            }
+            JsonToken.NULL -> {
+                reader.nextNull()
+                JSONObject.NULL
+            }
+            else -> {
+                reader.skipValue()
+                JSONObject.NULL
+            }
+        }
 
     private fun decodeHandwritingFromExport(
         handwritingObj: JSONObject?,
@@ -5656,7 +5920,8 @@ class MainActivity : AppCompatActivity() {
             addImportWarning(warnings, getString(R.string.debug_import_handwriting_base64, target))
             return null
         }
-        if (!validateHandwritingPayload(bytes, options)) {
+        val decodedSize = decodeHandwritingDimensions(bytes)
+        if (decodedSize == null) {
             addImportWarning(
                 warnings,
                 getString(
@@ -5668,13 +5933,24 @@ class MainActivity : AppCompatActivity() {
             )
             return null
         }
-        val filename = "handwriting_${System.currentTimeMillis()}_${UUID.randomUUID()}.${options.format.extension}"
+        val resolvedOptions = if (
+            decodedSize.first != options.canvasWidth || decodedSize.second != options.canvasHeight
+        ) {
+            Log.w(
+                IMPORT_LOG_TAG,
+                "Handwriting canvas mismatch for $target: expected=${options.canvasWidth}x${options.canvasHeight}, actual=${decodedSize.first}x${decodedSize.second}; importing using actual size"
+            )
+            options.copy(canvasWidth = decodedSize.first, canvasHeight = decodedSize.second)
+        } else {
+            options
+        }
+        val filename = "handwriting_${System.currentTimeMillis()}_${UUID.randomUUID()}.${resolvedOptions.format.extension}"
         //val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Handwriting(filename)
-            logImportedHandwriting(target, data, options, isImageBack)
-            HandwritingSide(filename, options)
+            logImportedHandwriting(target, data, resolvedOptions, isImageBack)
+            HandwritingSide(filename, resolvedOptions)
         }.getOrElse {
             deleteFile(filename)
             addImportWarning(warnings, getString(R.string.debug_import_handwriting_save, target, it.localizedMessage))
@@ -5682,13 +5958,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun validateHandwritingPayload(bytes: ByteArray, options: HandwritingOptions): Boolean {
+    private fun decodeHandwritingDimensions(bytes: ByteArray): Pair<Int, Int>? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val minEdge = 2
-        val hasValidSize = bounds.outWidth >= minEdge && bounds.outHeight >= minEdge
-        val matchesCanvas = bounds.outWidth == options.canvasWidth && bounds.outHeight == options.canvasHeight
-        return hasValidSize && matchesCanvas
+        if (bounds.outWidth < minEdge || bounds.outHeight < minEdge) return null
+        return bounds.outWidth to bounds.outHeight
     }
 
     private fun decodeImageFromExport(
@@ -6187,6 +6462,7 @@ class MainActivity : AppCompatActivity() {
                         put("isHidden", video.isHidden)
                         put("isPinned", video.isPinned)
                         put("watchProgressMs", video.watchProgressMs)
+                        put("isPlaying", video.isPlaying)
                     })
                 }
                 if (card.stickyNotes.isNotEmpty()) {
@@ -6396,7 +6672,8 @@ class MainActivity : AppCompatActivity() {
                     isFavorite = priorVideo?.isFavorite ?: false,
                     isHidden = priorVideo?.isHidden ?: false,
                     isPinned = priorVideo?.isPinned ?: false,
-                    watchProgressMs = priorVideo?.watchProgressMs ?: 0L
+                    watchProgressMs = priorVideo?.watchProgressMs ?: 0L,
+                    isPlaying = priorVideo?.isPlaying ?: true
                 )
             )
         }.sortedByDescending { it.updatedAt }
@@ -6601,6 +6878,9 @@ class MainActivity : AppCompatActivity() {
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
                     onVideoProgressChanged = { cardId, progressMs, durationMs ->
                         updateVideoWatchProgress(cardId, progressMs, durationMs)
+                    },
+                    onVideoPlaybackStateChanged = { cardId, isPlaying ->
+                        updateVideoPlaybackState(cardId, isPlaying)
                     }
                 )
             adapter.setBodyTextSize(cardFontSizeSp)
@@ -6964,6 +7244,17 @@ class MainActivity : AppCompatActivity() {
         scheduleVideoProgressPersist()
     }
 
+    private fun updateVideoPlaybackState(cardId: Long, isPlaying: Boolean) {
+        val videoFlow = flows.firstOrNull { it.id == VIDEO_FLOW_ID } ?: return
+        val cardIndex = videoFlow.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex < 0) return
+        val card = videoFlow.cards[cardIndex]
+        val video = card.video ?: return
+        if (video.isPlaying == isPlaying) return
+        card.video = video.copy(isPlaying = isPlaying)
+        scheduleVideoProgressPersist()
+    }
+
     private fun scheduleVideoProgressPersist() {
         videoProgressPersistJob?.cancel()
         videoProgressPersistJob = lifecycleScope.launch {
@@ -6983,12 +7274,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private data class ExportPayload(
-        val json: String,
-        val flowCount: Int,
-        val cardCount: Int,
-        val warnings: List<String>
-    )
+    private data class ExportPayload(val flowCount: Int, val cardCount: Int, val warnings: List<String>)
+
+    private data class OperationProgressDialog(
+        val dialog: AlertDialog,
+        val progressBar: ProgressBar,
+        val messageView: TextView
+    ) {
+        fun dismiss() {
+            if (dialog.isShowing) dialog.dismiss()
+        }
+    }
 
     private data class StickyNotesExportPayload(
         val json: String,
