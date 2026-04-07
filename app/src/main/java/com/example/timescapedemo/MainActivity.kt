@@ -32,6 +32,8 @@ import android.provider.DocumentsContract
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.util.JsonReader
+import android.util.JsonToken
 import android.util.JsonWriter
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
@@ -104,6 +106,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
@@ -5361,15 +5364,17 @@ class MainActivity : AppCompatActivity() {
         runCatching { openImageUriStream(uri)?.use { it.readBytes() } }.getOrNull()
 
     private fun logExportedImageBack(cardLabel: String, data: String) {
-        Log.d(
+        if (!Log.isLoggable(EXPORT_LOG_TAG, Log.VERBOSE)) return
+        Log.v(
             EXPORT_LOG_TAG,
             "Exported image back handwriting for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
         )
     }
 
     private fun logExportedHandwritingBack(cardLabel: String, backObj: JSONObject) {
+        if (!Log.isLoggable(EXPORT_LOG_TAG, Log.VERBOSE)) return
         val data = backObj.optString("data")
-        Log.d(
+        Log.v(
             EXPORT_LOG_TAG,
             "Exported handwriting back for $cardLabel (base64Length=${data.length}, preview=${data.take(LOG_DATA_PREVIEW_CHARS)})"
         )
@@ -5560,67 +5565,78 @@ class MainActivity : AppCompatActivity() {
         val warnings = mutableListOf<String>()
         val imageBackPayloads = mutableMapOf<String, String>()
         return try {
-            val jsonText = contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { reader ->
-                reader.readText()
-            } ?: throw IllegalStateException("Unable to open input stream")
-            val root = JSONObject(jsonText)
-            logImportJson(root)
-            val flowsArray = root.optJSONArray("flows") ?: JSONArray()
             val importedFlows = mutableListOf<ImportedFlow>()
             var totalCards = 0
-            for (i in 0 until flowsArray.length()) {
-                val flowObj = flowsArray.optJSONObject(i) ?: continue
-                val flowName = flowObj.optString("name")
-                val cardsArray = flowObj.optJSONArray("cards") ?: JSONArray()
-                val cards = mutableListOf<ImportedCard>()
-                for (j in 0 until cardsArray.length()) {
-                    val cardObj = cardsArray.optJSONObject(j) ?: continue
-                    val title = cardObj.optString("title")
-                    val snippet = cardObj.optString("snippet")
-                    val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
-                    val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
-                    val cardLabel = buildImportCardLabel(flowName, i, j, title)
-                    val handwriting = decodeHandwritingFromExport(
-                        cardObj.optJSONObject("handwriting"),
-                        createdFiles,
-                        warnings,
-                        cardLabel
-                    )
-                    val image = decodeImageFromExport(
-                        cardObj.optJSONObject("image"),
-                        createdFiles,
-                        warnings,
-                        cardLabel
-                    )
-                    val imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
-                        decodeHandwritingSideFromExport(
-                            it,
-                            createdFiles,
-                            warnings,
-                            cardLabel,
-                            isImageBack = true,
-                            duplicateTracker = imageBackPayloads
-                        )
+            contentResolver.openInputStream(uri)?.use { stream ->
+                JsonReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
+                    reader.beginObject()
+                    var flowIndex = 0
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "flows" -> {
+                                reader.beginArray()
+                                while (reader.hasNext()) {
+                                    val flowObj = readJsonObject(reader)
+                                    val flowName = flowObj.optString("name")
+                                    val cardsArray = flowObj.optJSONArray("cards") ?: JSONArray()
+                                    val cards = mutableListOf<ImportedCard>()
+                                    for (cardIndex in 0 until cardsArray.length()) {
+                                        val cardObj = cardsArray.optJSONObject(cardIndex) ?: continue
+                                        val title = cardObj.optString("title")
+                                        val snippet = cardObj.optString("snippet")
+                                        val updatedAt = cardObj.optLong("updatedAt", System.currentTimeMillis())
+                                        val textColor = parseColorString(cardObj.optString("textColor")) ?: Color.WHITE
+                                        val cardLabel = buildImportCardLabel(flowName, flowIndex, cardIndex, title)
+                                        val handwriting = decodeHandwritingFromExport(
+                                            cardObj.optJSONObject("handwriting"),
+                                            createdFiles,
+                                            warnings,
+                                            cardLabel
+                                        )
+                                        val image = decodeImageFromExport(
+                                            cardObj.optJSONObject("image"),
+                                            createdFiles,
+                                            warnings,
+                                            cardLabel
+                                        )
+                                        val imageHandwriting = cardObj.optJSONObject("imageHandwriting")?.let {
+                                            decodeHandwritingSideFromExport(
+                                                it,
+                                                createdFiles,
+                                                warnings,
+                                                cardLabel,
+                                                isImageBack = true,
+                                                duplicateTracker = imageBackPayloads
+                                            )
+                                        }
+                                        val stickyNotes = parseStickyNotes(cardObj)
+                                        val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
+                                        val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
+                                        cards += ImportedCard(
+                                            title,
+                                            snippet,
+                                            backSnippet,
+                                            updatedAt,
+                                            textColor,
+                                            handwriting,
+                                            image,
+                                            imageHandwriting,
+                                            recognizedText,
+                                            stickyNotes
+                                        )
+                                    }
+                                    totalCards += cards.size
+                                    importedFlows += ImportedFlow(flowName, cards)
+                                    flowIndex++
+                                }
+                                reader.endArray()
+                            }
+                            else -> reader.skipValue()
+                        }
                     }
-                    val stickyNotes = parseStickyNotes(cardObj)
-                    val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
-                    val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
-                    cards += ImportedCard(
-                        title,
-                        snippet,
-                        backSnippet,
-                        updatedAt,
-                        textColor,
-                        handwriting,
-                        image,
-                        imageHandwriting,
-                        recognizedText,
-                        stickyNotes
-                    )
+                    reader.endObject()
                 }
-                totalCards += cards.size
-                importedFlows += ImportedFlow(flowName, cards)
-            }
+            } ?: throw IllegalStateException("Unable to open input stream")
             Log.d(
                 IMPORT_LOG_TAG,
                 "Parsed import payload with ${importedFlows.size} flows and $totalCards cards"
@@ -5636,6 +5652,47 @@ class MainActivity : AppCompatActivity() {
             throw e
         }
     }
+
+    private fun readJsonObject(reader: JsonReader): JSONObject {
+        val result = JSONObject()
+        reader.beginObject()
+        while (reader.hasNext()) {
+            val key = reader.nextName()
+            result.put(key, readJsonValue(reader))
+        }
+        reader.endObject()
+        return result
+    }
+
+    private fun readJsonArray(reader: JsonReader): JSONArray {
+        val result = JSONArray()
+        reader.beginArray()
+        while (reader.hasNext()) {
+            result.put(readJsonValue(reader))
+        }
+        reader.endArray()
+        return result
+    }
+
+    private fun readJsonValue(reader: JsonReader): Any? =
+        when (reader.peek()) {
+            JsonToken.BEGIN_OBJECT -> readJsonObject(reader)
+            JsonToken.BEGIN_ARRAY -> readJsonArray(reader)
+            JsonToken.STRING -> reader.nextString()
+            JsonToken.BOOLEAN -> reader.nextBoolean()
+            JsonToken.NUMBER -> {
+                val asString = reader.nextString()
+                asString.toLongOrNull() ?: asString.toDoubleOrNull() ?: asString
+            }
+            JsonToken.NULL -> {
+                reader.nextNull()
+                JSONObject.NULL
+            }
+            else -> {
+                reader.skipValue()
+                JSONObject.NULL
+            }
+        }
 
     private fun decodeHandwritingFromExport(
         handwritingObj: JSONObject?,
