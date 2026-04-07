@@ -32,6 +32,7 @@ import android.provider.DocumentsContract
 import android.text.InputType
 import android.speech.tts.TextToSpeech
 import android.util.Base64
+import android.util.JsonWriter
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -5021,10 +5022,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val payload = withContext(Dispatchers.IO) {
                 runCatching {
-                    val exportPayload = buildExportPayload(flowsToExport)
-                    contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                    val exportPayload = contentResolver.openOutputStream(uri, "w")?.use { stream ->
                         OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            writer.write(exportPayload.json)
+                            JsonWriter(writer).use { jsonWriter ->
+                                jsonWriter.setIndent("  ")
+                                buildExportPayload(jsonWriter, flowsToExport)
+                            }
                         }
                     } ?: error("Unable to open output stream")
                     Log.d(
@@ -5046,54 +5049,32 @@ class MainActivity : AppCompatActivity() {
             val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
             if (payload.warnings.isNotEmpty()) {
                 showExportWarnings(payload.warnings) {
-                    shareExportPayload(payload, fileName)
+                    shareExportPayload(uri)
                 }
                 snackbarWithAction(
                     getString(R.string.snackbar_export_success_with_warnings, notesText, flowsText),
                     getString(R.string.snackbar_action_share)
                 ) {
-                    shareExportPayload(payload, fileName)
+                    shareExportPayload(uri)
                 }
             } else {
                 snackbarWithAction(
                     getString(R.string.snackbar_export_success, notesText, flowsText),
                     getString(R.string.snackbar_action_share)
                 ) {
-                    shareExportPayload(payload, fileName)
+                    shareExportPayload(uri)
                 }
             }
         }
     }
 
-    private fun shareExportPayload(payload: ExportPayload, fileName: String) {
-        lifecycleScope.launch {
-            val exportUri = withContext(Dispatchers.IO) {
-                runCatching {
-                    val exportDir = File(cacheDir, "exports").apply { mkdirs() }
-                    val exportFile = File(exportDir, fileName)
-                    FileOutputStream(exportFile).use { stream ->
-                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            writer.write(payload.json)
-                        }
-                    }
-                    FileProvider.getUriForFile(
-                        this@MainActivity,
-                        "${applicationContext.packageName}.fileprovider",
-                        exportFile
-                    )
-                }.getOrNull()
-            }
-            if (exportUri == null) {
-                snackbar(getString(R.string.snackbar_share_failed))
-                return@launch
-            }
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/json"
-                putExtra(Intent.EXTRA_STREAM, exportUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(shareIntent, getString(R.string.share_export_chooser_title)))
+    private fun shareExportPayload(exportUri: Uri) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_STREAM, exportUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        startActivity(Intent.createChooser(shareIntent, getString(R.string.share_export_chooser_title)))
     }
 
     private fun shareStickyNotesExportPayload(payload: StickyNotesExportPayload, fileName: String) {
@@ -5127,40 +5108,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildExportPayload(flowsToExport: List<CardFlow>): ExportPayload {
-        val root = JSONObject()
-        root.put("version", NOTES_EXPORT_VERSION)
-        root.put("generatedAt", System.currentTimeMillis())
-        val flowsArray = JSONArray()
-        val warnings = mutableListOf<String>()
+    private fun buildExportPayload(writer: JsonWriter, flowsToExport: List<CardFlow>): ExportPayload {
+        writer.beginObject()
+        writer.name("version").value(NOTES_EXPORT_VERSION.toLong())
+        writer.name("generatedAt").value(System.currentTimeMillis())
+        writer.name("flows")
+        writer.beginArray()
         val imageBackPayloads = mutableMapOf<String, String>()
         val duplicateImageBacks = mutableMapOf<String, MutableList<String>>()
+        val warnings = mutableListOf<String>()
         var cardCount = 0
         flowsToExport.forEachIndexed { flowIndex, flow ->
-            val flowObj = JSONObject()
-            flowObj.put("name", flow.name)
-            val cardsArray = JSONArray()
+            writer.beginObject()
+            writer.name("name").value(flow.name)
+            writer.name("cards")
+            writer.beginArray()
             val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
             val cardsForExport = shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards
             cardsForExport.forEachIndexed { cardIndex, card ->
-                val cardObj = JSONObject()
-                cardObj.put("title", card.title)
-                cardObj.put("snippet", card.snippet)
-                card.backSnippet?.let { cardObj.put("backSnippet", it) }
-                card.recognizedText?.let { cardObj.put("recognizedText", it) }
-                cardObj.put("textColor", colorToString(card.textColor))
-                cardObj.put("updatedAt", card.updatedAt)
+                writer.beginObject()
+                writer.name("title").value(card.title)
+                writer.name("snippet").value(card.snippet)
+                card.backSnippet?.let { writer.name("backSnippet").value(it) }
+                card.recognizedText?.let { writer.name("recognizedText").value(it) }
+                writer.name("textColor").value(colorToString(card.textColor))
+                writer.name("updatedAt").value(card.updatedAt)
                 val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
                 card.handwriting?.let { handwriting ->
-                    handwritingToJson(handwriting, warnings, cardLabel)?.let { cardObj.put("handwriting", it) }
+                    handwritingToJson(handwriting, warnings, cardLabel)?.let {
+                        writer.name("handwriting")
+                        writeJsonValue(writer, it)
+                    }
                 }
                 card.image?.let { image ->
-                    imageToExportJson(image)?.let { cardObj.put("image", it) }
+                    imageToExportJson(image)?.let {
+                        writer.name("image")
+                        writeJsonValue(writer, it)
+                    }
                 }
                 card.imageHandwriting?.let { back ->
                     val missingBackWarning = getString(R.string.debug_export_missing_image_back, cardLabel)
                     handwritingSideToExportPayload(back, warnings, missingBackWarning)?.let { export ->
-                        cardObj.put("imageHandwriting", export.json)
+                        writer.name("imageHandwriting")
+                        writeJsonValue(writer, export.json)
                         logExportedImageBack(cardLabel, export.data)
                         val duplicate = imageBackPayloads.putIfAbsent(export.data, cardLabel)
                         if (duplicate != null && duplicate != cardLabel) {
@@ -5169,25 +5159,26 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 if (card.stickyNotes.isNotEmpty()) {
-                    val notesArray = JSONArray()
+                    writer.name("stickyNotes")
+                    writer.beginArray()
                     card.stickyNotes.forEach { note ->
-                        notesArray.put(JSONObject().apply {
-                            put("id", note.id)
-                            put("front", note.frontText)
-                            put("back", note.backText)
-                            put("color", colorToString(note.color))
-                            put("rotation", note.rotation.toDouble())
-                        })
+                        writer.beginObject()
+                        writer.name("id").value(note.id)
+                        writer.name("front").value(note.frontText)
+                        writer.name("back").value(note.backText)
+                        writer.name("color").value(colorToString(note.color))
+                        writer.name("rotation").value(note.rotation.toDouble())
+                        writer.endObject()
                     }
-                    cardObj.put("stickyNotes", notesArray)
+                    writer.endArray()
                 }
-                cardsArray.put(cardObj)
+                writer.endObject()
                 cardCount++
             }
-            flowObj.put("cards", cardsArray)
-            flowsArray.put(flowObj)
+            writer.endArray()
+            writer.endObject()
         }
-        root.put("flows", flowsArray)
+        writer.endArray()
         duplicateImageBacks.forEach { (original, matches) ->
             val matchList = matches.joinToString(separator = "\n")
             addExportWarning(
@@ -5195,9 +5186,11 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.debug_export_duplicate_image_back_grouped, original, matchList)
             )
         }
-        val exportJson = root.toString()
-        logExportJson(exportJson)
-        return ExportPayload(exportJson, flowsToExport.size, cardCount, warnings)
+        if (warnings.isNotEmpty()) {
+            Log.w(EXPORT_LOG_TAG, "Export generated ${warnings.size} warning(s)")
+        }
+        writer.endObject()
+        return ExportPayload(flowsToExport.size, cardCount, warnings)
     }
 
     private fun buildStickyNotesExportPayload(flowsToExport: List<CardFlow>): StickyNotesExportPayload {
@@ -5234,6 +5227,37 @@ class MainActivity : AppCompatActivity() {
         root.put("totalStickyNotes", stickyCount)
         root.put("totalFlows", flowsToExport.size)
         return StickyNotesExportPayload(root.toString(2), stickyCount)
+    }
+
+    private fun writeJsonValue(writer: JsonWriter, value: Any?) {
+        when (value) {
+            null, JSONObject.NULL -> writer.nullValue()
+            is JSONObject -> {
+                writer.beginObject()
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    writer.name(key)
+                    writeJsonValue(writer, value.opt(key))
+                }
+                writer.endObject()
+            }
+            is JSONArray -> {
+                writer.beginArray()
+                for (index in 0 until value.length()) {
+                    writeJsonValue(writer, value.opt(index))
+                }
+                writer.endArray()
+            }
+            is String -> writer.value(value)
+            is Boolean -> writer.value(value)
+            is Int -> writer.value(value.toLong())
+            is Long -> writer.value(value)
+            is Float -> writer.value(value.toDouble())
+            is Double -> writer.value(value)
+            is Number -> writer.value(value.toDouble())
+            else -> writer.value(value.toString())
+        }
     }
 
     private fun handwritingOptionsToJson(options: HandwritingOptions): JSONObject = JSONObject().apply {
@@ -6983,12 +7007,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private data class ExportPayload(
-        val json: String,
-        val flowCount: Int,
-        val cardCount: Int,
-        val warnings: List<String>
-    )
+    private data class ExportPayload(val flowCount: Int, val cardCount: Int, val warnings: List<String>)
 
     private data class StickyNotesExportPayload(
         val json: String,
