@@ -6712,6 +6712,27 @@ class MainActivity : AppCompatActivity() {
         val adapter: CardsAdapter,
         val cardCountView: TextView
     ) {
+        private var pendingActiveVideoCardId: Long? = null
+        private var pendingVideoCardUpdateAttempts: Int = 0
+        private val applyActiveVideoCardRunnable = object : Runnable {
+            override fun run() {
+                if (!recycler.isAttachedToWindow) {
+                    pendingVideoCardUpdateAttempts = 0
+                    return
+                }
+                if (recycler.isComputingLayout) {
+                    if (pendingVideoCardUpdateAttempts < MAX_VIDEO_CARD_UPDATE_RETRIES) {
+                        pendingVideoCardUpdateAttempts += 1
+                        recycler.post(this)
+                    } else {
+                        pendingVideoCardUpdateAttempts = 0
+                    }
+                    return
+                }
+                pendingVideoCardUpdateAttempts = 0
+                adapter.setActiveVideoCardId(pendingActiveVideoCardId)
+            }
+        }
         private var activeQuery: String = ""
         private var indicatorTotal: Int = 0
         private var lastHapticSelection: Int? = null
@@ -6815,6 +6836,7 @@ class MainActivity : AppCompatActivity() {
         fun dispose() {
             recycler.removeOnScrollListener(scrollListener)
             recycler.removeOnItemTouchListener(emptyAreaTouchListener)
+            recycler.removeCallbacks(applyActiveVideoCardRunnable)
             if (layoutManager.selectionListener === selectionCallback) {
                 layoutManager.selectionListener = null
             }
@@ -6892,15 +6914,28 @@ class MainActivity : AppCompatActivity() {
 
         private fun maybeAutoPlayCenteredVideo(selectionIndex: Int?) {
             if (flowId != VIDEO_FLOW_ID) {
-                adapter.setActiveVideoCardId(null)
+                setActiveVideoCardIdSafely(null)
                 return
             }
             val index = (selectionIndex ?: layoutManager.nearestIndex()).takeIf { it >= 0 } ?: run {
-                adapter.setActiveVideoCardId(null)
+                setActiveVideoCardIdSafely(null)
                 return
             }
             val item = adapter.getItemAt(index)
-            adapter.setActiveVideoCardId(item?.video?.let { item.id })
+            setActiveVideoCardIdSafely(item?.video?.let { item.id })
+        }
+
+        private fun setActiveVideoCardIdSafely(cardId: Long?) {
+            pendingActiveVideoCardId = cardId
+            if (recycler.isComputingLayout) {
+                recycler.removeCallbacks(applyActiveVideoCardRunnable)
+                pendingVideoCardUpdateAttempts = 0
+                recycler.post(applyActiveVideoCardRunnable)
+                return
+            }
+            recycler.removeCallbacks(applyActiveVideoCardRunnable)
+            pendingVideoCardUpdateAttempts = 0
+            adapter.setActiveVideoCardId(cardId)
         }
     }
 
@@ -7016,6 +7051,7 @@ private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
 private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
 private const val VIDEO_WATCH_COMPLETE_THRESHOLD_MS = 2_000L
 private const val VIDEO_PROGRESS_PERSIST_DELAY_MS = 800L
+private const val MAX_VIDEO_CARD_UPDATE_RETRIES = 8
 private const val LAN_EXPORT_TIMEOUT_MS = 2_000L
 private const val VIDEO_FLOW_ID = 0L
 private const val VIDEO_EMPTY_CARD_ID = 1L
