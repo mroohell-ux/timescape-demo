@@ -51,7 +51,9 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.PopupWindow
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
@@ -4835,6 +4837,55 @@ class MainActivity : AppCompatActivity() {
         snack.show()
     }
 
+    private fun showOperationProgressDialog(
+        title: String,
+        message: String,
+        indeterminate: Boolean
+    ): OperationProgressDialog {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * resources.displayMetrics.density).roundToInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val messageView = TextView(this).apply {
+            text = message
+            setPadding(0, 0, 0, (12 * resources.displayMetrics.density).roundToInt())
+        }
+        val progressBar = ProgressBar(
+            this,
+            null,
+            if (indeterminate) android.R.attr.progressBarStyle else android.R.attr.progressBarStyleHorizontal
+        ).apply {
+            isIndeterminate = indeterminate
+            max = 100
+        }
+        container.addView(messageView)
+        container.addView(progressBar)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(container)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        return OperationProgressDialog(dialog, progressBar, messageView)
+    }
+
+    private fun updateOperationProgress(
+        progress: OperationProgressDialog,
+        message: String,
+        current: Int,
+        total: Int?
+    ) {
+        progress.messageView.text = message
+        if (total == null || total <= 0) {
+            progress.progressBar.isIndeterminate = true
+            return
+        }
+        progress.progressBar.isIndeterminate = false
+        progress.progressBar.max = total
+        progress.progressBar.progress = current.coerceIn(0, total)
+    }
+
     private fun launchExportCurrentFlow() {
         val flow = currentFlow()
         if (flow == null) {
@@ -5024,36 +5075,54 @@ class MainActivity : AppCompatActivity() {
         }
         captureVisibleFlowStates()
         lifecycleScope.launch {
-            val payload = withContext(Dispatchers.IO) {
-                runCatching {
-                    val exportStartedAt = SystemClock.elapsedRealtime()
-                    val inputCardCount = flowsToExport.sumOf { flow -> flow.cards.size }
-                    Log.d(
-                        EXPORT_LOG_TAG,
-                        "Starting flow export (uri=$uri, fileName=$fileName, flows=${flowsToExport.size}, cards=$inputCardCount)"
-                    )
-                    val exportPayload = contentResolver.openOutputStream(uri, "w")?.use { stream ->
-                        OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
-                            JsonWriter(writer).use { jsonWriter ->
-                                jsonWriter.setIndent("  ")
-                                buildExportPayload(jsonWriter, flowsToExport)
+            val progressUi = showOperationProgressDialog(
+                title = getString(R.string.menu_export_flow),
+                message = getString(R.string.export_progress_message, 0, flowsToExport.size),
+                indeterminate = false
+            )
+            val payload = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val exportStartedAt = SystemClock.elapsedRealtime()
+                        val inputCardCount = flowsToExport.sumOf { flow -> flow.cards.size }
+                        Log.d(
+                            EXPORT_LOG_TAG,
+                            "Starting flow export (uri=$uri, fileName=$fileName, flows=${flowsToExport.size}, cards=$inputCardCount)"
+                        )
+                        val exportPayload = contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                            OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
+                                JsonWriter(writer).use { jsonWriter ->
+                                    jsonWriter.setIndent("  ")
+                                    buildExportPayload(jsonWriter, flowsToExport) { done, total, flowName ->
+                                        runOnUiThread {
+                                            updateOperationProgress(
+                                                progressUi,
+                                                message = getString(R.string.export_progress_message_with_name, done, total, flowName),
+                                                current = done,
+                                                total = total
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        }
-                    } ?: error("Unable to open output stream")
-                    Log.d(
+                        } ?: error("Unable to open output stream")
+                        Log.d(
+                            EXPORT_LOG_TAG,
+                            "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards in ${SystemClock.elapsedRealtime() - exportStartedAt}ms"
+                        )
+                        exportPayload
+                    }
+                }.getOrElse {
+                    Log.e(
                         EXPORT_LOG_TAG,
-                        "Wrote export payload to uri=$uri with ${exportPayload.flowCount} flows and ${exportPayload.cardCount} cards in ${SystemClock.elapsedRealtime() - exportStartedAt}ms"
+                        "Flow export failed while writing payload (uri=$uri, fileName=$fileName, flowCount=${flowsToExport.size})",
+                        it
                     )
-                    exportPayload
+                    snackbar(getString(R.string.snackbar_export_failed))
+                    return@launch
                 }
-            }.getOrElse {
-                Log.e(
-                    EXPORT_LOG_TAG,
-                    "Flow export failed while writing payload (uri=$uri, fileName=$fileName, flowCount=${flowsToExport.size})",
-                    it
-                )
-                snackbar(getString(R.string.snackbar_export_failed))
-                return@launch
+            } finally {
+                progressUi.dismiss()
             }
             val notesText = resources.getQuantityString(R.plurals.count_notes, payload.cardCount, payload.cardCount)
             val flowsText = resources.getQuantityString(R.plurals.count_flows, payload.flowCount, payload.flowCount)
@@ -5118,7 +5187,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildExportPayload(writer: JsonWriter, flowsToExport: List<CardFlow>): ExportPayload {
+    private fun buildExportPayload(
+        writer: JsonWriter,
+        flowsToExport: List<CardFlow>,
+        onFlowProgress: ((done: Int, total: Int, flowName: String) -> Unit)? = null
+    ): ExportPayload {
         val startedAt = SystemClock.elapsedRealtime()
         writer.beginObject()
         writer.name("version").value(NOTES_EXPORT_VERSION.toLong())
@@ -5193,6 +5266,7 @@ class MainActivity : AppCompatActivity() {
                 EXPORT_LOG_TAG,
                 "Exported flow ${flowIndex + 1}/${flowsToExport.size} (${flow.name}) with ${cardsForExport.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
             )
+            onFlowProgress?.invoke(flowIndex + 1, flowsToExport.size, flow.name)
         }
         writer.endArray()
         duplicateImageBacks.forEach { (original, matches) ->
@@ -5515,12 +5589,32 @@ class MainActivity : AppCompatActivity() {
 
     private fun importNotes(uri: Uri) {
         lifecycleScope.launch {
-            val payload = withContext(Dispatchers.IO) {
-                runCatching { readImportPayload(uri) }
-            }.getOrElse {
-                showImportErrorDialog(it)
-                snackbar(getString(R.string.snackbar_import_failed))
-                return@launch
+            val progressUi = showOperationProgressDialog(
+                title = getString(R.string.drawer_import_notes),
+                message = getString(R.string.import_progress_message_initial),
+                indeterminate = true
+            )
+            val payload = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        readImportPayload(uri) { done, flowName ->
+                            runOnUiThread {
+                                updateOperationProgress(
+                                    progressUi,
+                                    message = getString(R.string.import_progress_message_with_name, done, flowName),
+                                    current = done,
+                                    total = null
+                                )
+                            }
+                        }
+                    }
+                }.getOrElse {
+                    showImportErrorDialog(it)
+                    snackbar(getString(R.string.snackbar_import_failed))
+                    return@launch
+                }
+            } finally {
+                progressUi.dismiss()
             }
             if (payload.flows.isEmpty()) {
                 snackbar(getString(R.string.snackbar_import_empty))
@@ -5576,7 +5670,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun readImportPayload(uri: Uri): ImportPayload {
+    private fun readImportPayload(
+        uri: Uri,
+        onFlowProgress: ((done: Int, flowName: String) -> Unit)? = null
+    ): ImportPayload {
         val createdFiles = mutableListOf<CreatedFile>()
         val warnings = mutableListOf<String>()
         val imageBackPayloads = mutableMapOf<String, String>()
@@ -5654,6 +5751,7 @@ class MainActivity : AppCompatActivity() {
                                         IMPORT_LOG_TAG,
                                         "Parsed flow ${flowIndex + 1} (${flowName}) with ${cards.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
                                     )
+                                    onFlowProgress?.invoke(flowIndex + 1, flowName)
                                     flowIndex++
                                 }
                                 reader.endArray()
@@ -7120,6 +7218,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private data class ExportPayload(val flowCount: Int, val cardCount: Int, val warnings: List<String>)
+
+    private data class OperationProgressDialog(
+        val dialog: AlertDialog,
+        val progressBar: ProgressBar,
+        val messageView: TextView
+    ) {
+        fun dismiss() {
+            if (dialog.isShowing) dialog.dismiss()
+        }
+    }
 
     private data class StickyNotesExportPayload(
         val json: String,
