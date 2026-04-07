@@ -16,5 +16,6 @@ data class VideoCardData(
     val isFavorite: Boolean = false,
     val isHidden: Boolean = false,
     val isPinned: Boolean = false,
-    val watchProgressMs: Long = 0L
+    val watchProgressMs: Long = 0L,
+    val isPlaying: Boolean = true
 )

@@ -4754,7 +4754,8 @@ class MainActivity : AppCompatActivity() {
             isFavorite = obj.optBoolean("isFavorite", false),
             isHidden = obj.optBoolean("isHidden", false),
             isPinned = obj.optBoolean("isPinned", false),
-            watchProgressMs = obj.optLong("watchProgressMs", 0L)
+            watchProgressMs = obj.optLong("watchProgressMs", 0L),
+            isPlaying = obj.optBoolean("isPlaying", true)
         )
     }
 
@@ -6211,6 +6212,7 @@ class MainActivity : AppCompatActivity() {
                         put("isHidden", video.isHidden)
                         put("isPinned", video.isPinned)
                         put("watchProgressMs", video.watchProgressMs)
+                        put("isPlaying", video.isPlaying)
                     })
                 }
                 if (card.stickyNotes.isNotEmpty()) {
@@ -6420,7 +6422,8 @@ class MainActivity : AppCompatActivity() {
                     isFavorite = priorVideo?.isFavorite ?: false,
                     isHidden = priorVideo?.isHidden ?: false,
                     isPinned = priorVideo?.isPinned ?: false,
-                    watchProgressMs = priorVideo?.watchProgressMs ?: 0L
+                    watchProgressMs = priorVideo?.watchProgressMs ?: 0L,
+                    isPlaying = priorVideo?.isPlaying ?: true
                 )
             )
         }.sortedByDescending { it.updatedAt }
@@ -6625,6 +6628,9 @@ class MainActivity : AppCompatActivity() {
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
                     onVideoProgressChanged = { cardId, progressMs, durationMs ->
                         updateVideoWatchProgress(cardId, progressMs, durationMs)
+                    },
+                    onVideoPlaybackStateChanged = { cardId, isPlaying ->
+                        updateVideoPlaybackState(cardId, isPlaying)
                     }
                 )
             adapter.setBodyTextSize(cardFontSizeSp)
@@ -6985,6 +6991,17 @@ class MainActivity : AppCompatActivity() {
         }
         if (video.watchProgressMs == normalizedProgress) return
         card.video = video.copy(watchProgressMs = normalizedProgress)
+        scheduleVideoProgressPersist()
+    }
+
+    private fun updateVideoPlaybackState(cardId: Long, isPlaying: Boolean) {
+        val videoFlow = flows.firstOrNull { it.id == VIDEO_FLOW_ID } ?: return
+        val cardIndex = videoFlow.cards.indexOfFirst { it.id == cardId }
+        if (cardIndex < 0) return
+        val card = videoFlow.cards[cardIndex]
+        val video = card.video ?: return
+        if (video.isPlaying == isPlaying) return
+        card.video = video.copy(isPlaying = isPlaying)
         scheduleVideoProgressPersist()
     }
 

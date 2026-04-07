@@ -119,6 +119,7 @@ class CardsAdapter(
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
+    private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
@@ -145,6 +146,7 @@ class CardsAdapter(
         val videoPlayPauseButton: ImageButton = v.findViewById(R.id.videoPlayPauseButton)
         val videoSeekBar: SeekBar = v.findViewById(R.id.videoSeekBar)
         val videoTimeLabel: TextView = v.findViewById(R.id.videoTimeLabel)
+        val videoTitleLabel: TextView = v.findViewById(R.id.videoTitleLabel)
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -524,6 +526,7 @@ class CardsAdapter(
         holder.playOverlay.isVisible = !isActive
         holder.durationBadge.isVisible = true
         holder.durationBadge.text = formatDuration(video.durationMs)
+        holder.videoTitleLabel.text = item.title.ifBlank { video.fileName.substringBeforeLast('.') }
         val effectiveWatchProgressMs = videoProgressOverridesMs[item.id] ?: video.watchProgressMs
         holder.progressBar.isVisible = effectiveWatchProgressMs > 0L && video.durationMs > 0L
         val progress = if (video.durationMs > 0L) {
@@ -546,7 +549,12 @@ class CardsAdapter(
                 if (resumeProgressMs > 0L) {
                     holder.videoInlineView.seekTo(resumeProgressMs.toInt())
                 }
-                holder.videoInlineView.start()
+                val shouldPlay = video.isPlaying
+                if (shouldPlay) {
+                    holder.videoInlineView.start()
+                } else {
+                    holder.videoInlineView.pause()
+                }
                 holder.videoInlineView.animate().alpha(1f).setDuration(120L).start()
                 val startMs = if (resumeProgressMs > 0L) resumeProgressMs else 0L
                 holder.videoTimeLabel.text = "${formatDuration(startMs)} / ${formatDuration(player.duration.toLong())}"
@@ -555,9 +563,14 @@ class CardsAdapter(
                 } else {
                     0
                 }
-                holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_pause)
+                holder.videoPlayPauseButton.setImageResource(
+                    if (shouldPlay) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+                )
                 holder.videoPlayPauseButton.contentDescription =
-                    holder.itemView.context.getString(R.string.video_pause)
+                    holder.itemView.context.getString(if (shouldPlay) R.string.video_pause else R.string.video_play)
+                (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
+                    onVideoPlaybackStateChanged?.invoke(cardId, shouldPlay)
+                }
                 holder.itemView.removeCallbacks(videoProgressUpdater)
                 holder.itemView.post(videoProgressUpdater)
                 showVideoControls(holder)
@@ -589,11 +602,17 @@ class CardsAdapter(
                     holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_play)
                     holder.videoPlayPauseButton.contentDescription =
                         holder.itemView.context.getString(R.string.video_play)
+                    (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
+                        onVideoPlaybackStateChanged?.invoke(cardId, false)
+                    }
                 } else {
                     holder.videoInlineView.start()
                     holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_pause)
                     holder.videoPlayPauseButton.contentDescription =
                         holder.itemView.context.getString(R.string.video_pause)
+                    (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
+                        onVideoPlaybackStateChanged?.invoke(cardId, true)
+                    }
                 }
             }
             holder.videoInlineView.setOnClickListener {
