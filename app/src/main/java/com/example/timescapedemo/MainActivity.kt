@@ -5765,7 +5765,8 @@ class MainActivity : AppCompatActivity() {
             addImportWarning(warnings, getString(R.string.debug_import_handwriting_base64, target))
             return null
         }
-        if (!validateHandwritingPayload(bytes, options)) {
+        val decodedSize = decodeHandwritingDimensions(bytes)
+        if (decodedSize == null) {
             addImportWarning(
                 warnings,
                 getString(
@@ -5777,13 +5778,24 @@ class MainActivity : AppCompatActivity() {
             )
             return null
         }
-        val filename = "handwriting_${System.currentTimeMillis()}_${UUID.randomUUID()}.${options.format.extension}"
+        val resolvedOptions = if (
+            decodedSize.first != options.canvasWidth || decodedSize.second != options.canvasHeight
+        ) {
+            Log.w(
+                IMPORT_LOG_TAG,
+                "Handwriting canvas mismatch for $target: expected=${options.canvasWidth}x${options.canvasHeight}, actual=${decodedSize.first}x${decodedSize.second}; importing using actual size"
+            )
+            options.copy(canvasWidth = decodedSize.first, canvasHeight = decodedSize.second)
+        } else {
+            options
+        }
+        val filename = "handwriting_${System.currentTimeMillis()}_${UUID.randomUUID()}.${resolvedOptions.format.extension}"
         //val filename = "handwriting_${'$'}{System.currentTimeMillis()}_${'$'}{UUID.randomUUID()}.${'$'}{options.format.extension}"
         return runCatching {
             openFileOutput(filename, MODE_PRIVATE).use { it.write(bytes) }
             createdFiles += CreatedFile.Handwriting(filename)
-            logImportedHandwriting(target, data, options, isImageBack)
-            HandwritingSide(filename, options)
+            logImportedHandwriting(target, data, resolvedOptions, isImageBack)
+            HandwritingSide(filename, resolvedOptions)
         }.getOrElse {
             deleteFile(filename)
             addImportWarning(warnings, getString(R.string.debug_import_handwriting_save, target, it.localizedMessage))
@@ -5791,13 +5803,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun validateHandwritingPayload(bytes: ByteArray, options: HandwritingOptions): Boolean {
+    private fun decodeHandwritingDimensions(bytes: ByteArray): Pair<Int, Int>? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val minEdge = 2
-        val hasValidSize = bounds.outWidth >= minEdge && bounds.outHeight >= minEdge
-        val matchesCanvas = bounds.outWidth == options.canvasWidth && bounds.outHeight == options.canvasHeight
-        return hasValidSize && matchesCanvas
+        if (bounds.outWidth < minEdge || bounds.outHeight < minEdge) return null
+        return bounds.outWidth to bounds.outHeight
     }
 
     private fun decodeImageFromExport(
