@@ -5077,7 +5077,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val progressUi = showOperationProgressDialog(
                 title = getString(R.string.menu_export_flow),
-                message = getString(R.string.export_progress_message, 0, flowsToExport.size),
+                message = getString(
+                    R.string.export_progress_cards_message,
+                    0,
+                    flowsToExport.sumOf { it.cards.size }
+                ),
                 indeterminate = false
             )
             val payload = try {
@@ -5093,11 +5097,11 @@ class MainActivity : AppCompatActivity() {
                             OutputStreamWriter(stream, StandardCharsets.UTF_8).use { writer ->
                                 JsonWriter(writer).use { jsonWriter ->
                                     jsonWriter.setIndent("  ")
-                                    buildExportPayload(jsonWriter, flowsToExport) { done, total, flowName ->
+                                    buildExportPayload(jsonWriter, flowsToExport) { done, total ->
                                         runOnUiThread {
                                             updateOperationProgress(
                                                 progressUi,
-                                                message = getString(R.string.export_progress_message_with_name, done, total, flowName),
+                                                message = getString(R.string.export_progress_cards_message, done, total),
                                                 current = done,
                                                 total = total
                                             )
@@ -5190,7 +5194,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildExportPayload(
         writer: JsonWriter,
         flowsToExport: List<CardFlow>,
-        onFlowProgress: ((done: Int, total: Int, flowName: String) -> Unit)? = null
+        onCardProgress: ((done: Int, total: Int) -> Unit)? = null
     ): ExportPayload {
         val startedAt = SystemClock.elapsedRealtime()
         writer.beginObject()
@@ -5202,6 +5206,10 @@ class MainActivity : AppCompatActivity() {
         val duplicateImageBacks = mutableMapOf<String, MutableList<String>>()
         val warnings = mutableListOf<String>()
         var cardCount = 0
+        val totalCards = flowsToExport.sumOf { flow ->
+            val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
+            (shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards).size
+        }
         flowsToExport.forEachIndexed { flowIndex, flow ->
             val flowStartedAt = SystemClock.elapsedRealtime()
             writer.beginObject()
@@ -5259,6 +5267,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 writer.endObject()
                 cardCount++
+                onCardProgress?.invoke(cardCount, totalCards)
             }
             writer.endArray()
             writer.endObject()
@@ -5266,7 +5275,6 @@ class MainActivity : AppCompatActivity() {
                 EXPORT_LOG_TAG,
                 "Exported flow ${flowIndex + 1}/${flowsToExport.size} (${flow.name}) with ${cardsForExport.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
             )
-            onFlowProgress?.invoke(flowIndex + 1, flowsToExport.size, flow.name)
         }
         writer.endArray()
         duplicateImageBacks.forEach { (original, matches) ->
@@ -5591,19 +5599,28 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val progressUi = showOperationProgressDialog(
                 title = getString(R.string.drawer_import_notes),
-                message = getString(R.string.import_progress_message_initial),
-                indeterminate = true
+                message = getString(R.string.import_progress_counting_message),
+                indeterminate = false
             )
             val payload = try {
                 withContext(Dispatchers.IO) {
+                    val totalCards = countImportCards(uri)
+                    runOnUiThread {
+                        updateOperationProgress(
+                            progressUi,
+                            message = getString(R.string.import_progress_cards_message, 0, totalCards),
+                            current = 0,
+                            total = totalCards
+                        )
+                    }
                     runCatching {
-                        readImportPayload(uri) { done, flowName ->
+                        readImportPayload(uri, totalCards) { done, total ->
                             runOnUiThread {
                                 updateOperationProgress(
                                     progressUi,
-                                    message = getString(R.string.import_progress_message_with_name, done, flowName),
+                                    message = getString(R.string.import_progress_cards_message, done, total),
                                     current = done,
-                                    total = null
+                                    total = total
                                 )
                             }
                         }
@@ -5672,7 +5689,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun readImportPayload(
         uri: Uri,
-        onFlowProgress: ((done: Int, flowName: String) -> Unit)? = null
+        totalCards: Int,
+        onCardProgress: ((done: Int, total: Int) -> Unit)? = null
     ): ImportPayload {
         val createdFiles = mutableListOf<CreatedFile>()
         val warnings = mutableListOf<String>()
@@ -5685,7 +5703,8 @@ class MainActivity : AppCompatActivity() {
                 "Starting import parse (uri=$uri, sizeBytes=$sourceSizeBytes)"
             )
             val importedFlows = mutableListOf<ImportedFlow>()
-            var totalCards = 0
+            var importedCardTotal = 0
+            var parsedCards = 0
             contentResolver.openInputStream(uri)?.use { stream ->
                 JsonReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
                     reader.beginObject()
@@ -5744,14 +5763,15 @@ class MainActivity : AppCompatActivity() {
                                             recognizedText,
                                             stickyNotes
                                         )
+                                        parsedCards++
+                                        onCardProgress?.invoke(parsedCards, totalCards)
                                     }
-                                    totalCards += cards.size
+                                    importedCardTotal += cards.size
                                     importedFlows += ImportedFlow(flowName, cards)
                                     Log.d(
                                         IMPORT_LOG_TAG,
                                         "Parsed flow ${flowIndex + 1} (${flowName}) with ${cards.size} card(s) in ${SystemClock.elapsedRealtime() - flowStartedAt}ms"
                                     )
-                                    onFlowProgress?.invoke(flowIndex + 1, flowName)
                                     flowIndex++
                                 }
                                 reader.endArray()
@@ -5764,9 +5784,9 @@ class MainActivity : AppCompatActivity() {
             } ?: throw IllegalStateException("Unable to open input stream")
             Log.d(
                 IMPORT_LOG_TAG,
-                "Parsed import payload with ${importedFlows.size} flows and $totalCards cards in ${SystemClock.elapsedRealtime() - startedAt}ms"
+                "Parsed import payload with ${importedFlows.size} flows and $importedCardTotal cards in ${SystemClock.elapsedRealtime() - startedAt}ms"
             )
-            ImportPayload(importedFlows, totalCards, warnings)
+            ImportPayload(importedFlows, importedCardTotal, warnings)
         } catch (e: Exception) {
             createdFiles.forEach { created ->
                 when (created) {
@@ -5776,6 +5796,43 @@ class MainActivity : AppCompatActivity() {
             }
             throw e
         }
+    }
+
+    private fun countImportCards(uri: Uri): Int {
+        var count = 0
+        contentResolver.openInputStream(uri)?.use { stream ->
+            JsonReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
+                reader.beginObject()
+                while (reader.hasNext()) {
+                    when (reader.nextName()) {
+                        "flows" -> {
+                            reader.beginArray()
+                            while (reader.hasNext()) {
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "cards" -> {
+                                            reader.beginArray()
+                                            while (reader.hasNext()) {
+                                                reader.skipValue()
+                                                count++
+                                            }
+                                            reader.endArray()
+                                        }
+                                        else -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                            }
+                            reader.endArray()
+                        }
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+            }
+        }
+        return count
     }
 
     private fun readJsonObject(reader: JsonReader): JSONObject {
