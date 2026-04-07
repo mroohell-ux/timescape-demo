@@ -161,23 +161,27 @@ class CardsAdapter(
     private val videoProgressUpdater = object : Runnable {
         override fun run() {
             val holders = attachedVideoHolders.toList()
+            var hasPlayingVideo = false
             holders.forEach { holder ->
                 syncVideoControlRotation(holder)
                 val vv = holder.videoInlineView
-                if (vv.isVisible && vv.duration > 0) {
-                    val pos = vv.currentPosition.coerceAtLeast(0)
+                if (vv.isVisible && vv.isPlaying) {
+                    hasPlayingVideo = true
                     val dur = vv.duration.coerceAtLeast(1)
+                    val pos = vv.currentPosition.coerceAtLeast(0)
                     (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
                         dispatchVideoProgress(cardId, pos.toLong(), dur.toLong())
                     }
                     holder.videoSeekBar.progress = ((pos.toDouble() / dur.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
                     holder.videoTimeLabel.text = "${formatDuration(pos.toLong())} / ${formatDuration(dur.toLong())}"
+                }
+                if (vv.isVisible) {
                     val icon = if (vv.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
                     holder.videoPlayPauseButton.setImageResource(icon)
                 }
             }
-            if (holders.any { it.videoInlineView.isVisible }) {
-                holders.firstOrNull()?.itemView?.postDelayed(this, 250L)
+            if (hasPlayingVideo) {
+                holders.firstOrNull()?.itemView?.postDelayed(this, VIDEO_PROGRESS_UPDATE_INTERVAL_MS)
             }
         }
     }
@@ -599,6 +603,7 @@ class CardsAdapter(
                 if (holder.videoInlineView.isPlaying) {
                     holder.videoInlineView.pause()
                     persistVideoProgress(holder)
+                    holder.itemView.removeCallbacks(videoProgressUpdater)
                     holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_play)
                     holder.videoPlayPauseButton.contentDescription =
                         holder.itemView.context.getString(R.string.video_play)
@@ -607,6 +612,8 @@ class CardsAdapter(
                     }
                 } else {
                     holder.videoInlineView.start()
+                    holder.itemView.removeCallbacks(videoProgressUpdater)
+                    holder.itemView.post(videoProgressUpdater)
                     holder.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_pause)
                     holder.videoPlayPauseButton.contentDescription =
                         holder.itemView.context.getString(R.string.video_pause)
@@ -1408,6 +1415,7 @@ class CardsAdapter(
 
 private const val HANDWRITING_PREFETCH_DISTANCE = 2
 private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 5_000L
+private const val VIDEO_PROGRESS_UPDATE_INTERVAL_MS = 1_000L
 private const val VIDEO_PROGRESS_RESUME_MARGIN_MS = 1_000L
 
 private fun CardItem.deepCopy(): CardItem = copy(
