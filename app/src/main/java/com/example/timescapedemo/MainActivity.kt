@@ -65,6 +65,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
+import androidx.appcompat.widget.AppCompatImageButton
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -143,6 +144,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var rootLayout: CoordinatorLayout
     private lateinit var toolbar: MaterialToolbar
+    private lateinit var toolbarTitleContainer: LinearLayout
+    private lateinit var toolbarTitleView: TextView
+    private lateinit var toolbarVideoMuteButton: AppCompatImageButton
     private lateinit var flowPager: ViewPager2
     private lateinit var flowBar: View
     private lateinit var flowChipGroup: ChipGroup
@@ -182,7 +186,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerWatchSyncHelpButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerToggleReorderFlowsButton: MaterialButton
-    private lateinit var drawerVideoMuteToggleButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
@@ -514,6 +517,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         toolbar.title = ""
+        toolbar.subtitle = ""
+        setupToolbarTitleArea()
 
         val header = navigationView.getHeaderView(0)
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
@@ -526,7 +531,6 @@ class MainActivity : AppCompatActivity() {
         drawerWatchSyncHelpButton = header.findViewById(R.id.buttonDrawerWatchSyncHelp)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
         drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
-        drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
         drawerClearImagesButton = header.findViewById(R.id.buttonDrawerClearImages)
@@ -643,10 +647,6 @@ class MainActivity : AppCompatActivity() {
             toggleFlowReorderMode()
             drawerLayout.closeDrawer(GravityCompat.START)
         }
-        drawerVideoMuteToggleButton.setOnClickListener {
-            setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
-        }
-
         drawerAddImagesButton.setOnClickListener { launchPicker() }
         drawerClearImagesButton.setOnClickListener {
             if (selectedImages.isEmpty()) {
@@ -816,6 +816,42 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
+    }
+
+    private fun setupToolbarTitleArea() {
+        val density = resources.displayMetrics.density
+        toolbarTitleContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        toolbarTitleView = TextView(this).apply {
+            setTextColor(Color.parseColor("#111111"))
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+        }
+        toolbarVideoMuteButton = AppCompatImageButton(this).apply {
+            setBackgroundResource(android.R.color.transparent)
+            imageTintList = ColorStateList.valueOf(Color.parseColor("#111111"))
+            contentDescription = getString(R.string.drawer_video_mute)
+            visibility = View.GONE
+            setOnClickListener {
+                setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
+            }
+        }
+        val iconSize = (24 * density).roundToInt()
+        val iconParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+            marginStart = (8 * density).roundToInt()
+        }
+        toolbarTitleContainer.addView(toolbarTitleView)
+        toolbarTitleContainer.addView(toolbarVideoMuteButton, iconParams)
+        val titleParams = Toolbar.LayoutParams(
+            Toolbar.LayoutParams.WRAP_CONTENT,
+            Toolbar.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            marginStart = (56 * density).roundToInt()
+        }
+        toolbar.addView(toolbarTitleContainer, titleParams)
     }
 
     private fun setupSearchAction(searchItem: MenuItem?) {
@@ -1184,14 +1220,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateToolbarSubtitle() {
         val flow = currentFlow()
-        toolbar.title = flow?.name ?: getString(R.string.app_name)
-        if (flow?.id == VIDEO_FLOW_ID) {
+        val isVideoFlow = flow?.id == VIDEO_FLOW_ID
+        if (isVideoFlow) {
             val source = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
             val folder = source?.let { Uri.parse(it).lastPathSegment?.substringAfterLast(':') } ?: ""
-            toolbar.subtitle = folder
+            toolbarTitleView.text = folder.ifBlank { getString(R.string.menu_pick_video_folder) }
+            toolbarVideoMuteButton.visibility = View.VISIBLE
+            toolbarVideoMuteButton.setImageResource(
+                if (isGlobalVideoMuted) R.drawable.ic_volume_off else R.drawable.ic_volume_up
+            )
+            toolbarVideoMuteButton.contentDescription = getString(
+                if (isGlobalVideoMuted) R.string.drawer_video_unmute else R.string.drawer_video_mute
+            )
         } else {
-            toolbar.subtitle = ""
+            toolbarTitleView.text = flow?.name ?: getString(R.string.app_name)
+            toolbarVideoMuteButton.visibility = View.GONE
         }
+        toolbar.title = ""
+        toolbar.subtitle = ""
     }
 
     private fun expandSearchViewToToolbarWidth(view: SearchView) {
@@ -1269,13 +1315,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setGlobalVideoMuted(muted: Boolean, persist: Boolean) {
         isGlobalVideoMuted = muted
-        if (::drawerVideoMuteToggleButton.isInitialized) {
-            drawerVideoMuteToggleButton.text = if (muted) {
-                getString(R.string.drawer_video_unmute)
-            } else {
-                getString(R.string.drawer_video_mute)
-            }
-        }
+        updateShuffleMenuState()
         flowControllers.values.forEach { controller ->
             controller.adapter.setGlobalVideoMuted(muted)
         }
