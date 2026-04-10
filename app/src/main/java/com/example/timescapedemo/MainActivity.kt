@@ -84,6 +84,7 @@ import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -374,7 +375,11 @@ class MainActivity : AppCompatActivity() {
                 return@registerForActivityResult
             }
             persistReadPermission(uri)
-            prefs.edit().putString(KEY_VIDEO_SOURCE_URI, uri.toString()).apply()
+            val sourceUri = uri.toString()
+            val folders = getVideoSourceFolders().toMutableList()
+            if (!folders.contains(sourceUri)) folders.add(sourceUri)
+            saveVideoSourceFolders(folders)
+            prefs.edit().putString(KEY_VIDEO_SOURCE_URI, sourceUri).apply()
             ensureVideoFlow()
             refreshVideoFlow(showSnackbar = true)
             snackbar(getString(R.string.snackbar_video_folder_saved))
@@ -6617,7 +6622,16 @@ class MainActivity : AppCompatActivity() {
     private fun refreshVideoFlow(showSnackbar: Boolean = false) {
         val videoFlow = flows.firstOrNull { it.id == VIDEO_FLOW_ID } ?: return
         val shouldScrollToTop = showSnackbar
-        val folderValue = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
+        val knownFolders = getVideoSourceFolders()
+        val preferredFolder = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
+        val folderValue = when {
+            !preferredFolder.isNullOrBlank() && knownFolders.contains(preferredFolder) -> preferredFolder
+            knownFolders.isNotEmpty() -> knownFolders.first()
+            else -> preferredFolder
+        }
+        if (!folderValue.isNullOrBlank() && folderValue != preferredFolder) {
+            prefs.edit().putString(KEY_VIDEO_SOURCE_URI, folderValue).apply()
+        }
         if (folderValue.isNullOrBlank()) {
             videoFlow.cards.clear()
             videoFlow.cards += CardItem(
@@ -6780,6 +6794,41 @@ class MainActivity : AppCompatActivity() {
         return out
     }
 
+    private fun getVideoSourceFolders(): List<String> {
+        val saved = prefs.getString(KEY_VIDEO_SOURCE_URIS, null)
+        if (!saved.isNullOrBlank()) {
+            return runCatching {
+                val arr = JSONArray(saved)
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val value = arr.optString(i).trim()
+                        if (value.isNotEmpty()) add(value)
+                    }
+                }.distinct()
+            }.getOrDefault(emptyList())
+        }
+        val legacy = prefs.getString(KEY_VIDEO_SOURCE_URI, null)?.takeIf { it.isNotBlank() } ?: return emptyList()
+        saveVideoSourceFolders(listOf(legacy))
+        return listOf(legacy)
+    }
+
+    private fun saveVideoSourceFolders(folders: List<String>) {
+        val arr = JSONArray()
+        folders.distinct().forEach(arr::put)
+        prefs.edit().putString(KEY_VIDEO_SOURCE_URIS, arr.toString()).apply()
+    }
+
+    private fun videoFolderLabel(uriText: String): String {
+        val uri = Uri.parse(uriText)
+        val fromDoc = DocumentFile.fromTreeUri(this, uri)?.name?.trim().orEmpty()
+        if (fromDoc.isNotEmpty()) return fromDoc
+        val docId = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull().orEmpty()
+        val fromDocId = docId.substringAfterLast('/').trim()
+        if (fromDocId.isNotEmpty()) return fromDocId
+        return uri.lastPathSegment?.substringAfterLast(':')?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: getString(R.string.video_folder_label_fallback)
+    }
+
     private fun isSupportedVideo(fileName: String, mime: String): Boolean {
         if (mime.startsWith("video/")) return true
         val ext = fileName.substringAfterLast('.', "").lowercase(Locale.US)
@@ -6862,6 +6911,10 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+            val videoFolderTagsContainer = view.findViewById<View>(R.id.videoFolderTagsContainer)
+            val videoFolderTags = view.findViewById<ChipGroup>(R.id.videoFolderTags)
+            val videoFolderTagsScroll = view.findViewById<HorizontalScrollView>(R.id.videoFolderTagsScroll)
+            val addVideoFolderButton = view.findViewById<MaterialButton>(R.id.buttonAddVideoFolderTag)
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
@@ -6886,7 +6939,17 @@ class MainActivity : AppCompatActivity() {
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+            holder = FlowVH(
+                view,
+                recycler,
+                layoutManager,
+                adapter,
+                cardCountView,
+                videoFolderTagsContainer,
+                videoFolderTags,
+                videoFolderTagsScroll,
+                addVideoFolderButton
+            )
             return holder
         }
 
@@ -6910,7 +6973,11 @@ class MainActivity : AppCompatActivity() {
             val recycler: RecyclerView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter,
-            val cardCountView: TextView
+            val cardCountView: TextView,
+            val videoFolderTagsContainer: View,
+            val videoFolderTags: ChipGroup,
+            val videoFolderTagsScroll: HorizontalScrollView,
+            val addVideoFolderButton: MaterialButton
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
 
@@ -6932,6 +6999,37 @@ class MainActivity : AppCompatActivity() {
                     shouldRestoreState = flowSearchQueryNormalized.isEmpty(),
                     shouldScrollToTop = flowSearchQueryNormalized.isNotEmpty()
                 )
+                bindVideoFolderTags(flow)
+            }
+
+            private fun bindVideoFolderTags(flow: CardFlow) {
+                val isVideoFlow = flow.id == VIDEO_FLOW_ID
+                videoFolderTagsContainer.isVisible = isVideoFlow
+                if (!isVideoFlow) return
+                val sourceFolders = getVideoSourceFolders()
+                val selectedSource = prefs.getString(KEY_VIDEO_SOURCE_URI, null)
+                videoFolderTags.removeAllViews()
+                sourceFolders.forEach { folderUri ->
+                    val chip = Chip(this@MainActivity).apply {
+                        text = videoFolderLabel(folderUri)
+                        isCheckable = true
+                        isCheckedIconVisible = false
+                        isCloseIconVisible = false
+                        isClickable = true
+                        isChecked = folderUri == selectedSource
+                        setOnClickListener {
+                            if (prefs.getString(KEY_VIDEO_SOURCE_URI, null) != folderUri) {
+                                prefs.edit().putString(KEY_VIDEO_SOURCE_URI, folderUri).apply()
+                                refreshVideoFlow(showSnackbar = true)
+                            }
+                        }
+                    }
+                    videoFolderTags.addView(chip)
+                }
+                addVideoFolderButton.setOnClickListener { pickVideoFolder.launch(null) }
+                if (videoFolderTags.childCount > 0) {
+                    videoFolderTagsScroll.post { videoFolderTagsScroll.fullScroll(View.FOCUS_RIGHT) }
+                }
             }
 
             fun onCardTapped(index: Int) {
@@ -7343,6 +7441,7 @@ private const val KEY_HANDWRITING_DEFAULT_CANVAS_WIDTH = "handwriting/default_ca
 private const val KEY_HANDWRITING_DEFAULT_CANVAS_HEIGHT = "handwriting/default_canvas_height"
 private const val KEY_HANDWRITING_DEFAULT_FORMAT = "handwriting/default_format"
 private const val KEY_VIDEO_SOURCE_URI = "video/source_uri"
+private const val KEY_VIDEO_SOURCE_URIS = "video/source_uris"
 private const val KEY_VIDEO_INCLUDE_SUBFOLDERS = "video/include_subfolders"
 private const val KEY_VIDEO_GLOBAL_MUTED = "video/global_muted"
 private const val VIDEO_WATCH_COMPLETE_THRESHOLD_MS = 2_000L
