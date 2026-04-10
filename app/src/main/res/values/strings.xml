@@ -281,6 +281,7 @@
     <string name="video_flow_name">Movies</string>
     <string name="menu_pick_video_folder">Choose video folder</string>
     <string name="menu_refresh_video_folder">Refresh videos</string>
+    <string name="video_folder_label_fallback">Video folder</string>
     <string name="snackbar_video_folder_missing">Pick a video folder to populate Movies.</string>
     <string name="snackbar_video_folder_saved">Video source folder connected.</string>
     <string name="snackbar_video_refresh_complete">Movies synced: %1$d videos.</string>
