@@ -944,6 +944,10 @@ class CardsAdapter(
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
 
     private fun bindFilamentCard(holder: VH, item: CardItem, face: HandwritingFace, position: Int) {
+        if (!holder.filamentFlipCard.isReady()) {
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
         val front = snapshotCardFace(holder, item, HandwritingFace.FRONT, position)
         val back = snapshotCardFace(holder, item, HandwritingFace.BACK, position)
         if (front == null || back == null) {

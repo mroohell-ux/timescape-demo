@@ -12,6 +12,7 @@ import androidx.core.animation.doOnEnd
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
+import com.google.android.filament.Filament
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.LightManager
 import com.google.android.filament.Renderer
@@ -20,6 +21,7 @@ import com.google.android.filament.Skybox
 import com.google.android.filament.SwapChain
 import com.google.android.filament.Texture
 import com.google.android.filament.View
+import android.util.Log
 import java.nio.ByteBuffer
 import kotlin.math.cos
 import kotlin.math.sin
@@ -56,13 +58,20 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     private var angleDeg: Float = 0f
     private var face: HandwritingFace = HandwritingFace.FRONT
+    private var filamentReady = false
 
     init {
         addView(surfaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        initializeFilament()
+        filamentReady = initializeFilamentSafely()
+        if (!filamentReady) {
+            surfaceView.visibility = GONE
+        }
     }
 
+    fun isReady(): Boolean = filamentReady
+
     fun bind(front: Bitmap, back: Bitmap, targetFace: HandwritingFace) {
+        if (!filamentReady) return
         face = targetFace
         uploadTextures(front, back)
         angleDeg = if (targetFace == HandwritingFace.FRONT) 0f else 180f
@@ -72,6 +81,10 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     fun currentFace(): HandwritingFace = face
 
     fun flipTo(targetFace: HandwritingFace, onEnd: (() -> Unit)? = null) {
+        if (!filamentReady) {
+            onEnd?.invoke()
+            return
+        }
         if (targetFace == face) {
             onEnd?.invoke()
             return
@@ -127,7 +140,19 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         scheduleFrame()
     }
 
+    private fun initializeFilamentSafely(): Boolean {
+        return try {
+            Filament.init()
+            initializeFilament()
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "Filament initialization failed; falling back to normal card path.", t)
+            false
+        }
+    }
+
     private fun uploadTextures(front: Bitmap, back: Bitmap) {
+        if (!filamentReady) return
         val localEngine = engine ?: return
         frontTexture?.let { localEngine.destroyTexture(it) }
         backTexture?.let { localEngine.destroyTexture(it) }
@@ -201,6 +226,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     }
 
     override fun doFrame(frameTimeNanos: Long) {
+        if (!filamentReady) return
         frameScheduled = false
         val localRenderer = renderer ?: return
         val localSwapChain = swapChain ?: return
@@ -213,12 +239,14 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (!filamentReady) return
         updateCameraProjection()
         view?.viewport = com.google.android.filament.Viewport(0, 0, w, h)
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        if (!filamentReady) return
         val localEngine = engine ?: return
         frontTexture?.let(localEngine::destroyTexture)
         backTexture?.let(localEngine::destroyTexture)
@@ -238,5 +266,9 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         renderer = null
         swapChain = null
         engine = null
+    }
+
+    companion object {
+        private const val TAG = "FilamentFlippableCard"
     }
 }
