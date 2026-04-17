@@ -1122,7 +1122,7 @@ class CardsAdapter(
         if (total == 0) return true
         val darkRatio = darkCount.toFloat() / total.toFloat()
         val transparentRatio = transparentCount.toFloat() / total.toFloat()
-        return transparentRatio > 0.8f || darkRatio > 0.92f
+        return transparentRatio > 0.25f || darkRatio > 0.92f
     }
 
     private fun animateFilamentShellFlip(holder: VH, targetFace: HandwritingFace) {
