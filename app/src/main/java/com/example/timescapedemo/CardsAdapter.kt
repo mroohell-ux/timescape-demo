@@ -151,6 +151,8 @@ class CardsAdapter(
         val videoSeekBar: SeekBar = v.findViewById(R.id.videoSeekBar)
         val videoTimeLabel: TextView = v.findViewById(R.id.videoTimeLabel)
         val videoTitleLabel: TextView = v.findViewById(R.id.videoTitleLabel)
+        var lastTapNormX: Float = 0.5f
+        var lastTapNormY: Float = 0.5f
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -296,6 +298,7 @@ class CardsAdapter(
         val vh = VH(v)
         vh.gestureDetector = GestureDetectorCompat(v.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                updateTapAnchor(vh, e)
                 val idx = vh.bindingAdapterPosition
                 if (idx != RecyclerView.NO_POSITION) onItemClick(idx)
                 return true
@@ -1056,10 +1059,32 @@ class CardsAdapter(
         val shell = holder.card
         val density = holder.itemView.resources.displayMetrics.density
         shell.cameraDistance = density * FILAMENT_SHELL_CAMERA_DISTANCE
+        val tapX = holder.lastTapNormX.coerceIn(0f, 1f)
+        val tapY = holder.lastTapNormY.coerceIn(0f, 1f)
+        val hingeSign = if (tapX >= 0.5f) -1f else 1f
+        val hingeRotation = FILAMENT_SHELL_HALF_ROTATION * hingeSign
+        val verticalTilt = ((tapY - 0.5f) * 2f * FILAMENT_SHELL_MAX_TILT_X_DEG).coerceIn(
+            -FILAMENT_SHELL_MAX_TILT_X_DEG,
+            FILAMENT_SHELL_MAX_TILT_X_DEG
+        )
+        val cornerRoll = ((tapX - 0.5f) * (tapY - 0.5f) * 4f * FILAMENT_SHELL_MAX_ROLL_DEG).coerceIn(
+            -FILAMENT_SHELL_MAX_ROLL_DEG,
+            FILAMENT_SHELL_MAX_ROLL_DEG
+        )
+        shell.pivotX = shell.width * tapX
+        shell.pivotY = shell.height * (0.52f + (tapY - 0.5f) * 0.16f)
         shell.animate().cancel()
         val fold = AnimatorSet().apply {
             playTogether(
-                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, 0f, FILAMENT_SHELL_HALF_ROTATION).apply {
+                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, 0f, hingeRotation).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION_X, 0f, verticalTilt).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION, 0f, cornerRoll).apply {
                     duration = FILAMENT_SHELL_HALF_DURATION_MS
                     interpolator = AccelerateInterpolator()
                 },
@@ -1075,7 +1100,15 @@ class CardsAdapter(
         }
         val unfold = AnimatorSet().apply {
             playTogether(
-                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, -FILAMENT_SHELL_HALF_ROTATION, 0f).apply {
+                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, -hingeRotation, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION_X, verticalTilt, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION, cornerRoll, 0f).apply {
                     duration = FILAMENT_SHELL_HALF_DURATION_MS
                     interpolator = DecelerateInterpolator()
                 },
@@ -1092,18 +1125,32 @@ class CardsAdapter(
         fold.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator) {
                 holder.filamentFlipCard.setFace(targetFace)
-                shell.rotationY = -FILAMENT_SHELL_HALF_ROTATION
+                shell.rotationY = -hingeRotation
                 unfold.start()
             }
         })
         unfold.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator) {
                 shell.rotationY = 0f
+                shell.rotationX = 0f
+                shell.rotation = 0f
                 shell.scaleX = 1f
                 shell.scaleY = 1f
             }
         })
         fold.start()
+    }
+
+    private fun updateTapAnchor(holder: VH, event: MotionEvent) {
+        val w = holder.card.width.takeIf { it > 0 } ?: return
+        val h = holder.card.height.takeIf { it > 0 } ?: return
+        val localX = event.x - holder.card.left
+        val localY = event.y - holder.card.top
+        holder.lastTapNormX = (localX / w.toFloat()).coerceIn(0f, 1f)
+        holder.lastTapNormY = (localY / h.toFloat()).coerceIn(0f, 1f)
+        if (ENABLE_3D_LOGS) {
+            Log.i(TAG_3D, "tapAnchor: x=${holder.lastTapNormX}, y=${holder.lastTapNormY}")
+        }
     }
 
     private fun animateHandwritingFlip(
@@ -1574,6 +1621,8 @@ class CardsAdapter(
         private const val FILAMENT_SHELL_HALF_DURATION_MS = 165L
         private const val FILAMENT_SHELL_HALF_ROTATION = 86f
         private const val FILAMENT_SHELL_CAMERA_DISTANCE = 9_500f
+        private const val FILAMENT_SHELL_MAX_TILT_X_DEG = 5.8f
+        private const val FILAMENT_SHELL_MAX_ROLL_DEG = 1.6f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
