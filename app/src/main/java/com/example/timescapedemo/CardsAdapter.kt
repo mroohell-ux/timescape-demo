@@ -1092,6 +1092,20 @@ class CardsAdapter(
             }
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
+            val snapshotBackgroundColor = when {
+                item.handwriting != null -> {
+                    if (face == HandwritingFace.BACK) {
+                        item.handwriting?.back?.options?.backgroundColor ?: item.handwriting!!.options.backgroundColor
+                    } else {
+                        item.handwriting!!.options.backgroundColor
+                    }
+                }
+                item.imageHandwriting != null && face == HandwritingFace.BACK -> {
+                    item.imageHandwriting?.options?.backgroundColor ?: Color.WHITE
+                }
+                else -> Color.WHITE
+            }
+            canvas.drawColor(snapshotBackgroundColor)
             holder.cardSceneSnapshotRoot.draw(canvas)
             return bitmap
         } finally {
