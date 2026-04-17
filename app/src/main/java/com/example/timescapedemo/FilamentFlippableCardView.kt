@@ -78,7 +78,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         frontFaceView.cameraDistance = cameraDistancePx
         backFaceView.cameraDistance = cameraDistancePx
         filamentReady = initializeFilamentSafely()
-        if (BuildConfig.DEBUG) {
+        if (ENABLE_3D_LOGS) {
             Log.d(TAG, "init: filamentReady=$filamentReady")
         }
         if (!filamentReady) {
@@ -89,7 +89,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     fun isReady(): Boolean = filamentReady
 
     fun bind(front: Bitmap, back: Bitmap, targetFace: HandwritingFace) {
-        if (BuildConfig.DEBUG) {
+        if (ENABLE_3D_LOGS) {
             Log.d(
                 TAG,
                 "bind: targetFace=$targetFace, front=${front.width}x${front.height}, back=${back.width}x${back.height}, ready=$filamentReady"
@@ -111,7 +111,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     fun currentFace(): HandwritingFace = face
 
     fun flipTo(targetFace: HandwritingFace, onEnd: (() -> Unit)? = null) {
-        if (BuildConfig.DEBUG) {
+        if (ENABLE_3D_LOGS) {
             Log.d(TAG, "flipTo: current=$face target=$targetFace angle=$angleDeg ready=$filamentReady")
         }
         if (targetFace == face) {
@@ -138,7 +138,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
             doOnEnd {
                 face = targetFace
                 applyFaceRotationInstant()
-                if (BuildConfig.DEBUG) {
+                if (ENABLE_3D_LOGS) {
                     Log.d(TAG, "flipTo:end face=$face angle=$angleDeg")
                 }
                 onEnd?.invoke()
@@ -287,7 +287,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         if (localRenderer.beginFrame(localSwapChain, frameTimeNanos)) {
             localRenderer.render(localView)
             localRenderer.endFrame()
-            if (BuildConfig.DEBUG && debugFrameCount < 5) {
+            if (ENABLE_3D_LOGS && debugFrameCount < 5) {
                 debugFrameCount += 1
                 Log.d(TAG, "doFrame: rendered frame #$debugFrameCount at $frameTimeNanos")
             }
@@ -327,5 +327,6 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "FilamentFlippableCard"
+        private const val ENABLE_3D_LOGS = true
     }
 }

@@ -412,8 +412,8 @@ class CardsAdapter(
             bindTextCard(holder, item, face)
         }
         if (isFlippable && !isSnapshotBinding) {
-            if (BuildConfig.DEBUG) {
-                Log.d("CardsAdapter3D", "onBind: try filament cardId=${item.id} face=$face position=$position")
+            if (ENABLE_3D_LOGS) {
+                Log.d(TAG_3D, "onBind: try filament cardId=${item.id} face=$face position=$position")
             }
             bindFilamentCard(holder, item, face, position)
         } else {
@@ -920,8 +920,8 @@ class CardsAdapter(
         }
         when {
             holder.filamentFlipCard.isVisible -> {
-                if (BuildConfig.DEBUG) {
-                    Log.d("CardsAdapter3D", "toggleCardFace: filament flip cardId=${item.id} $current->$next")
+                if (ENABLE_3D_LOGS) {
+                    Log.d(TAG_3D, "toggleCardFace: filament flip cardId=${item.id} $current->$next")
                 }
                 holder.filamentFlipCard.flipTo(next)
             }
@@ -954,8 +954,8 @@ class CardsAdapter(
 
     private fun bindFilamentCard(holder: VH, item: CardItem, face: HandwritingFace, position: Int) {
         if (!holder.filamentFlipCard.isReady()) {
-            if (BuildConfig.DEBUG) {
-                Log.d("CardsAdapter3D", "bindFilamentCard: not ready cardId=${item.id}")
+            if (ENABLE_3D_LOGS) {
+                Log.d(TAG_3D, "bindFilamentCard: not ready cardId=${item.id}")
             }
             holder.filamentFlipCard.isVisible = false
             return
@@ -963,18 +963,18 @@ class CardsAdapter(
         val front = snapshotCardFace(holder, item, HandwritingFace.FRONT, position)
         val back = snapshotCardFace(holder, item, HandwritingFace.BACK, position)
         if (front == null || back == null) {
-            if (BuildConfig.DEBUG) {
+            if (ENABLE_3D_LOGS) {
                 Log.d(
-                    "CardsAdapter3D",
+                    TAG_3D,
                     "bindFilamentCard: snapshot missing cardId=${item.id} frontNull=${front == null} backNull=${back == null} root=${holder.cardSceneSnapshotRoot.width}x${holder.cardSceneSnapshotRoot.height}"
                 )
             }
             holder.filamentFlipCard.isVisible = false
             return
         }
-        if (BuildConfig.DEBUG) {
+        if (ENABLE_3D_LOGS) {
             Log.d(
-                "CardsAdapter3D",
+                TAG_3D,
                 "bindFilamentCard: cardId=${item.id} face=$face front=${front.width}x${front.height} back=${back.width}x${back.height}"
             )
         }
@@ -1470,6 +1470,8 @@ class CardsAdapter(
     }
     @Suppress("ConstPropertyName")
     private companion object {
+        private const val TAG_3D = "CardsAdapter3D"
+        private const val ENABLE_3D_LOGS = true
         private const val DEFAULT_BODY_TEXT_SIZE_SP = 18f
         private const val MIN_BODY_TEXT_SIZE_SP = 12f
         private const val MAX_BODY_TEXT_SIZE_SP = 32f
