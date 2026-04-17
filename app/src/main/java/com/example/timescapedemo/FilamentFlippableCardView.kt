@@ -79,7 +79,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         backFaceView.cameraDistance = cameraDistancePx
         filamentReady = initializeFilamentSafely()
         if (ENABLE_3D_LOGS) {
-            Log.d(TAG, "init: filamentReady=$filamentReady")
+            Log.i(TAG, "init: filamentReady=$filamentReady")
         }
         if (!filamentReady) {
             surfaceView.visibility = GONE
@@ -90,7 +90,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     fun bind(front: Bitmap, back: Bitmap, targetFace: HandwritingFace) {
         if (ENABLE_3D_LOGS) {
-            Log.d(
+            Log.i(
                 TAG,
                 "bind: targetFace=$targetFace, front=${front.width}x${front.height}, back=${back.width}x${back.height}, ready=$filamentReady"
             )
@@ -112,7 +112,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     fun flipTo(targetFace: HandwritingFace, onEnd: (() -> Unit)? = null) {
         if (ENABLE_3D_LOGS) {
-            Log.d(TAG, "flipTo: current=$face target=$targetFace angle=$angleDeg ready=$filamentReady")
+            Log.i(TAG, "flipTo: current=$face target=$targetFace angle=$angleDeg ready=$filamentReady")
         }
         if (targetFace == face) {
             onEnd?.invoke()
@@ -139,7 +139,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
                 face = targetFace
                 applyFaceRotationInstant()
                 if (ENABLE_3D_LOGS) {
-                    Log.d(TAG, "flipTo:end face=$face angle=$angleDeg")
+                    Log.i(TAG, "flipTo:end face=$face angle=$angleDeg")
                 }
                 onEnd?.invoke()
             }
@@ -289,7 +289,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
             localRenderer.endFrame()
             if (ENABLE_3D_LOGS && debugFrameCount < 5) {
                 debugFrameCount += 1
-                Log.d(TAG, "doFrame: rendered frame #$debugFrameCount at $frameTimeNanos")
+                Log.i(TAG, "doFrame: rendered frame #$debugFrameCount at $frameTimeNanos")
             }
         }
     }
