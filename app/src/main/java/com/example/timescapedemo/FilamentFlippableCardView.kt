@@ -3,10 +3,12 @@ package com.example.timescapedemo
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.view.Choreographer
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -52,6 +54,29 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     private val backFaceView = ImageView(context).apply {
         scaleType = ImageView.ScaleType.FIT_XY
     }
+    private val frontShadeView = View(context).apply {
+        setBackgroundColor(0xFF000000.toInt())
+        alpha = 0f
+    }
+    private val backShadeView = View(context).apply {
+        setBackgroundColor(0xFF000000.toInt())
+        alpha = 0f
+    }
+    private val edgeView = View(context).apply {
+        background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(0x33FFFFFF, 0xCCF2EBDD.toInt(), 0x22FFFFFF)
+        )
+        alpha = 0f
+    }
+    private val shadowView = View(context).apply {
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 26f
+            setColor(0x48000000)
+        }
+        alpha = 0f
+    }
 
     private var engine: Engine? = null
     private var renderer: Renderer? = null
@@ -74,12 +99,18 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     init {
         addView(surfaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(shadowView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(frontFaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(backFaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(frontShadeView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(backShadeView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(edgeView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         backFaceView.isVisible = false
         val cameraDistancePx = resources.displayMetrics.density * 3_200f
         frontFaceView.cameraDistance = cameraDistancePx
         backFaceView.cameraDistance = cameraDistancePx
+        frontShadeView.cameraDistance = cameraDistancePx
+        backShadeView.cameraDistance = cameraDistancePx
         surfaceView.holder.addCallback(this)
         surfaceView.visibility = GONE
     }
@@ -175,6 +206,40 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         frontFaceView.scaleY = depthScale
         backFaceView.scaleX = depthScale
         backFaceView.scaleY = depthScale
+
+        val pivotX = width * if (direction >= 0f) HAND_PIVOT_RIGHT_FRACTION else HAND_PIVOT_LEFT_FRACTION
+        val pivotY = height * HAND_PIVOT_Y_FRACTION
+        for (v in listOf(frontFaceView, backFaceView, frontShadeView, backShadeView)) {
+            v.pivotX = pivotX
+            v.pivotY = pivotY
+        }
+
+        val rad = Math.toRadians(normalized.toDouble())
+        val sideExposure = kotlin.math.abs(kotlin.math.sin(rad)).toFloat().coerceIn(0f, 1f)
+        val facing = kotlin.math.abs(kotlin.math.cos(rad)).toFloat().coerceIn(0f, 1f)
+
+        val edgeWidthPx = (resources.displayMetrics.density * HAND_EDGE_MAX_DP * sideExposure).coerceAtLeast(1f)
+        edgeView.scaleX = edgeWidthPx / width.coerceAtLeast(1)
+        edgeView.alpha = 0.88f * sideExposure
+        edgeView.translationX = (width * 0.5f) + (direction * width * 0.06f * (1f - facing)) - (edgeWidthPx * 0.5f)
+
+        val darken = ((1f - facing) * HAND_MAX_DARKEN_ALPHA).coerceIn(0f, HAND_MAX_DARKEN_ALPHA)
+        frontShadeView.alpha = darken
+        backShadeView.alpha = darken * 0.92f
+        frontShadeView.rotationY = frontFaceView.rotationY
+        backShadeView.rotationY = backFaceView.rotationY
+        frontShadeView.rotationX = frontFaceView.rotationX
+        backShadeView.rotationX = backFaceView.rotationX
+        frontShadeView.rotation = frontFaceView.rotation
+        backShadeView.rotation = backFaceView.rotation
+        frontShadeView.translationY = frontFaceView.translationY
+        backShadeView.translationY = backFaceView.translationY
+
+        shadowView.alpha = (HAND_SHADOW_BASE_ALPHA + sideExposure * 0.24f).coerceIn(0f, 0.5f)
+        shadowView.scaleX = 0.93f + sideExposure * 0.1f
+        shadowView.scaleY = 0.88f + sideExposure * 0.1f
+        shadowView.translationY = resources.displayMetrics.density * (HAND_SHADOW_DROP_DP + arc * 4.2f)
+        shadowView.translationX = -direction * resources.displayMetrics.density * 2.6f * arc
     }
 
     private fun handEasedProgress(raw: Float): Float {
@@ -427,5 +492,12 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         private const val HAND_MAX_TILT_X_DEG = 6.5f
         private const val HAND_MAX_ROLL_DEG = 1.4f
         private const val HAND_LIFT_DP = 3.5f
+        private const val HAND_PIVOT_RIGHT_FRACTION = 0.64f
+        private const val HAND_PIVOT_LEFT_FRACTION = 0.36f
+        private const val HAND_PIVOT_Y_FRACTION = 0.58f
+        private const val HAND_EDGE_MAX_DP = 3.2f
+        private const val HAND_MAX_DARKEN_ALPHA = 0.17f
+        private const val HAND_SHADOW_BASE_ALPHA = 0.16f
+        private const val HAND_SHADOW_DROP_DP = 9.5f
     }
 }
