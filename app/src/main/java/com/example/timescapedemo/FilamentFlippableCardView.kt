@@ -67,6 +67,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     private var angleDeg: Float = 0f
     private var face: HandwritingFace = HandwritingFace.FRONT
     private var filamentReady = false
+    private var debugFrameCount = 0
 
     init {
         addView(surfaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -77,6 +78,9 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         frontFaceView.cameraDistance = cameraDistancePx
         backFaceView.cameraDistance = cameraDistancePx
         filamentReady = initializeFilamentSafely()
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "init: filamentReady=$filamentReady")
+        }
         if (!filamentReady) {
             surfaceView.visibility = GONE
         }
@@ -85,6 +89,12 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     fun isReady(): Boolean = filamentReady
 
     fun bind(front: Bitmap, back: Bitmap, targetFace: HandwritingFace) {
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TAG,
+                "bind: targetFace=$targetFace, front=${front.width}x${front.height}, back=${back.width}x${back.height}, ready=$filamentReady"
+            )
+        }
         frontFaceView.setImageBitmap(front)
         backFaceView.setImageBitmap(back)
         frontFaceView.isVisible = targetFace == HandwritingFace.FRONT
@@ -101,6 +111,9 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     fun currentFace(): HandwritingFace = face
 
     fun flipTo(targetFace: HandwritingFace, onEnd: (() -> Unit)? = null) {
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "flipTo: current=$face target=$targetFace angle=$angleDeg ready=$filamentReady")
+        }
         if (targetFace == face) {
             onEnd?.invoke()
             return
@@ -125,6 +138,9 @@ class FilamentFlippableCardView @JvmOverloads constructor(
             doOnEnd {
                 face = targetFace
                 applyFaceRotationInstant()
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "flipTo:end face=$face angle=$angleDeg")
+                }
                 onEnd?.invoke()
             }
             start()
@@ -271,6 +287,10 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         if (localRenderer.beginFrame(localSwapChain, frameTimeNanos)) {
             localRenderer.render(localView)
             localRenderer.endFrame()
+            if (BuildConfig.DEBUG && debugFrameCount < 5) {
+                debugFrameCount += 1
+                Log.d(TAG, "doFrame: rendered frame #$debugFrameCount at $frameTimeNanos")
+            }
         }
     }
 

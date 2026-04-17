@@ -40,6 +40,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
+import android.util.Log
 import androidx.core.view.isVisible
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -411,6 +412,9 @@ class CardsAdapter(
             bindTextCard(holder, item, face)
         }
         if (isFlippable && !isSnapshotBinding) {
+            if (BuildConfig.DEBUG) {
+                Log.d("CardsAdapter3D", "onBind: try filament cardId=${item.id} face=$face position=$position")
+            }
             bindFilamentCard(holder, item, face, position)
         } else {
             holder.filamentFlipCard.isVisible = false
@@ -915,7 +919,12 @@ class CardsAdapter(
             else -> item.snippet
         }
         when {
-            holder.filamentFlipCard.isVisible -> holder.filamentFlipCard.flipTo(next)
+            holder.filamentFlipCard.isVisible -> {
+                if (BuildConfig.DEBUG) {
+                    Log.d("CardsAdapter3D", "toggleCardFace: filament flip cardId=${item.id} $current->$next")
+                }
+                holder.filamentFlipCard.flipTo(next)
+            }
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
             hasTextBack -> bindTextCard(holder, item, next)
@@ -945,14 +954,29 @@ class CardsAdapter(
 
     private fun bindFilamentCard(holder: VH, item: CardItem, face: HandwritingFace, position: Int) {
         if (!holder.filamentFlipCard.isReady()) {
+            if (BuildConfig.DEBUG) {
+                Log.d("CardsAdapter3D", "bindFilamentCard: not ready cardId=${item.id}")
+            }
             holder.filamentFlipCard.isVisible = false
             return
         }
         val front = snapshotCardFace(holder, item, HandwritingFace.FRONT, position)
         val back = snapshotCardFace(holder, item, HandwritingFace.BACK, position)
         if (front == null || back == null) {
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    "CardsAdapter3D",
+                    "bindFilamentCard: snapshot missing cardId=${item.id} frontNull=${front == null} backNull=${back == null} root=${holder.cardSceneSnapshotRoot.width}x${holder.cardSceneSnapshotRoot.height}"
+                )
+            }
             holder.filamentFlipCard.isVisible = false
             return
+        }
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                "CardsAdapter3D",
+                "bindFilamentCard: cardId=${item.id} face=$face front=${front.width}x${front.height} back=${back.width}x${back.height}"
+            )
         }
         holder.filamentFlipCard.bind(front, back, face)
         holder.filamentFlipCard.isVisible = true
