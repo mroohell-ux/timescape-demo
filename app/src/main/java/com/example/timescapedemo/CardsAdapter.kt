@@ -942,7 +942,7 @@ class CardsAdapter(
                 if (ENABLE_3D_LOGS) {
                     Log.i(TAG_3D, "toggleCardFace: filament flip cardId=${item.id} $current->$next")
                 }
-                holder.filamentFlipCard.flipTo(next)
+                animateFilamentShellFlip(holder, next)
             }
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
@@ -1050,6 +1050,60 @@ class CardsAdapter(
         } finally {
             isSnapshotBinding = false
         }
+    }
+
+    private fun animateFilamentShellFlip(holder: VH, targetFace: HandwritingFace) {
+        val shell = holder.card
+        val density = holder.itemView.resources.displayMetrics.density
+        shell.cameraDistance = density * FILAMENT_SHELL_CAMERA_DISTANCE
+        shell.animate().cancel()
+        val fold = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, 0f, FILAMENT_SHELL_HALF_ROTATION).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_X, 1f, 0.985f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_Y, 1f, 0.992f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                }
+            )
+        }
+        val unfold = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, -FILAMENT_SHELL_HALF_ROTATION, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_X, 0.985f, 1.01f, 1f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_Y, 0.992f, 1f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                }
+            )
+        }
+        fold.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                holder.filamentFlipCard.setFace(targetFace)
+                shell.rotationY = -FILAMENT_SHELL_HALF_ROTATION
+                unfold.start()
+            }
+        })
+        unfold.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                shell.rotationY = 0f
+                shell.scaleX = 1f
+                shell.scaleY = 1f
+            }
+        })
+        fold.start()
     }
 
     private fun animateHandwritingFlip(
@@ -1517,6 +1571,9 @@ class CardsAdapter(
         private const val BG_BLUR_RADIUS = 12f
         private const val HANDWRITING_FLIP_HALF_DURATION = 140L
         private const val HANDWRITING_CAMERA_DISTANCE = 8000f
+        private const val FILAMENT_SHELL_HALF_DURATION_MS = 165L
+        private const val FILAMENT_SHELL_HALF_ROTATION = 86f
+        private const val FILAMENT_SHELL_CAMERA_DISTANCE = 9_500f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;

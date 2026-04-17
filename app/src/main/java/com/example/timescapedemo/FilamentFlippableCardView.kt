@@ -144,6 +144,15 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     fun currentFace(): HandwritingFace = face
 
+    fun setFace(targetFace: HandwritingFace) {
+        face = targetFace
+        frontFaceView.isVisible = targetFace == HandwritingFace.FRONT
+        backFaceView.isVisible = targetFace == HandwritingFace.BACK
+        angleDeg = if (targetFace == HandwritingFace.FRONT) 0f else 180f
+        applyFaceRotationInstant(1f, 1f)
+        invalidateFilamentState()
+    }
+
     fun flipTo(targetFace: HandwritingFace, onEnd: (() -> Unit)? = null) {
         if (ENABLE_3D_LOGS) {
             Log.i(TAG, "flipTo: current=$face target=$targetFace angle=$angleDeg ready=$filamentReady")
