@@ -49,10 +49,10 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     private val surfaceView = SurfaceView(context)
     private val frontFaceView = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.FIT_XY
+        scaleType = ImageView.ScaleType.FIT_CENTER
     }
     private val backFaceView = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.FIT_XY
+        scaleType = ImageView.ScaleType.FIT_CENTER
     }
     private val frontShadeView = AndroidView(context).apply {
         setBackgroundColor(0xFF000000.toInt())
