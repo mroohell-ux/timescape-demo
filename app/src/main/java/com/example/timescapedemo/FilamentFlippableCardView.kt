@@ -68,6 +68,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     private var angleDeg: Float = 0f
     private var face: HandwritingFace = HandwritingFace.FRONT
     private var filamentReady = false
+    private var filamentInitAttempted = false
     private var debugFrameCount = 0
     private var isSurfaceAvailable = false
 
@@ -80,18 +81,16 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         frontFaceView.cameraDistance = cameraDistancePx
         backFaceView.cameraDistance = cameraDistancePx
         surfaceView.holder.addCallback(this)
-        filamentReady = initializeFilamentSafely()
-        if (ENABLE_3D_LOGS) {
-            Log.i(TAG, "init: filamentReady=$filamentReady")
-        }
-        if (!filamentReady) {
-            surfaceView.visibility = GONE
-        }
+        surfaceView.visibility = GONE
     }
 
-    fun isReady(): Boolean = filamentReady
+    fun isReady(): Boolean {
+        ensureFilamentInitialized()
+        return filamentReady
+    }
 
     fun bind(front: Bitmap, back: Bitmap, targetFace: HandwritingFace) {
+        ensureFilamentInitialized()
         if (ENABLE_3D_LOGS) {
             Log.i(
                 TAG,
@@ -105,6 +104,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         face = targetFace
         if (filamentReady) {
             uploadTextures(front, back)
+            surfaceView.visibility = VISIBLE
         }
         angleDeg = if (targetFace == HandwritingFace.FRONT) 0f else 180f
         applyFaceRotationInstant()
@@ -203,6 +203,18 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         } catch (t: Throwable) {
             Log.e(TAG, "Filament initialization failed; falling back to normal card path.", t)
             false
+        }
+    }
+
+    private fun ensureFilamentInitialized() {
+        if (filamentInitAttempted) return
+        filamentInitAttempted = true
+        filamentReady = initializeFilamentSafely()
+        if (ENABLE_3D_LOGS) {
+            Log.i(TAG, "init: filamentReady=$filamentReady")
+        }
+        if (!filamentReady) {
+            surfaceView.visibility = GONE
         }
     }
 

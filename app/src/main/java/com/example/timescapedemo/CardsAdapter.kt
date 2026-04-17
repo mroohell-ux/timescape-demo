@@ -975,6 +975,23 @@ class CardsAdapter(
             holder.filamentFlipCard.isVisible = false
             return
         }
+        if (holder.cardSceneSnapshotRoot.width <= 0 || holder.cardSceneSnapshotRoot.height <= 0) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(
+                    TAG_3D,
+                    "bindFilamentCard: root not laid out yet cardId=${item.id} root=${holder.cardSceneSnapshotRoot.width}x${holder.cardSceneSnapshotRoot.height}; scheduling retry"
+                )
+            }
+            holder.cardSceneSnapshotRoot.post {
+                val sameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+                if (!sameCard) return@post
+                val adapterPos = holder.bindingAdapterPosition
+                if (adapterPos == RecyclerView.NO_POSITION) return@post
+                bindFilamentCard(holder, item, currentCardFace(item.id), adapterPos)
+            }
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
         val front = snapshotCardFace(holder, item, HandwritingFace.FRONT, position)
         val back = snapshotCardFace(holder, item, HandwritingFace.BACK, position)
         if (front == null || back == null) {
