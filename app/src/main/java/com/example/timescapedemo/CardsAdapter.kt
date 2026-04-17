@@ -142,6 +142,7 @@ class CardsAdapter(
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val filamentFlipCard: FilamentFlippableCardView = v.findViewById(R.id.filamentFlipCard)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
+        val handwritingIndicator: ImageView = v.findViewById(R.id.indicatorHandwriting)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -348,14 +349,8 @@ class CardsAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
 
-        val stickyIconTint = if (item.stickyNotes.isEmpty()) {
-            ColorStateList.valueOf(
-                ContextCompat.getColor(holder.itemView.context, R.color.sticky_note_icon_empty_tint)
-            )
-        } else {
-            null
-        }
-        holder.stickyNotesButton.imageTintList = stickyIconTint
+        holder.stickyNotesButton.isVisible = item.stickyNotes.isNotEmpty()
+        holder.handwritingIndicator.isVisible = item.handwriting != null || item.imageHandwriting != null
 
         // ---- Bind text ----
         holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(
