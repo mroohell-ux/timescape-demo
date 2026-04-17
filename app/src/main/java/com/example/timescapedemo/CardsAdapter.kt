@@ -25,6 +25,7 @@ import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -47,6 +48,7 @@ import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.core.net.toUri
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -153,6 +155,10 @@ class CardsAdapter(
         val videoTitleLabel: TextView = v.findViewById(R.id.videoTitleLabel)
         var lastTapNormX: Float = 0.5f
         var lastTapNormY: Float = 0.5f
+        var downX: Float = 0f
+        var downY: Float = 0f
+        var isPressArmed: Boolean = false
+        var skipNextUpClick: Boolean = false
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -298,9 +304,6 @@ class CardsAdapter(
         val vh = VH(v)
         vh.gestureDetector = GestureDetectorCompat(v.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                updateTapAnchor(vh, e)
-                val idx = vh.bindingAdapterPosition
-                if (idx != RecyclerView.NO_POSITION) onItemClick(idx)
                 return true
             }
 
@@ -308,6 +311,7 @@ class CardsAdapter(
                 val index = vh.bindingAdapterPosition
                 if (index == RecyclerView.NO_POSITION) return true
                 val card = getItemAt(index)
+                vh.skipNextUpClick = true
                 if (card != null) onItemDoubleClick(card, index)
                 return true
             }
@@ -321,6 +325,7 @@ class CardsAdapter(
         })
         v.isClickable = true
         v.setOnTouchListener { view, event ->
+            val touchSlop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
             if (
                 event.action == MotionEvent.ACTION_UP &&
                 vh.videoInlineView.isVisible &&
@@ -329,6 +334,38 @@ class CardsAdapter(
             ) {
                 hideVideoControls(vh)
                 return@setOnTouchListener true
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    vh.downX = event.x
+                    vh.downY = event.y
+                    vh.isPressArmed = true
+                    updateTapAnchor(vh, event)
+                    applyPressInFeedback(vh, event)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (vh.isPressArmed) {
+                        val moved = hypot((event.x - vh.downX).toDouble(), (event.y - vh.downY).toDouble()).toFloat()
+                        if (moved > touchSlop) {
+                            vh.isPressArmed = false
+                            clearPressFeedback(vh)
+                        }
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    vh.isPressArmed = false
+                    clearPressFeedback(vh)
+                }
+                MotionEvent.ACTION_UP -> {
+                    val shouldTrigger = vh.isPressArmed && !vh.skipNextUpClick
+                    vh.isPressArmed = false
+                    clearPressFeedback(vh)
+                    if (shouldTrigger) {
+                        val idx = vh.bindingAdapterPosition
+                        if (idx != RecyclerView.NO_POSITION) onItemClick(idx)
+                    }
+                    vh.skipNextUpClick = false
+                }
             }
             val handled = vh.gestureDetector.onTouchEvent(event)
             if (!handled && event.action == MotionEvent.ACTION_UP) {
@@ -1164,6 +1201,40 @@ class CardsAdapter(
         }
     }
 
+    private fun applyPressInFeedback(holder: VH, event: MotionEvent) {
+        val shell = holder.card
+        val localX = (event.x - shell.left).coerceIn(0f, shell.width.toFloat())
+        val localY = (event.y - shell.top).coerceIn(0f, shell.height.toFloat())
+        val normX = if (shell.width > 0) localX / shell.width.toFloat() else 0.5f
+        val normY = if (shell.height > 0) localY / shell.height.toFloat() else 0.5f
+        val tiltX = ((normY - 0.5f) * 2f * PRESS_MAX_TILT_DEG).coerceIn(-PRESS_MAX_TILT_DEG, PRESS_MAX_TILT_DEG)
+        val tiltY = ((0.5f - normX) * 2f * PRESS_MAX_TILT_DEG).coerceIn(-PRESS_MAX_TILT_DEG, PRESS_MAX_TILT_DEG)
+        shell.pivotX = localX
+        shell.pivotY = localY
+        shell.animate()
+            .scaleX(PRESS_SCALE)
+            .scaleY(PRESS_SCALE)
+            .rotationX(tiltX)
+            .rotationY(tiltY)
+            .translationY(PRESS_SINK_DP * shell.resources.displayMetrics.density)
+            .setDuration(PRESS_ANIM_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun clearPressFeedback(holder: VH) {
+        val shell = holder.card
+        shell.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .rotationX(0f)
+            .rotationY(0f)
+            .translationY(0f)
+            .setDuration(PRESS_RELEASE_DURATION_MS)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
     private fun animateHandwritingFlip(
         holder: VH,
         item: CardItem,
@@ -1635,6 +1706,11 @@ class CardsAdapter(
         private const val FILAMENT_SHELL_MAX_TILT_X_DEG = 5.8f
         private const val FILAMENT_SHELL_MAX_ROLL_DEG = 1.6f
         private const val FILAMENT_SHELL_MAX_LEAD_SHIFT_DP = 7.2f
+        private const val PRESS_SCALE = 0.986f
+        private const val PRESS_MAX_TILT_DEG = 1.8f
+        private const val PRESS_SINK_DP = 2.4f
+        private const val PRESS_ANIM_DURATION_MS = 90L
+        private const val PRESS_RELEASE_DURATION_MS = 140L
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
