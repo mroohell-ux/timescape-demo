@@ -8,7 +8,7 @@ import android.util.AttributeSet
 import android.view.Choreographer
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import android.view.View
+import android.view.View as AndroidView
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -25,7 +25,7 @@ import com.google.android.filament.Scene
 import com.google.android.filament.Skybox
 import com.google.android.filament.SwapChain
 import com.google.android.filament.Texture
-import com.google.android.filament.View
+import com.google.android.filament.View as FilamentView
 import android.util.Log
 import java.nio.ByteBuffer
 import kotlin.math.cos
@@ -54,22 +54,22 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     private val backFaceView = ImageView(context).apply {
         scaleType = ImageView.ScaleType.FIT_XY
     }
-    private val frontShadeView = View(context).apply {
+    private val frontShadeView = AndroidView(context).apply {
         setBackgroundColor(0xFF000000.toInt())
         alpha = 0f
     }
-    private val backShadeView = View(context).apply {
+    private val backShadeView = AndroidView(context).apply {
         setBackgroundColor(0xFF000000.toInt())
         alpha = 0f
     }
-    private val edgeView = View(context).apply {
+    private val edgeView = AndroidView(context).apply {
         background = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
             intArrayOf(0x33FFFFFF, 0xCCF2EBDD.toInt(), 0x22FFFFFF)
         )
         alpha = 0f
     }
-    private val shadowView = View(context).apply {
+    private val shadowView = AndroidView(context).apply {
         background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = 26f
@@ -82,7 +82,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     private var renderer: Renderer? = null
     private var swapChain: SwapChain? = null
     private var scene: Scene? = null
-    private var view: View? = null
+    private var view: FilamentView? = null
     private var camera: Camera? = null
     private var cameraEntity: Int = 0
     private var frameScheduled = false
@@ -263,7 +263,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
         view?.scene = scene
         view?.camera = camera
-        view?.blendMode = View.BlendMode.OPAQUE
+        view?.blendMode = FilamentView.BlendMode.OPAQUE
         view?.isPostProcessingEnabled = true
 
         val sun = EntityManager.get().create()
