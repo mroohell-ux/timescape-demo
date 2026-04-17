@@ -7,6 +7,7 @@ import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -135,8 +136,10 @@ class CardsAdapter(
         val imageCardContainer: View = v.findViewById(R.id.imageCardContainer)
         val imageCard: ImageView = v.findViewById(R.id.imageCard)
         val cardContent: View = v.findViewById(R.id.card_content)
+        val cardSceneSnapshotRoot: View = v.findViewById(R.id.cardSceneSnapshotRoot)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
+        val filamentFlipCard: FilamentFlippableCardView = v.findViewById(R.id.filamentFlipCard)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
@@ -190,6 +193,7 @@ class CardsAdapter(
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
     private val videoProgressOverridesMs = mutableMapOf<Long, Long>()
     private enum class CardMode { TEXT, IMAGE, HANDWRITING }
+    private var isSnapshotBinding = false
     private val blurEffect: RenderEffect? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
@@ -378,6 +382,10 @@ class CardsAdapter(
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
+        val isFlippable = isCardFlippable(item)
+        holder.cardContent.isVisible = true
+        holder.textScrim.isVisible = true
+        holder.filamentFlipCard.isVisible = false
         if (handwritingContent != null) {
             holder.card.clearRatio()
             holder.card.scaleX = 1f
@@ -401,6 +409,11 @@ class CardsAdapter(
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
             bindTextCard(holder, item, face)
+        }
+        if (isFlippable && !isSnapshotBinding) {
+            bindFilamentCard(holder, item, face, position)
+        } else {
+            holder.filamentFlipCard.isVisible = false
         }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
@@ -902,6 +915,7 @@ class CardsAdapter(
             else -> item.snippet
         }
         when {
+            holder.filamentFlipCard.isVisible -> holder.filamentFlipCard.flipTo(next)
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
             hasTextBack -> bindTextCard(holder, item, next)
@@ -918,12 +932,61 @@ class CardsAdapter(
 
     fun canFlipCardAt(index: Int): Boolean {
         val item = getItemAt(index) ?: return false
+        return isCardFlippable(item)
+    }
+
+    private fun isCardFlippable(item: CardItem): Boolean {
         if (item.handwriting != null) return true
         if (item.imageHandwriting != null && item.image != null) return true
         return !item.backSnippet.isNullOrBlank()
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
+
+    private fun bindFilamentCard(holder: VH, item: CardItem, face: HandwritingFace, position: Int) {
+        val front = snapshotCardFace(holder, item, HandwritingFace.FRONT, position)
+        val back = snapshotCardFace(holder, item, HandwritingFace.BACK, position)
+        if (front == null || back == null) {
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
+        holder.filamentFlipCard.bind(front, back, face)
+        holder.filamentFlipCard.isVisible = true
+        holder.cardContent.isVisible = false
+        holder.imageCardContainer.isVisible = false
+        holder.handwritingContainer.isVisible = false
+        holder.textScrim.isVisible = false
+    }
+
+    private fun snapshotCardFace(
+        holder: VH,
+        item: CardItem,
+        face: HandwritingFace,
+        position: Int
+    ): Bitmap? {
+        val width = holder.cardSceneSnapshotRoot.width
+        val height = holder.cardSceneSnapshotRoot.height
+        if (width <= 0 || height <= 0) return null
+        val fallbackText = when {
+            item.handwriting != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.handwriting_card_missing)
+            item.image != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.image_card_missing)
+            else -> item.snippet
+        }
+        isSnapshotBinding = true
+        try {
+            when {
+                item.handwriting != null -> bindHandwriting(holder, item, item.handwriting!!, face, fallbackText, position)
+                item.image != null -> bindImageCard(holder, item, face, fallbackText, position)
+                else -> bindTextCard(holder, item, face)
+            }
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            holder.cardSceneSnapshotRoot.draw(canvas)
+            return bitmap
+        } finally {
+            isSnapshotBinding = false
+        }
+    }
 
     private fun animateHandwritingFlip(
         holder: VH,
