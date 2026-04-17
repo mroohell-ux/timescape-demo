@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.AttributeSet
 import android.view.Choreographer
+import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
@@ -42,7 +43,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : FrameLayout(context, attrs, defStyleAttr), Choreographer.FrameCallback {
+) : FrameLayout(context, attrs, defStyleAttr), Choreographer.FrameCallback, SurfaceHolder.Callback {
 
     private val surfaceView = SurfaceView(context)
     private val frontFaceView = ImageView(context).apply {
@@ -68,6 +69,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     private var face: HandwritingFace = HandwritingFace.FRONT
     private var filamentReady = false
     private var debugFrameCount = 0
+    private var isSurfaceAvailable = false
 
     init {
         addView(surfaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -77,6 +79,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         val cameraDistancePx = resources.displayMetrics.density * 3_200f
         frontFaceView.cameraDistance = cameraDistancePx
         backFaceView.cameraDistance = cameraDistancePx
+        surfaceView.holder.addCallback(this)
         filamentReady = initializeFilamentSafely()
         if (ENABLE_3D_LOGS) {
             Log.i(TAG, "init: filamentReady=$filamentReady")
@@ -163,7 +166,6 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         val localEngine = Engine.create()
         engine = localEngine
         renderer = localEngine.createRenderer()
-        swapChain = localEngine.createSwapChain(surfaceView.holder.surface)
         scene = localEngine.createScene()
         view = localEngine.createView()
 
@@ -190,7 +192,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         scene?.skybox = Skybox.Builder().color(0.04f, 0.04f, 0.05f, 1f).build(localEngine)
 
         updateCameraProjection()
-        scheduleFrame()
+        ensureSwapChain()
     }
 
     private fun initializeFilamentSafely(): Boolean {
@@ -273,6 +275,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     }
 
     private fun scheduleFrame() {
+        if (!isSurfaceAvailable || swapChain == null) return
         if (frameScheduled) return
         frameScheduled = true
         Choreographer.getInstance().postFrameCallback(this)
@@ -304,6 +307,8 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         if (!filamentReady) return
+        surfaceView.holder.removeCallback(this)
+        frameScheduled = false
         val localEngine = engine ?: return
         frontTexture?.let(localEngine::destroyTexture)
         backTexture?.let(localEngine::destroyTexture)
@@ -323,6 +328,60 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         renderer = null
         swapChain = null
         engine = null
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        isSurfaceAvailable = true
+        if (ENABLE_3D_LOGS) {
+            Log.i(TAG, "surfaceCreated: valid=${holder.surface?.isValid == true}")
+        }
+        ensureSwapChain()
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        if (ENABLE_3D_LOGS) {
+            Log.i(TAG, "surfaceChanged: ${width}x$height format=$format")
+        }
+        updateCameraProjection()
+        view?.viewport = com.google.android.filament.Viewport(0, 0, width, height)
+        scheduleFrame()
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        isSurfaceAvailable = false
+        frameScheduled = false
+        val localEngine = engine
+        val localSwap = swapChain
+        if (localEngine != null && localSwap != null) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(TAG, "surfaceDestroyed: destroying swap chain")
+            }
+            localEngine.destroySwapChain(localSwap)
+            swapChain = null
+        }
+    }
+
+    private fun ensureSwapChain() {
+        if (!filamentReady) return
+        if (!isSurfaceAvailable) return
+        if (swapChain != null) return
+        val localEngine = engine ?: return
+        val surface = surfaceView.holder.surface
+        if (surface == null || !surface.isValid) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(TAG, "ensureSwapChain: surface invalid, postponing")
+            }
+            return
+        }
+        try {
+            swapChain = localEngine.createSwapChain(surface)
+            if (ENABLE_3D_LOGS) {
+                Log.i(TAG, "ensureSwapChain: created successfully")
+            }
+            scheduleFrame()
+        } catch (t: Throwable) {
+            Log.e(TAG, "ensureSwapChain: failed to create swapchain", t)
+        }
     }
 
     companion object {
