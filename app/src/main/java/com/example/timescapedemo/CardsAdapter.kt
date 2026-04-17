@@ -1048,6 +1048,13 @@ class CardsAdapter(
             holder.filamentFlipCard.isVisible = false
             return
         }
+        if (isLikelyInvalidSnapshot(front) || isLikelyInvalidSnapshot(back)) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(TAG_3D, "bindFilamentCard: rejected dark/empty snapshot for cardId=${item.id}")
+            }
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
         if (ENABLE_3D_LOGS) {
             Log.i(
                 TAG_3D,
@@ -1090,6 +1097,32 @@ class CardsAdapter(
         } finally {
             isSnapshotBinding = false
         }
+    }
+
+    private fun isLikelyInvalidSnapshot(bitmap: Bitmap): Boolean {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return true
+        val sampleGrid = 6
+        var total = 0
+        var darkCount = 0
+        var transparentCount = 0
+        for (iy in 0 until sampleGrid) {
+            val y = ((iy + 0.5f) / sampleGrid.toFloat() * (h - 1)).toInt().coerceIn(0, h - 1)
+            for (ix in 0 until sampleGrid) {
+                val x = ((ix + 0.5f) / sampleGrid.toFloat() * (w - 1)).toInt().coerceIn(0, w - 1)
+                val p = bitmap.getPixel(x, y)
+                val a = Color.alpha(p)
+                val luma = (Color.red(p) * 0.2126f) + (Color.green(p) * 0.7152f) + (Color.blue(p) * 0.0722f)
+                if (a < 24) transparentCount++
+                if (luma < 12f) darkCount++
+                total++
+            }
+        }
+        if (total == 0) return true
+        val darkRatio = darkCount.toFloat() / total.toFloat()
+        val transparentRatio = transparentCount.toFloat() / total.toFloat()
+        return transparentRatio > 0.8f || darkRatio > 0.92f
     }
 
     private fun animateFilamentShellFlip(holder: VH, targetFace: HandwritingFace) {
