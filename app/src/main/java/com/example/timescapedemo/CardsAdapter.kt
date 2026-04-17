@@ -387,6 +387,10 @@ class CardsAdapter(
         holder.cardContent.isVisible = true
         holder.textScrim.isVisible = true
         holder.filamentFlipCard.isVisible = false
+        holder.cardContent.alpha = 1f
+        holder.imageCardContainer.alpha = 1f
+        holder.handwritingContainer.alpha = 1f
+        holder.textScrim.alpha = 1f
         if (handwritingContent != null) {
             holder.card.clearRatio()
             holder.card.scaleX = 1f
@@ -1012,10 +1016,10 @@ class CardsAdapter(
         }
         holder.filamentFlipCard.bind(front, back, face)
         holder.filamentFlipCard.isVisible = true
-        holder.cardContent.isVisible = false
-        holder.imageCardContainer.isVisible = false
-        holder.handwritingContainer.isVisible = false
-        holder.textScrim.isVisible = false
+        holder.cardContent.alpha = 0f
+        holder.imageCardContainer.alpha = 0f
+        holder.handwritingContainer.alpha = 0f
+        holder.textScrim.alpha = 0f
     }
 
     private fun snapshotCardFace(
