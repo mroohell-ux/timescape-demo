@@ -8,7 +8,9 @@ import android.view.Choreographer
 import android.view.SurfaceView
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.core.animation.doOnEnd
+import androidx.core.view.isVisible
 import com.google.android.filament.Camera
 import com.google.android.filament.Engine
 import com.google.android.filament.EntityManager
@@ -43,6 +45,12 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 ) : FrameLayout(context, attrs, defStyleAttr), Choreographer.FrameCallback {
 
     private val surfaceView = SurfaceView(context)
+    private val frontFaceView = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.FIT_XY
+    }
+    private val backFaceView = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.FIT_XY
+    }
 
     private var engine: Engine? = null
     private var renderer: Renderer? = null
@@ -62,6 +70,12 @@ class FilamentFlippableCardView @JvmOverloads constructor(
 
     init {
         addView(surfaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(frontFaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(backFaceView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        backFaceView.isVisible = false
+        val cameraDistancePx = resources.displayMetrics.density * 3_200f
+        frontFaceView.cameraDistance = cameraDistancePx
+        backFaceView.cameraDistance = cameraDistancePx
         filamentReady = initializeFilamentSafely()
         if (!filamentReady) {
             surfaceView.visibility = GONE
@@ -71,39 +85,62 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     fun isReady(): Boolean = filamentReady
 
     fun bind(front: Bitmap, back: Bitmap, targetFace: HandwritingFace) {
-        if (!filamentReady) return
+        frontFaceView.setImageBitmap(front)
+        backFaceView.setImageBitmap(back)
+        frontFaceView.isVisible = targetFace == HandwritingFace.FRONT
+        backFaceView.isVisible = targetFace == HandwritingFace.BACK
         face = targetFace
-        uploadTextures(front, back)
+        if (filamentReady) {
+            uploadTextures(front, back)
+        }
         angleDeg = if (targetFace == HandwritingFace.FRONT) 0f else 180f
+        applyFaceRotationInstant()
         invalidateFilamentState()
     }
 
     fun currentFace(): HandwritingFace = face
 
     fun flipTo(targetFace: HandwritingFace, onEnd: (() -> Unit)? = null) {
-        if (!filamentReady) {
-            onEnd?.invoke()
-            return
-        }
         if (targetFace == face) {
             onEnd?.invoke()
             return
         }
         val start = angleDeg
         val end = if (targetFace == HandwritingFace.FRONT) 0f else 180f
+        var swapped = false
         ValueAnimator.ofFloat(start, end).apply {
             duration = 360L
             interpolator = PathInterpolator(0.2f, 0f, 0.1f, 1f)
             addUpdateListener {
                 angleDeg = it.animatedValue as Float
+                applyFaceRotationInstant()
+                if (!swapped && ((start < end && angleDeg >= 90f) || (start > end && angleDeg <= 90f))) {
+                    swapped = true
+                    val showBack = targetFace == HandwritingFace.BACK
+                    frontFaceView.isVisible = !showBack
+                    backFaceView.isVisible = showBack
+                }
                 invalidateFilamentState()
             }
             doOnEnd {
                 face = targetFace
+                applyFaceRotationInstant()
                 onEnd?.invoke()
             }
             start()
         }
+    }
+
+    private fun applyFaceRotationInstant() {
+        val normalized = ((angleDeg % 360f) + 360f) % 360f
+        val tilt = kotlin.math.abs(90f - (normalized % 180f)) / 90f
+        val depthScale = 0.985f + 0.015f * tilt
+        frontFaceView.rotationY = angleDeg
+        backFaceView.rotationY = angleDeg + 180f
+        frontFaceView.scaleX = depthScale
+        frontFaceView.scaleY = depthScale
+        backFaceView.scaleX = depthScale
+        backFaceView.scaleY = depthScale
     }
 
     private fun initializeFilament() {
