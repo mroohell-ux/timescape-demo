@@ -1101,9 +1101,9 @@ class CardsAdapter(
                     }
                 }
                 item.imageHandwriting != null && face == HandwritingFace.BACK -> {
-                    item.imageHandwriting?.options?.backgroundColor ?: Color.WHITE
+                    item.imageHandwriting?.options?.backgroundColor ?: Color.TRANSPARENT
                 }
-                else -> Color.WHITE
+                else -> Color.TRANSPARENT
             }
             canvas.drawColor(snapshotBackgroundColor)
             holder.cardSceneSnapshotRoot.draw(canvas)
