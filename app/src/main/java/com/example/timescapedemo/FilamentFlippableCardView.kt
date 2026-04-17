@@ -123,13 +123,16 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         }
         val start = angleDeg
         val end = if (targetFace == HandwritingFace.FRONT) 0f else 180f
+        val direction = if (end >= start) 1f else -1f
         var swapped = false
         ValueAnimator.ofFloat(start, end).apply {
-            duration = 360L
-            interpolator = PathInterpolator(0.2f, 0f, 0.1f, 1f)
+            duration = HAND_FLIP_DURATION_MS
+            interpolator = PathInterpolator(0.18f, 0.02f, 0.12f, 1f)
             addUpdateListener {
                 angleDeg = it.animatedValue as Float
-                applyFaceRotationInstant()
+                val rawProgress = it.animatedFraction.coerceIn(0f, 1f)
+                val handProgress = handEasedProgress(rawProgress)
+                applyFaceRotationInstant(handProgress, direction)
                 if (!swapped && ((start < end && angleDeg >= 90f) || (start > end && angleDeg <= 90f))) {
                     swapped = true
                     val showBack = targetFace == HandwritingFace.BACK
@@ -140,7 +143,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
             }
             doOnEnd {
                 face = targetFace
-                applyFaceRotationInstant()
+                applyFaceRotationInstant(1f, direction)
                 if (ENABLE_3D_LOGS) {
                     Log.i(TAG, "flipTo:end face=$face angle=$angleDeg")
                 }
@@ -150,16 +153,37 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         }
     }
 
-    private fun applyFaceRotationInstant() {
+    private fun applyFaceRotationInstant(progress: Float = 0f, direction: Float = 1f) {
         val normalized = ((angleDeg % 360f) + 360f) % 360f
-        val tilt = kotlin.math.abs(90f - (normalized % 180f)) / 90f
-        val depthScale = 0.985f + 0.015f * tilt
+        val edge = kotlin.math.abs(90f - (normalized % 180f)) / 90f
+        val depthScale = 0.982f + 0.018f * edge
+        val liftPx = resources.displayMetrics.density * HAND_LIFT_DP
+        val arc = (kotlin.math.sin(progress * Math.PI)).toFloat()
+        val tiltX = HAND_MAX_TILT_X_DEG * arc
+        val driftY = -liftPx * arc
+        val rollZ = HAND_MAX_ROLL_DEG * arc * -direction
+
         frontFaceView.rotationY = angleDeg
         backFaceView.rotationY = angleDeg + 180f
+        frontFaceView.rotationX = tiltX
+        backFaceView.rotationX = tiltX
+        frontFaceView.rotation = rollZ
+        backFaceView.rotation = rollZ
+        frontFaceView.translationY = driftY
+        backFaceView.translationY = driftY
         frontFaceView.scaleX = depthScale
         frontFaceView.scaleY = depthScale
         backFaceView.scaleX = depthScale
         backFaceView.scaleY = depthScale
+    }
+
+    private fun handEasedProgress(raw: Float): Float {
+        val clamped = raw.coerceIn(0f, 1f)
+        return if (clamped < 0.5f) {
+            2f * clamped * clamped
+        } else {
+            1f - ((-2f * clamped + 2f) * (-2f * clamped + 2f)) / 2f
+        }
     }
 
     private fun initializeFilament() {
@@ -399,5 +423,9 @@ class FilamentFlippableCardView @JvmOverloads constructor(
     companion object {
         private const val TAG = "FilamentFlippableCard"
         private const val ENABLE_3D_LOGS = true
+        private const val HAND_FLIP_DURATION_MS = 520L
+        private const val HAND_MAX_TILT_X_DEG = 6.5f
+        private const val HAND_MAX_ROLL_DEG = 1.4f
+        private const val HAND_LIFT_DP = 3.5f
     }
 }
