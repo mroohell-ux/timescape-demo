@@ -1059,9 +1059,10 @@ class CardsAdapter(
         val shell = holder.card
         val density = holder.itemView.resources.displayMetrics.density
         shell.cameraDistance = density * FILAMENT_SHELL_CAMERA_DISTANCE
-        val tapX = holder.lastTapNormX.coerceIn(0f, 1f)
+        val tapX = holder.lastTapNormX.coerceIn(0f, 1f) // touched/free side
         val tapY = holder.lastTapNormY.coerceIn(0f, 1f)
-        val hingeSign = if (tapX >= 0.5f) -1f else 1f
+        val anchoredX = 1f - tapX // opposite side feels more anchored
+        val hingeSign = if (anchoredX >= 0.5f) -1f else 1f
         val hingeRotation = FILAMENT_SHELL_HALF_ROTATION * hingeSign
         val verticalTilt = ((tapY - 0.5f) * 2f * FILAMENT_SHELL_MAX_TILT_X_DEG).coerceIn(
             -FILAMENT_SHELL_MAX_TILT_X_DEG,
@@ -1071,7 +1072,8 @@ class CardsAdapter(
             -FILAMENT_SHELL_MAX_ROLL_DEG,
             FILAMENT_SHELL_MAX_ROLL_DEG
         )
-        shell.pivotX = shell.width * tapX
+        val leadShiftX = (tapX - 0.5f) * density * FILAMENT_SHELL_MAX_LEAD_SHIFT_DP
+        shell.pivotX = shell.width * (0.5f + (anchoredX - 0.5f) * 0.58f)
         shell.pivotY = shell.height * (0.52f + (tapY - 0.5f) * 0.16f)
         shell.animate().cancel()
         val fold = AnimatorSet().apply {
@@ -1085,6 +1087,10 @@ class CardsAdapter(
                     interpolator = AccelerateInterpolator()
                 },
                 ObjectAnimator.ofFloat(shell, View.ROTATION, 0f, cornerRoll).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.TRANSLATION_X, 0f, leadShiftX).apply {
                     duration = FILAMENT_SHELL_HALF_DURATION_MS
                     interpolator = AccelerateInterpolator()
                 },
@@ -1112,6 +1118,10 @@ class CardsAdapter(
                     duration = FILAMENT_SHELL_HALF_DURATION_MS
                     interpolator = DecelerateInterpolator()
                 },
+                ObjectAnimator.ofFloat(shell, View.TRANSLATION_X, leadShiftX, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
                 ObjectAnimator.ofFloat(shell, View.SCALE_X, 0.985f, 1.01f, 1f).apply {
                     duration = FILAMENT_SHELL_HALF_DURATION_MS
                     interpolator = DecelerateInterpolator()
@@ -1134,6 +1144,7 @@ class CardsAdapter(
                 shell.rotationY = 0f
                 shell.rotationX = 0f
                 shell.rotation = 0f
+                shell.translationX = 0f
                 shell.scaleX = 1f
                 shell.scaleY = 1f
             }
@@ -1623,6 +1634,7 @@ class CardsAdapter(
         private const val FILAMENT_SHELL_CAMERA_DISTANCE = 9_500f
         private const val FILAMENT_SHELL_MAX_TILT_X_DEG = 5.8f
         private const val FILAMENT_SHELL_MAX_ROLL_DEG = 1.6f
+        private const val FILAMENT_SHELL_MAX_LEAD_SHIFT_DP = 7.2f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
