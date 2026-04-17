@@ -247,7 +247,7 @@ class CardsAdapter(
         }.toSet()
         blockedUris.retainAll(activeUris)
         val flippableIds = copies.filter {
-            it.handwriting != null || it.imageHandwriting != null || !it.backSnippet.isNullOrBlank()
+            !it.backSnippet.isNullOrBlank()
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
         val currentCardIds = copies.map { it.id }.toSet()
@@ -1004,8 +1004,8 @@ class CardsAdapter(
     }
 
     private fun isCardFlippable(item: CardItem): Boolean {
-        if (item.handwriting != null) return true
-        if (item.imageHandwriting != null && item.image != null) return true
+        if (item.handwriting != null) return false
+        if (item.imageHandwriting != null) return false
         return !item.backSnippet.isNullOrBlank()
     }
 
