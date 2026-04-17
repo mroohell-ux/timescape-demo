@@ -244,7 +244,7 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         frontShadeView.translationY = frontFaceView.translationY
         backShadeView.translationY = backFaceView.translationY
 
-        shadowView.alpha = (HAND_SHADOW_BASE_ALPHA + sideExposure * 0.24f).coerceIn(0f, 0.5f)
+        shadowView.alpha = (sideExposure * 0.24f).coerceIn(0f, 0.42f)
         shadowView.scaleX = 0.93f + sideExposure * 0.1f
         shadowView.scaleY = 0.88f + sideExposure * 0.1f
         shadowView.translationY = resources.displayMetrics.density * (HAND_SHADOW_DROP_DP + arc * 4.2f)
@@ -506,7 +506,6 @@ class FilamentFlippableCardView @JvmOverloads constructor(
         private const val HAND_PIVOT_Y_FRACTION = 0.58f
         private const val HAND_EDGE_MAX_DP = 3.2f
         private const val HAND_MAX_DARKEN_ALPHA = 0.17f
-        private const val HAND_SHADOW_BASE_ALPHA = 0.16f
         private const val HAND_SHADOW_DROP_DP = 9.5f
     }
 }
