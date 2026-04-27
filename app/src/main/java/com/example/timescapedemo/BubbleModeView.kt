@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.Choreographer
@@ -197,10 +199,18 @@ class BubbleModeView @JvmOverloads constructor(
             val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
             val alpha = (0.45f + (1f - distNorm) * 0.45f).coerceIn(0.3f, 0.95f)
             val radius = bubble.radius * prominence
-            bubblePaint.color = ColorUtils.setAlphaComponent(enhanceBubbleColor(bubble.item.color), (alpha * 255).toInt())
+            val alphaInt = (alpha * 255).toInt()
+            bubblePaint.shader = createBubbleGradient(
+                item = bubble.item,
+                centerX = drawX,
+                centerY = drawY,
+                radius = radius,
+                alpha = alphaInt
+            )
 
             canvas.drawCircle(drawX, drawY, radius, bubblePaint)
             canvas.drawCircle(drawX, drawY, radius, bubbleStrokePaint)
+            bubblePaint.shader = null
 
             val maxTextWidth = radius * 1.45f
             val text = bubble.item.title.ifBlank { "Untitled" }
@@ -274,12 +284,46 @@ class BubbleModeView @JvmOverloads constructor(
         }
     }
 
-    private fun enhanceBubbleColor(color: Int): Int {
-        val hsl = FloatArray(3)
-        ColorUtils.colorToHSL(color, hsl)
-        hsl[1] = (hsl[1] * 1.15f).coerceAtMost(1f)
-        hsl[2] = (hsl[2] * 0.78f + 0.12f).coerceIn(0f, 1f)
-        return ColorUtils.HSLToColor(hsl)
+    private fun createBubbleGradient(
+        item: BubbleItem,
+        centerX: Float,
+        centerY: Float,
+        radius: Float,
+        alpha: Int
+    ): Shader {
+        val baseHsv = FloatArray(3)
+        Color.colorToHSV(item.color, baseHsv)
+        val hueShift = (((item.id % 11L) - 5L).toFloat()) * 1.8f
+        val hue = (baseHsv[0] + hueShift + 360f) % 360f
+        val saturation = baseHsv[1].coerceIn(0f, 1f)
+        val value = baseHsv[2].coerceIn(0f, 1f)
+
+        val centerTone = floatArrayOf(
+            hue,
+            (saturation * 0.55f).coerceIn(0f, 1f),
+            (value * 0.92f).coerceIn(0f, 1f)
+        )
+        val midTone = floatArrayOf(
+            hue,
+            (saturation * 0.85f).coerceIn(0f, 1f),
+            (value * 0.70f).coerceIn(0f, 1f)
+        )
+        val edgeTone = floatArrayOf(
+            hue,
+            (saturation * 1.15f).coerceIn(0f, 1f),
+            (value * 0.35f).coerceIn(0f, 1f)
+        )
+        val centerColor = ColorUtils.setAlphaComponent(Color.HSVToColor(centerTone), alpha)
+        val midColor = ColorUtils.setAlphaComponent(Color.HSVToColor(midTone), alpha)
+        val edgeColor = ColorUtils.setAlphaComponent(Color.HSVToColor(edgeTone), alpha)
+        return RadialGradient(
+            centerX,
+            centerY,
+            radius,
+            intArrayOf(centerColor, midColor, edgeColor),
+            floatArrayOf(0f, 0.62f, 1f),
+            Shader.TileMode.CLAMP
+        )
     }
 
     private fun ellipsize(text: String, paint: TextPaint, maxWidth: Float): String {
