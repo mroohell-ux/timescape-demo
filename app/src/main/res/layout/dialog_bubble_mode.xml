@@ -4,18 +4,6 @@
     android:layout_height="match_parent"
     android:background="@android:color/transparent">
 
-    <ImageView
-        android:id="@+id/bubbleBackdrop"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="centerCrop"
-        android:contentDescription="@null" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="#40203146" />
-
     <com.example.timescapedemo.BubbleModeView
         android:id="@+id/bubbleField"
         android:layout_width="match_parent"

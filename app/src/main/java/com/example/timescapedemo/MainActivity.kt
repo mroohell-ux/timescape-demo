@@ -2687,16 +2687,15 @@ class MainActivity : AppCompatActivity() {
         val targets = flow.cards.flatMap { card ->
             card.stickyNotes.map { note -> BubbleModeNoteTarget(flow, card, note) }
         }
+        Log.d("BubbleMode", "showBubbleMode flow=${flow.name} stickyTargets=${targets.size}")
         if (targets.isEmpty()) {
             snackbar(getString(R.string.snackbar_bubble_mode_empty))
             return
         }
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.parseColor("#2008152D")))
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         val content = layoutInflater.inflate(R.layout.dialog_bubble_mode, null)
         dialog.setContentView(content)
-        val backdrop = content.findViewById<ImageView>(R.id.bubbleBackdrop)
-        backdrop.setImageDrawable(captureCurrentFlowBackdrop())
         val bubbleField = content.findViewById<BubbleModeView>(R.id.bubbleField)
         bubbleField.submitBubbles(
             targets.map { target ->
@@ -2710,9 +2709,11 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         )
+        Log.d("BubbleMode", "submitted bubbles count=${targets.size}")
         bubbleField.onBubbleClick = { item ->
             val target = item.payload as? BubbleModeNoteTarget
             if (target != null) {
+                Log.d("BubbleMode", "bubble tapped noteId=${target.note.id} cardId=${target.card.id}")
                 dialog.dismiss()
                 showStickyNotesDialog(
                     flow = target.flow,
@@ -2723,25 +2724,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         dialog.show()
-    }
-
-    private fun captureCurrentFlowBackdrop(): android.graphics.drawable.Drawable? {
-        val pagerRecycler = flowPager.getChildAt(0) as? RecyclerView
-        val currentPageView = pagerRecycler
-            ?.findViewHolderForAdapterPosition(flowPager.currentItem)
-            ?.itemView
-            ?: flowPager
-        if (currentPageView.width <= 0 || currentPageView.height <= 0) {
-            return rootLayout.background
-        }
-        val bitmap = Bitmap.createBitmap(
-            currentPageView.width,
-            currentPageView.height,
-            Bitmap.Config.ARGB_8888
-        )
-        val canvas = Canvas(bitmap)
-        currentPageView.draw(canvas)
-        return BitmapDrawable(resources, bitmap)
+        Log.d("BubbleMode", "dialog shown")
     }
 
     private fun showStickyNotesDialog(

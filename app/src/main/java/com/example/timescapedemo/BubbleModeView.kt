@@ -14,6 +14,7 @@ import android.view.VelocityTracker
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import androidx.core.graphics.ColorUtils
+import android.util.Log
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -66,6 +67,7 @@ class BubbleModeView @JvmOverloads constructor(
     private var velocityTracker: VelocityTracker? = null
     private var lastTouchX = 0f
     private var lastTouchY = 0f
+    private var pendingItems: List<BubbleItem> = emptyList()
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -92,8 +94,10 @@ class BubbleModeView @JvmOverloads constructor(
     }
 
     fun submitBubbles(items: List<BubbleItem>) {
+        pendingItems = items
         bubbleStates.clear()
         if (width == 0 || height == 0 || items.isEmpty()) {
+            Log.d("BubbleModeView", "submit deferred width=$width height=$height items=${items.size}")
             invalidate()
             return
         }
@@ -115,6 +119,7 @@ class BubbleModeView @JvmOverloads constructor(
         offsetY = (fieldHeight - height) / 2f
         velocityX = 0f
         velocityY = 0f
+        Log.d("BubbleModeView", "submit complete rendered=${bubbleStates.size} field=${fieldWidth}x$fieldHeight")
         invalidate()
     }
 
@@ -133,8 +138,9 @@ class BubbleModeView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (bubbleStates.isNotEmpty()) {
-            submitBubbles(bubbleStates.map { it.item })
+        if (pendingItems.isNotEmpty()) {
+            Log.d("BubbleModeView", "onSizeChanged replay items=${pendingItems.size} size=${w}x$h")
+            submitBubbles(pendingItems)
         }
     }
 
@@ -177,6 +183,9 @@ class BubbleModeView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (bubbleStates.isEmpty() && pendingItems.isNotEmpty()) {
+            Log.d("BubbleModeView", "onDraw with empty state despite pending=${pendingItems.size}")
+        }
         val cx = width / 2f
         val cy = height / 2f
         bubbleStates.forEach { bubble ->
