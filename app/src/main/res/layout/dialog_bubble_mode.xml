@@ -2,7 +2,19 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#100A1A">
+    android:background="@android:color/transparent">
+
+    <ImageView
+        android:id="@+id/bubbleBackdrop"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#40203146" />
 
     <com.example.timescapedemo.BubbleModeView
         android:id="@+id/bubbleField"

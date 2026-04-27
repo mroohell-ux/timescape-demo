@@ -2695,6 +2695,8 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.parseColor("#2008152D")))
         val content = layoutInflater.inflate(R.layout.dialog_bubble_mode, null)
         dialog.setContentView(content)
+        val backdrop = content.findViewById<ImageView>(R.id.bubbleBackdrop)
+        backdrop.setImageDrawable(captureCurrentFlowBackdrop())
         val bubbleField = content.findViewById<BubbleModeView>(R.id.bubbleField)
         bubbleField.submitBubbles(
             targets.map { target ->
@@ -2721,6 +2723,25 @@ class MainActivity : AppCompatActivity() {
             }
         }
         dialog.show()
+    }
+
+    private fun captureCurrentFlowBackdrop(): android.graphics.drawable.Drawable? {
+        val pagerRecycler = flowPager.getChildAt(0) as? RecyclerView
+        val currentPageView = pagerRecycler
+            ?.findViewHolderForAdapterPosition(flowPager.currentItem)
+            ?.itemView
+            ?: flowPager
+        if (currentPageView.width <= 0 || currentPageView.height <= 0) {
+            return rootLayout.background
+        }
+        val bitmap = Bitmap.createBitmap(
+            currentPageView.width,
+            currentPageView.height,
+            Bitmap.Config.ARGB_8888
+        )
+        val canvas = Canvas(bitmap)
+        currentPageView.draw(canvas)
+        return BitmapDrawable(resources, bitmap)
     }
 
     private fun showStickyNotesDialog(
