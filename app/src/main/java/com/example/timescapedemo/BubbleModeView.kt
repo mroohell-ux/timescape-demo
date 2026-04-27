@@ -101,8 +101,8 @@ class BubbleModeView @JvmOverloads constructor(
             invalidate()
             return
         }
-        fieldWidth = max(width * 2.4f, width + 400f)
-        fieldHeight = max(height * 2.2f, height + 360f)
+        fieldWidth = width.toFloat()
+        fieldHeight = height.toFloat()
         items.forEach { item ->
             val radius = random.nextInt((44 * density()).toInt(), (84 * density()).toInt()).toFloat()
             bubbleStates += BubbleState(
@@ -115,8 +115,8 @@ class BubbleModeView @JvmOverloads constructor(
                 depthBias = random.nextFloat() * 0.2f - 0.1f
             )
         }
-        offsetX = (fieldWidth - width) / 2f
-        offsetY = (fieldHeight - height) / 2f
+        offsetX = 0f
+        offsetY = 0f
         velocityX = 0f
         velocityY = 0f
         Log.d("BubbleModeView", "submit complete rendered=${bubbleStates.size} field=${fieldWidth}x$fieldHeight")
@@ -194,7 +194,7 @@ class BubbleModeView @JvmOverloads constructor(
             if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return@forEach
 
             val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
-            val prominence = (1.15f - distNorm * 0.35f + bubble.depthBias).coerceIn(0.76f, 1.18f)
+            val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
             val alpha = (0.45f + (1f - distNorm) * 0.45f).coerceIn(0.3f, 0.95f)
             val radius = bubble.radius * prominence
             bubblePaint.color = ColorUtils.setAlphaComponent(enhanceBubbleColor(bubble.item.color), (alpha * 255).toInt())

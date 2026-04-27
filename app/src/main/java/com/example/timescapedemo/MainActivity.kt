@@ -2693,7 +2693,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        val flowBackground = rootLayout.background?.constantState?.newDrawable()?.mutate()
+            ?: ColorDrawable(Color.parseColor("#E7F3FF"))
+        dialog.window?.setBackgroundDrawable(flowBackground)
         val content = layoutInflater.inflate(R.layout.dialog_bubble_mode, null)
         dialog.setContentView(content)
         val bubbleField = content.findViewById<BubbleModeView>(R.id.bubbleField)
