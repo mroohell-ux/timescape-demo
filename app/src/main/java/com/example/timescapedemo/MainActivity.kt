@@ -2709,14 +2709,16 @@ class MainActivity : AppCompatActivity() {
             }
         )
         bubbleField.onBubbleClick = { item ->
-            val target = item.payload as? BubbleModeNoteTarget ?: return@onBubbleClick
-            dialog.dismiss()
-            showStickyNotesDialog(
-                flow = target.flow,
-                card = target.card,
-                focusedNoteId = target.note.id,
-                showBackOfFocused = false
-            )
+            val target = item.payload as? BubbleModeNoteTarget
+            if (target != null) {
+                dialog.dismiss()
+                showStickyNotesDialog(
+                    flow = target.flow,
+                    card = target.card,
+                    focusedNoteId = target.note.id,
+                    showBackOfFocused = false
+                )
+            }
         }
         dialog.show()
     }
