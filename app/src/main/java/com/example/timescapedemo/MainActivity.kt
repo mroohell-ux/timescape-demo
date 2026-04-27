@@ -786,6 +786,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
+                R.id.action_bubble_mode -> { showBubbleMode(); true }
                 R.id.action_export_flow -> { launchExportCurrentFlow(); true }
                 R.id.action_add_card -> {
                     if (currentFlow()?.id == VIDEO_FLOW_ID) {
@@ -2673,6 +2674,51 @@ class MainActivity : AppCompatActivity() {
         applyCardBackgrounds(flow)
         refreshFlow(flow, scrollToTop = false)
         saveState()
+    }
+
+    private data class BubbleModeNoteTarget(
+        val flow: CardFlow,
+        val card: CardItem,
+        val note: StickyNote
+    )
+
+    private fun showBubbleMode() {
+        val flow = currentFlow() ?: return
+        val targets = flow.cards.flatMap { card ->
+            card.stickyNotes.map { note -> BubbleModeNoteTarget(flow, card, note) }
+        }
+        if (targets.isEmpty()) {
+            snackbar(getString(R.string.snackbar_bubble_mode_empty))
+            return
+        }
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.parseColor("#2008152D")))
+        val content = layoutInflater.inflate(R.layout.dialog_bubble_mode, null)
+        dialog.setContentView(content)
+        val bubbleField = content.findViewById<BubbleModeView>(R.id.bubbleField)
+        bubbleField.submitBubbles(
+            targets.map { target ->
+                BubbleModeView.BubbleItem(
+                    id = target.note.id,
+                    title = target.note.frontText.ifBlank {
+                        target.note.backText.ifBlank { target.card.title.ifBlank { target.card.snippet } }
+                    },
+                    color = target.note.color,
+                    payload = target
+                )
+            }
+        )
+        bubbleField.onBubbleClick = { item ->
+            val target = item.payload as? BubbleModeNoteTarget ?: return@onBubbleClick
+            dialog.dismiss()
+            showStickyNotesDialog(
+                flow = target.flow,
+                card = target.card,
+                focusedNoteId = target.note.id,
+                showBackOfFocused = false
+            )
+        }
+        dialog.show()
     }
 
     private fun showStickyNotesDialog(
