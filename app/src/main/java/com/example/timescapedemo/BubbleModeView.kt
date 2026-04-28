@@ -19,8 +19,8 @@ import androidx.core.graphics.ColorUtils
 import android.util.Log
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -144,7 +144,7 @@ class BubbleModeView @JvmOverloads constructor(
             val pageIndex = index / bubblesPerPage
             val pageLeft = pageIndex * width.toFloat()
             val pageRight = pageLeft + width.toFloat()
-            val radius = random.nextInt((46 * density()).toInt(), (88 * density()).toInt()).toFloat()
+            val radius = radiusForText(item)
             val minX = pageLeft + radius
             val maxX = pageRight - radius
             val minY = radius
@@ -345,23 +345,24 @@ class BubbleModeView @JvmOverloads constructor(
         canvas.drawCircle(renderX, renderY, radius, bubblePaint)
         bubblePaint.shader = null
 
-        val maxTextWidth = radius * 1.45f
+        val maxTextWidth = radius * 1.62f
         val text = if (isFocused) {
             if (focusedShowingBack) bubble.item.backText else bubble.item.frontText
         } else {
             bubble.item.title
         }.ifBlank { "Untitled" }
-        val clipped = ellipsize(text, textPaint, maxTextWidth)
+        val maxLines = if (isFocused) 7 else 4
+        val lines = buildWrappedLines(text, textPaint, maxTextWidth, maxLines)
         textPaint.alpha = ((180 + ((1f - distNorm) * 75f).toInt()) * dimFactor).toInt().coerceIn(70, 255)
         if (isFocused) {
             val effective = flipProgress.coerceIn(0f, 1f)
             val sx = kotlin.math.abs(cos(Math.PI * effective)).toFloat().coerceAtLeast(0.05f)
             canvas.save()
             canvas.scale(sx, 1f, renderX, renderY)
-            canvas.drawText(clipped, renderX, renderY + textPaint.textSize * 0.28f, textPaint)
+            drawCenteredMultilineText(canvas, lines, renderX, renderY)
             canvas.restore()
         } else {
-            canvas.drawText(clipped, renderX, renderY + textPaint.textSize * 0.28f, textPaint)
+            drawCenteredMultilineText(canvas, lines, renderX, renderY)
         }
     }
 
@@ -597,20 +598,71 @@ class BubbleModeView @JvmOverloads constructor(
         )
     }
 
-    private fun ellipsize(text: String, paint: TextPaint, maxWidth: Float): String {
+    private fun radiusForText(item: BubbleItem): Float {
+        val baseText = max(item.frontText.length, item.backText.length).coerceAtLeast(item.title.length)
+        val normalized = (baseText / 240f).coerceIn(0f, 1.6f)
+        val minRadius = 52f * density()
+        val maxRadius = 122f * density()
+        val target = minRadius + (maxRadius - minRadius) * kotlin.math.sqrt(normalized.coerceIn(0f, 1f))
+        val jitter = (random.nextFloat() - 0.5f) * (8f * density())
+        return (target + jitter).coerceIn(minRadius, maxRadius)
+    }
+
+    private fun buildWrappedLines(
+        rawText: String,
+        paint: TextPaint,
+        maxWidth: Float,
+        maxLines: Int
+    ): List<String> {
+        val words = rawText.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) return listOf("")
+        val lines = mutableListOf<String>()
+        var current = ""
+        words.forEach { word ->
+            val candidate = if (current.isEmpty()) word else "$current $word"
+            if (paint.measureText(candidate) <= maxWidth || current.isEmpty()) {
+                current = candidate
+            } else {
+                lines += current
+                current = word
+            }
+            if (lines.size >= maxLines) return@forEach
+        }
+        if (current.isNotEmpty() && lines.size < maxLines) lines += current
+        if (lines.size > maxLines) return lines.take(maxLines)
+        if (words.joinToString(" ").length > lines.joinToString(" ").length && lines.isNotEmpty()) {
+            val last = lines.last()
+            lines[lines.lastIndex] = trimToWidth(last + "…", paint, maxWidth)
+        }
+        return lines
+    }
+
+    private fun drawCenteredMultilineText(
+        canvas: Canvas,
+        lines: List<String>,
+        centerX: Float,
+        centerY: Float
+    ) {
+        if (lines.isEmpty()) return
+        val lineHeight = textPaint.fontMetrics.let { it.descent - it.ascent }
+        val blockHeight = lineHeight * lines.size
+        var y = centerY - blockHeight / 2f - textPaint.fontMetrics.ascent
+        lines.forEach { line ->
+            canvas.drawText(line, centerX, y, textPaint)
+            y += lineHeight
+        }
+    }
+
+    private fun trimToWidth(text: String, paint: TextPaint, maxWidth: Float): String {
         if (paint.measureText(text) <= maxWidth) return text
         var low = 0
         var high = text.length
         while (low < high) {
             val mid = (low + high + 1) / 2
-            val candidate = text.take(mid) + "…"
-            if (paint.measureText(candidate) <= maxWidth) {
-                low = mid
-            } else {
-                high = mid - 1
-            }
+            val candidate = text.take(mid)
+            if (paint.measureText(candidate) <= maxWidth) low = mid else high = mid - 1
         }
-        return text.take(low) + "…"
+        return text.take(low)
     }
 
     private fun density(): Float = resources.displayMetrics.density
