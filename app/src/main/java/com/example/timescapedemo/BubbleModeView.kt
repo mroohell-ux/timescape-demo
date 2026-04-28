@@ -80,6 +80,8 @@ class BubbleModeView @JvmOverloads constructor(
     private var focusedBubbleId: Long? = null
     private var flipProgress = 1f
     private var focusedShowingBack = false
+    private var draggedBubbleId: Long? = null
+    private var lastDragEventTimeMs: Long = 0L
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -197,8 +199,11 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
                 velocityX = 0f
                 velocityY = 0f
+                val touched = bubbleAt(event.x, event.y)
+                draggedBubbleId = touched?.item?.id
                 lastTouchX = event.x
                 lastTouchY = event.y
+                lastDragEventTimeMs = event.eventTime
                 swipeDistancePx = 0f
                 parent.requestDisallowInterceptTouchEvent(true)
             }
@@ -206,13 +211,28 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityTracker?.addMovement(event)
                 val dx = lastTouchX - event.x
                 val dy = lastTouchY - event.y
-                swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
-                offsetX += dx
-                offsetY += dy
-                applySwipeForce(-dx, -dy)
+                val dragged = draggedBubbleId?.let { id -> bubbleStates.firstOrNull { it.item.id == id } }
+                if (dragged != null) {
+                    val worldX = event.x + offsetX
+                    val worldY = event.y + offsetY
+                    val dtSec = ((event.eventTime - lastDragEventTimeMs).coerceAtLeast(1L)) / 1000f
+                    val oldX = dragged.x
+                    val oldY = dragged.y
+                    dragged.x = worldX.coerceIn(dragged.minX, dragged.maxX)
+                    dragged.y = worldY.coerceIn(dragged.minY, dragged.maxY)
+                    dragged.vx = ((dragged.x - oldX) / dtSec) / 60f
+                    dragged.vy = ((dragged.y - oldY) / dtSec) / 60f
+                    applyDragInfluence(dragged, speed = hypot(dragged.vx, dragged.vy))
+                    lastDragEventTimeMs = event.eventTime
+                } else {
+                    swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
+                    offsetX += dx
+                    offsetY += dy
+                    applySwipeForce(-dx, -dy)
+                    clampOffsets(withResistance = true)
+                }
                 lastTouchX = event.x
                 lastTouchY = event.y
-                clampOffsets(withResistance = true)
                 invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -224,7 +244,9 @@ class BubbleModeView @JvmOverloads constructor(
                     recycle()
                 }
                 velocityTracker = null
-                if (swipeDistancePx > 48f * density()) {
+                val wasDraggingBubble = draggedBubbleId != null
+                draggedBubbleId = null
+                if (!wasDraggingBubble && swipeDistancePx > 48f * density()) {
                     focusedBubbleId = null
                     onBubbleFocusChanged?.invoke(null)
                     onSwipeGesture?.invoke()
@@ -297,6 +319,12 @@ class BubbleModeView @JvmOverloads constructor(
         clampOffsets(withResistance = false)
 
         bubbleStates.forEach { bubble ->
+            val isDragged = bubble.item.id == draggedBubbleId
+            if (isDragged) {
+                bubble.vx *= 0.995f
+                bubble.vy *= 0.995f
+                return@forEach
+            }
             bubble.vx += (random.nextFloat() - 0.5f) * 1.1f * dt
             bubble.vy += (random.nextFloat() - 0.5f) * 1.1f * dt
             bubble.vx *= friction
@@ -349,13 +377,15 @@ class BubbleModeView @JvmOverloads constructor(
 
                 val invMassA = 1f / a.mass
                 val invMassB = 1f / b.mass
-                val invMassSum = invMassA + invMassB
+                val effectiveInvMassA = if (a.item.id == draggedBubbleId) 0f else invMassA
+                val effectiveInvMassB = if (b.item.id == draggedBubbleId) 0f else invMassB
+                val invMassSum = effectiveInvMassA + effectiveInvMassB
                 if (invMassSum <= 0f) continue
 
-                a.x -= nx * overlap * (invMassA / invMassSum)
-                a.y -= ny * overlap * (invMassA / invMassSum)
-                b.x += nx * overlap * (invMassB / invMassSum)
-                b.y += ny * overlap * (invMassB / invMassSum)
+                a.x -= nx * overlap * (effectiveInvMassA / invMassSum)
+                a.y -= ny * overlap * (effectiveInvMassA / invMassSum)
+                b.x += nx * overlap * (effectiveInvMassB / invMassSum)
+                b.y += ny * overlap * (effectiveInvMassB / invMassSum)
 
                 val rvx = b.vx - a.vx
                 val rvy = b.vy - a.vy
@@ -366,11 +396,31 @@ class BubbleModeView @JvmOverloads constructor(
                 val impulseX = impulse * nx
                 val impulseY = impulse * ny
 
-                a.vx -= impulseX * invMassA
-                a.vy -= impulseY * invMassA
-                b.vx += impulseX * invMassB
-                b.vy += impulseY * invMassB
+                a.vx -= impulseX * effectiveInvMassA
+                a.vy -= impulseY * effectiveInvMassA
+                b.vx += impulseX * effectiveInvMassB
+                b.vy += impulseY * effectiveInvMassB
             }
+        }
+    }
+
+    private fun applyDragInfluence(dragged: BubbleState, speed: Float) {
+        val influenceRadius = dragged.radius * 3.4f
+        val baseForce = (speed * 0.9f).coerceIn(0.4f, 12f)
+        bubbleStates.forEach { bubble ->
+            if (bubble.item.id == dragged.item.id) return@forEach
+            if (abs(bubble.minX - dragged.minX) > 1f) return@forEach
+            val dx = bubble.x - dragged.x
+            val dy = bubble.y - dragged.y
+            val dist = hypot(dx, dy).coerceAtLeast(1f)
+            if (dist > influenceRadius) return@forEach
+            val nx = dx / dist
+            val ny = dy / dist
+            val falloff = 1f - (dist / influenceRadius)
+            val impulse = baseForce * falloff * falloff
+            val massFactor = (9000f / bubble.mass).coerceIn(0.12f, 0.95f)
+            bubble.vx += nx * impulse * massFactor
+            bubble.vy += ny * impulse * massFactor
         }
     }
 
