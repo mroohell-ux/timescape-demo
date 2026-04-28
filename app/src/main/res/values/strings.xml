@@ -222,6 +222,9 @@
     <string name="bubble_mode_title">Bubble Mode</string>
     <string name="bubble_mode_subtitle">Glide through your sticky notes and tap a bubble to open it.</string>
     <string name="snackbar_bubble_mode_empty">No sticky notes in this flow yet.</string>
+    <string name="bubble_review_title">Bubble Review</string>
+    <string name="bubble_review_remember">Remember</string>
+    <string name="bubble_review_dont_remember">Don’t remember</string>
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>

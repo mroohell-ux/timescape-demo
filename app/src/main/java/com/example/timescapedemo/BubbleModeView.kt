@@ -51,6 +51,7 @@ class BubbleModeView @JvmOverloads constructor(
     )
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
+    var onSwipeGesture: (() -> Unit)? = null
 
     private val bubbleStates = mutableListOf<BubbleState>()
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -75,6 +76,8 @@ class BubbleModeView @JvmOverloads constructor(
     private var lastTouchX = 0f
     private var lastTouchY = 0f
     private var pendingItems: List<BubbleItem> = emptyList()
+    private var swipeDistancePx = 0f
+    private var transitionProgress = 1f
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -140,6 +143,16 @@ class BubbleModeView @JvmOverloads constructor(
         offsetY = 0f
         velocityX = 0f
         velocityY = 0f
+        transitionProgress = 0f
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 280
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                transitionProgress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
         Log.d("BubbleModeView", "submit complete rendered=${bubbleStates.size} field=${fieldWidth}x$fieldHeight")
         invalidate()
     }
@@ -175,12 +188,14 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityY = 0f
                 lastTouchX = event.x
                 lastTouchY = event.y
+                swipeDistancePx = 0f
                 parent.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
                 velocityTracker?.addMovement(event)
                 val dx = lastTouchX - event.x
                 val dy = lastTouchY - event.y
+                swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
                 offsetX += dx
                 offsetY += dy
                 applySwipeForce(-dx, -dy)
@@ -198,6 +213,9 @@ class BubbleModeView @JvmOverloads constructor(
                     recycle()
                 }
                 velocityTracker = null
+                if (swipeDistancePx > 48f * density()) {
+                    onSwipeGesture?.invoke()
+                }
             }
         }
         return true
@@ -217,7 +235,7 @@ class BubbleModeView @JvmOverloads constructor(
 
             val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
             val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
-            val alpha = (0.68f + (1f - distNorm) * 0.30f).coerceIn(0.55f, 0.98f)
+            val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress).coerceIn(0.1f, 0.98f)
             val radius = bubble.radius * prominence
             val alphaInt = (alpha * 255).toInt()
             bubblePaint.shader = createBubbleGradient(
