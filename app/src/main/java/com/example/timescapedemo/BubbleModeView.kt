@@ -565,28 +565,34 @@ class BubbleModeView @JvmOverloads constructor(
 
         val centerTone = floatArrayOf(
             hue,
-            (saturation * 1.08f + 0.08f).coerceIn(0f, 1f),
-            (value * 1.03f + 0.05f).coerceIn(0f, 1f)
+            (0.70f + saturation * 0.28f).coerceIn(0f, 1f),
+            (0.45f + value * 0.28f).coerceIn(0f, 1f)
         )
         val midTone = floatArrayOf(
             hue,
-            (saturation * 1.25f).coerceIn(0f, 1f),
-            (value * 0.78f).coerceIn(0f, 1f)
+            (0.82f + saturation * 0.22f).coerceIn(0f, 1f),
+            (0.32f + value * 0.24f).coerceIn(0f, 1f)
         )
         val edgeTone = floatArrayOf(
             hue,
-            (saturation * 1.45f).coerceIn(0f, 1f),
-            (value * 0.42f).coerceIn(0f, 1f)
+            (0.92f + saturation * 0.14f).coerceIn(0f, 1f),
+            (0.16f + value * 0.12f).coerceIn(0f, 1f)
+        )
+        val rimTone = floatArrayOf(
+            hue,
+            (0.95f + saturation * 0.08f).coerceIn(0f, 1f),
+            (0.08f + value * 0.05f).coerceIn(0f, 1f)
         )
         val centerColor = ColorUtils.setAlphaComponent(Color.HSVToColor(centerTone), alpha)
         val midColor = ColorUtils.setAlphaComponent(Color.HSVToColor(midTone), alpha)
         val edgeColor = ColorUtils.setAlphaComponent(Color.HSVToColor(edgeTone), alpha)
+        val rimColor = ColorUtils.setAlphaComponent(Color.HSVToColor(rimTone), alpha)
         return RadialGradient(
             centerX,
             centerY,
             radius,
-            intArrayOf(centerColor, midColor, edgeColor),
-            floatArrayOf(0f, 0.62f, 1f),
+            intArrayOf(centerColor, midColor, edgeColor, rimColor),
+            floatArrayOf(0f, 0.55f, 0.88f, 1f),
             Shader.TileMode.CLAMP
         )
     }
