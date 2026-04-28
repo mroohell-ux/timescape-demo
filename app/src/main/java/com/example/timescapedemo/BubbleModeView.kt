@@ -378,19 +378,11 @@ class BubbleModeView @JvmOverloads constructor(
         val right = offsetX + width + radiusPadding
         val top = offsetY - radiusPadding
         val bottom = offsetY + height + radiusPadding
-        val candidates = bubbleStates.filter { it.x in left..right && it.y in top..bottom }
-        val noteCountDensity = ((bubbleStates.size - 1).coerceAtLeast(0) / 99f).coerceIn(0f, 1f)
-        val targetVisible = lerp(42f, 24f, kotlin.math.sqrt(noteCountDensity)).toInt().coerceIn(18, 52)
-        if (candidates.size <= targetVisible) return candidates.map { it.item.id }.toSet()
-        val sorted = candidates.sortedBy { kotlin.math.atan2((it.y - offsetY - height / 2f), (it.x - offsetX - width / 2f)) }
-        val stride = (sorted.size.toFloat() / targetVisible.toFloat()).coerceAtLeast(1f)
-        val selected = mutableSetOf<Long>()
-        var idx = 0f
-        while (selected.size < targetVisible && idx < sorted.size) {
-            selected += sorted[idx.toInt()].item.id
-            idx += stride
-        }
-        return selected
+        return bubbleStates
+            .asSequence()
+            .filter { it.x in left..right && it.y in top..bottom }
+            .map { it.item.id }
+            .toSet()
     }
 
     private fun clampOffsets(withResistance: Boolean) {
