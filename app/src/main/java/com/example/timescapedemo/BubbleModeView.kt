@@ -42,7 +42,11 @@ class BubbleModeView @JvmOverloads constructor(
         var radius: Float,
         var driftX: Float,
         var driftY: Float,
-        var depthBias: Float
+        var depthBias: Float,
+        val minX: Float,
+        val maxX: Float,
+        val minY: Float,
+        val maxY: Float
     )
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
@@ -103,18 +107,31 @@ class BubbleModeView @JvmOverloads constructor(
             invalidate()
             return
         }
-        fieldWidth = width.toFloat()
+        val bubblesPerPage = 30
+        val pageCount = (items.size + bubblesPerPage - 1) / bubblesPerPage
+        fieldWidth = width.toFloat() * pageCount.coerceAtLeast(1)
         fieldHeight = height.toFloat()
-        items.forEach { item ->
-            val radius = random.nextInt((44 * density()).toInt(), (84 * density()).toInt()).toFloat()
+        items.forEachIndexed { index, item ->
+            val pageIndex = index / bubblesPerPage
+            val pageLeft = pageIndex * width.toFloat()
+            val pageRight = pageLeft + width.toFloat()
+            val radius = random.nextInt((46 * density()).toInt(), (88 * density()).toInt()).toFloat()
+            val minX = pageLeft + radius
+            val maxX = pageRight - radius
+            val minY = radius
+            val maxY = fieldHeight - radius
             bubbleStates += BubbleState(
                 item = item,
-                x = random.nextFloat() * (fieldWidth - radius * 2) + radius,
-                y = random.nextFloat() * (fieldHeight - radius * 2) + radius,
+                x = random.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX,
+                y = random.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY,
                 radius = radius,
-                driftX = random.nextFloat() * 16f - 8f,
-                driftY = random.nextFloat() * 16f - 8f,
-                depthBias = random.nextFloat() * 0.2f - 0.1f
+                driftX = random.nextFloat() * 26f - 13f,
+                driftY = random.nextFloat() * 22f - 11f,
+                depthBias = random.nextFloat() * 0.2f - 0.1f,
+                minX = minX,
+                maxX = maxX,
+                minY = minY,
+                maxY = maxY
             )
         }
         offsetX = 0f
@@ -197,7 +214,7 @@ class BubbleModeView @JvmOverloads constructor(
 
             val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
             val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
-            val alpha = (0.45f + (1f - distNorm) * 0.45f).coerceIn(0.3f, 0.95f)
+            val alpha = (0.68f + (1f - distNorm) * 0.30f).coerceIn(0.55f, 0.98f)
             val radius = bubble.radius * prominence
             val alphaInt = (alpha * 255).toInt()
             bubblePaint.shader = createBubbleGradient(
@@ -234,13 +251,13 @@ class BubbleModeView @JvmOverloads constructor(
         bubbleStates.forEach { bubble ->
             bubble.x += bubble.driftX * dt
             bubble.y += bubble.driftY * dt
-            if (bubble.x - bubble.radius < 0f || bubble.x + bubble.radius > fieldWidth) {
+            if (bubble.x < bubble.minX || bubble.x > bubble.maxX) {
                 bubble.driftX *= -1f
-                bubble.x = bubble.x.coerceIn(bubble.radius, fieldWidth - bubble.radius)
+                bubble.x = bubble.x.coerceIn(bubble.minX, bubble.maxX)
             }
-            if (bubble.y - bubble.radius < 0f || bubble.y + bubble.radius > fieldHeight) {
+            if (bubble.y < bubble.minY || bubble.y > bubble.maxY) {
                 bubble.driftY *= -1f
-                bubble.y = bubble.y.coerceIn(bubble.radius, fieldHeight - bubble.radius)
+                bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
             }
         }
     }
@@ -300,18 +317,18 @@ class BubbleModeView @JvmOverloads constructor(
 
         val centerTone = floatArrayOf(
             hue,
-            (saturation * 0.55f).coerceIn(0f, 1f),
-            (value * 0.92f).coerceIn(0f, 1f)
+            (saturation * 0.95f + 0.05f).coerceIn(0f, 1f),
+            (value * 0.98f + 0.02f).coerceIn(0f, 1f)
         )
         val midTone = floatArrayOf(
             hue,
-            (saturation * 0.85f).coerceIn(0f, 1f),
-            (value * 0.70f).coerceIn(0f, 1f)
+            (saturation * 1.12f).coerceIn(0f, 1f),
+            (value * 0.66f).coerceIn(0f, 1f)
         )
         val edgeTone = floatArrayOf(
             hue,
-            (saturation * 1.15f).coerceIn(0f, 1f),
-            (value * 0.35f).coerceIn(0f, 1f)
+            (saturation * 1.35f).coerceIn(0f, 1f),
+            (value * 0.28f).coerceIn(0f, 1f)
         )
         val centerColor = ColorUtils.setAlphaComponent(Color.HSVToColor(centerTone), alpha)
         val midColor = ColorUtils.setAlphaComponent(Color.HSVToColor(midTone), alpha)
