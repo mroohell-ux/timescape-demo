@@ -154,8 +154,8 @@ class BubbleModeView @JvmOverloads constructor(
                 x = targetX,
                 y = targetY,
                 radius = radius,
-                vx = random.nextFloat() * 14f - 7f,
-                vy = random.nextFloat() * 14f - 7f,
+                vx = random.nextFloat() * 3.2f - 1.6f,
+                vy = random.nextFloat() * 3.2f - 1.6f,
                 mass = (radius * radius).coerceAtLeast(1f),
                 depthBias = random.nextFloat() * 0.2f - 0.1f,
                 minX = minX,
@@ -364,8 +364,8 @@ class BubbleModeView @JvmOverloads constructor(
 
     private fun stepPhysics(dt: Float) {
         if (bubbleStates.isEmpty()) return
-        val friction = 0.985f
-        val restitution = 0.88f
+        val friction = 0.94f
+        val restitution = 0.74f
         val spring = (dt * 11.5f).coerceIn(0f, 1f)
         offsetX = lerp(offsetX, panTargetX, spring)
         offsetY = lerp(offsetY, panTargetY, spring)
@@ -383,10 +383,10 @@ class BubbleModeView @JvmOverloads constructor(
             } else if (bubble.entryProgress < 1f) {
                 bubble.entryProgress = (bubble.entryProgress + dt * 2.3f).coerceAtMost(1f)
             }
-            bubble.vx += (random.nextFloat() - 0.5f) * 1.1f * dt
-            bubble.vy += (random.nextFloat() - 0.5f) * 1.1f * dt
             bubble.vx *= friction
             bubble.vy *= friction
+            if (abs(bubble.vx) < 0.018f) bubble.vx = 0f
+            if (abs(bubble.vy) < 0.018f) bubble.vy = 0f
             bubble.x += bubble.vx * dt * 60f
             bubble.y += bubble.vy * dt * 60f
             if (bubble.x < bubble.minX || bubble.x > bubble.maxX) {
@@ -398,7 +398,7 @@ class BubbleModeView @JvmOverloads constructor(
                 bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
             }
         }
-        resolveBubbleCollisions(restitution = 0.82f)
+        resolveBubbleCollisions(restitution = 0.68f)
     }
 
     private fun resolveBubbleCollisions(restitution: Float) {
