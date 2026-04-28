@@ -246,8 +246,6 @@ class BubbleModeView @JvmOverloads constructor(
                     dragged.y = worldY.coerceIn(dragged.minY, dragged.maxY)
                     dragged.vx = ((dragged.x - oldX) / dtSec) / 60f
                     dragged.vy = ((dragged.y - oldY) / dtSec) / 60f
-                    applyDragInfluence(dragged, speed = hypot(dragged.vx, dragged.vy))
-                    resolveDragContacts(dragged)
                     lastDragEventTimeMs = event.eventTime
                 } else {
                     swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
@@ -397,94 +395,6 @@ class BubbleModeView @JvmOverloads constructor(
                 bubble.vy *= -restitution
                 bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
             }
-        }
-        resolveBubbleCollisions(restitution = 0.68f)
-    }
-
-    private fun resolveBubbleCollisions(restitution: Float) {
-        for (i in 0 until bubbleStates.size) {
-            val a = bubbleStates[i]
-            for (j in i + 1 until bubbleStates.size) {
-                val b = bubbleStates[j]
-                val dx = b.x - a.x
-                val dy = b.y - a.y
-                val distSq = dx * dx + dy * dy
-                val minDist = a.radius + b.radius
-                if (distSq <= 0f || distSq >= minDist * minDist) continue
-
-                val dist = kotlin.math.sqrt(distSq)
-                val nx = dx / dist
-                val ny = dy / dist
-                val overlap = minDist - dist
-
-                val invMassA = 1f / a.mass
-                val invMassB = 1f / b.mass
-                val effectiveInvMassA = if (a.item.id == draggedBubbleId) 0f else invMassA
-                val effectiveInvMassB = if (b.item.id == draggedBubbleId) 0f else invMassB
-                val invMassSum = effectiveInvMassA + effectiveInvMassB
-                if (invMassSum <= 0f) continue
-
-                a.x -= nx * overlap * (effectiveInvMassA / invMassSum)
-                a.y -= ny * overlap * (effectiveInvMassA / invMassSum)
-                b.x += nx * overlap * (effectiveInvMassB / invMassSum)
-                b.y += ny * overlap * (effectiveInvMassB / invMassSum)
-
-                val rvx = b.vx - a.vx
-                val rvy = b.vy - a.vy
-                val velAlongNormal = rvx * nx + rvy * ny
-                if (velAlongNormal > 0f) continue
-
-                val impulse = -(1f + restitution) * velAlongNormal / invMassSum
-                val impulseX = impulse * nx
-                val impulseY = impulse * ny
-
-                a.vx -= impulseX * effectiveInvMassA
-                a.vy -= impulseY * effectiveInvMassA
-                b.vx += impulseX * effectiveInvMassB
-                b.vy += impulseY * effectiveInvMassB
-            }
-        }
-    }
-
-    private fun applyDragInfluence(dragged: BubbleState, speed: Float) {
-        if (speed < 0.55f) return
-        val normalizedSpeed = ((speed - 0.55f) / 1.8f).coerceIn(0f, 1.2f)
-        val influenceRadius = dragged.radius * 3.9f
-        val baseForce = (normalizedSpeed * 8.0f).coerceIn(0.15f, 8.5f)
-        bubbleStates.forEach { bubble ->
-            if (bubble.item.id == dragged.item.id) return@forEach
-            val dx = bubble.x - dragged.x
-            val dy = bubble.y - dragged.y
-            val dist = hypot(dx, dy).coerceAtLeast(1f)
-            if (dist > influenceRadius) return@forEach
-            val nx = dx / dist
-            val ny = dy / dist
-            val falloff = 1f - (dist / influenceRadius)
-            val impulse = baseForce * falloff * falloff
-            val massFactor = (6500f / bubble.mass).coerceIn(0.08f, 0.55f)
-            bubble.vx += nx * impulse * massFactor
-            bubble.vy += ny * impulse * massFactor
-        }
-    }
-
-    private fun resolveDragContacts(dragged: BubbleState) {
-        bubbleStates.forEach { bubble ->
-            if (bubble.item.id == dragged.item.id) return@forEach
-            val dx = bubble.x - dragged.x
-            val dy = bubble.y - dragged.y
-            val dist = hypot(dx, dy).coerceAtLeast(0.001f)
-            val minDist = dragged.radius + bubble.radius
-            if (dist >= minDist) return@forEach
-            val nx = dx / dist
-            val ny = dy / dist
-            val overlap = minDist - dist
-            bubble.x += nx * overlap * 0.55f
-            bubble.y += ny * overlap * 0.55f
-            bubble.x = bubble.x.coerceIn(bubble.minX, bubble.maxX)
-            bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
-            val push = (overlap * 0.08f).coerceAtLeast(0.03f)
-            bubble.vx += nx * push
-            bubble.vy += ny * push
         }
     }
 
