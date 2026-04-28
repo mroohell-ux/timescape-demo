@@ -2733,13 +2733,17 @@ class MainActivity : AppCompatActivity() {
             val target = focusedTarget ?: return@setOnClickListener
             val current = bubbleModeScores[target.note.id] ?: 0
             bubbleModeScores[target.note.id] = current - 1
-            submitNextPage()
+            focusedTarget = null
+            decisionBar.isVisible = false
+            bubbleField.clearFocusedBubble()
         }
         dontRememberButton.setOnClickListener {
             val target = focusedTarget ?: return@setOnClickListener
             val current = bubbleModeScores[target.note.id] ?: 0
             bubbleModeScores[target.note.id] = current + 1
-            submitNextPage()
+            focusedTarget = null
+            decisionBar.isVisible = false
+            bubbleField.clearFocusedBubble()
         }
         dialog.show()
         Log.d("BubbleMode", "dialog shown")

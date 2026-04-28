@@ -90,6 +90,7 @@ class BubbleModeView @JvmOverloads constructor(
     private var focusStartRadius = 0f
     private var draggedBubbleId: Long? = null
     private var lastDragEventTimeMs: Long = 0L
+    private var reviewGestureBlocked = false
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -97,6 +98,8 @@ class BubbleModeView @JvmOverloads constructor(
             val bubble = bubbleAt(e.x, e.y) ?: return false
             if (focusedBubbleId == bubble.item.id) {
                 animateFlip()
+            } else if (focusedBubbleId != null) {
+                return true
             } else {
                 focusedBubbleId = bubble.item.id
                 focusedShowingBack = false
@@ -215,6 +218,11 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityX = 0f
                 velocityY = 0f
                 val touched = bubbleAt(event.x, event.y)
+                reviewGestureBlocked = focusedBubbleId != null && touched?.item?.id != focusedBubbleId
+                if (reviewGestureBlocked) {
+                    draggedBubbleId = null
+                    return true
+                }
                 draggedBubbleId = touched?.item?.id
                 lastTouchX = event.x
                 lastTouchY = event.y
@@ -223,6 +231,7 @@ class BubbleModeView @JvmOverloads constructor(
                 parent.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
+                if (reviewGestureBlocked) return true
                 velocityTracker?.addMovement(event)
                 val dx = lastTouchX - event.x
                 val dy = lastTouchY - event.y
@@ -252,6 +261,10 @@ class BubbleModeView @JvmOverloads constructor(
                 invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (reviewGestureBlocked) {
+                    reviewGestureBlocked = false
+                    return true
+                }
                 velocityTracker?.apply {
                     addMovement(event)
                     computeCurrentVelocity(1000)
@@ -632,5 +645,13 @@ class BubbleModeView @JvmOverloads constructor(
             }
             start()
         }
+    }
+
+    fun clearFocusedBubble() {
+        focusedBubbleId = null
+        focusAnimProgress = 1f
+        focusedShowingBack = false
+        onBubbleFocusChanged?.invoke(null)
+        invalidate()
     }
 }
