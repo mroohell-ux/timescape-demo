@@ -40,8 +40,9 @@ class BubbleModeView @JvmOverloads constructor(
         var x: Float,
         var y: Float,
         var radius: Float,
-        var driftX: Float,
-        var driftY: Float,
+        var vx: Float,
+        var vy: Float,
+        var mass: Float,
         var depthBias: Float,
         val minX: Float,
         val maxX: Float,
@@ -125,8 +126,9 @@ class BubbleModeView @JvmOverloads constructor(
                 x = random.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX,
                 y = random.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY,
                 radius = radius,
-                driftX = random.nextFloat() * 26f - 13f,
-                driftY = random.nextFloat() * 22f - 11f,
+                vx = random.nextFloat() * 14f - 7f,
+                vy = random.nextFloat() * 14f - 7f,
+                mass = (radius * radius).coerceAtLeast(1f),
                 depthBias = random.nextFloat() * 0.2f - 0.1f,
                 minX = minX,
                 maxX = maxX,
@@ -181,6 +183,7 @@ class BubbleModeView @JvmOverloads constructor(
                 val dy = lastTouchY - event.y
                 offsetX += dx
                 offsetY += dy
+                applySwipeForce(-dx, -dy)
                 lastTouchX = event.x
                 lastTouchY = event.y
                 clampOffsets(withResistance = true)
@@ -239,7 +242,8 @@ class BubbleModeView @JvmOverloads constructor(
 
     private fun stepPhysics(dt: Float) {
         if (bubbleStates.isEmpty()) return
-        val friction = 0.93f
+        val friction = 0.985f
+        val restitution = 0.88f
         offsetX += velocityX * dt
         offsetY += velocityY * dt
         velocityX *= friction
@@ -249,15 +253,79 @@ class BubbleModeView @JvmOverloads constructor(
         clampOffsets(withResistance = false)
 
         bubbleStates.forEach { bubble ->
-            bubble.x += bubble.driftX * dt
-            bubble.y += bubble.driftY * dt
+            bubble.vx += (random.nextFloat() - 0.5f) * 1.1f * dt
+            bubble.vy += (random.nextFloat() - 0.5f) * 1.1f * dt
+            bubble.vx *= friction
+            bubble.vy *= friction
+            bubble.x += bubble.vx * dt * 60f
+            bubble.y += bubble.vy * dt * 60f
             if (bubble.x < bubble.minX || bubble.x > bubble.maxX) {
-                bubble.driftX *= -1f
+                bubble.vx *= -restitution
                 bubble.x = bubble.x.coerceIn(bubble.minX, bubble.maxX)
             }
             if (bubble.y < bubble.minY || bubble.y > bubble.maxY) {
-                bubble.driftY *= -1f
+                bubble.vy *= -restitution
                 bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
+            }
+        }
+        resolveBubbleCollisions(restitution = 0.82f)
+    }
+
+    private fun applySwipeForce(dx: Float, dy: Float) {
+        if (bubbleStates.isEmpty()) return
+        val viewportLeft = offsetX
+        val viewportRight = offsetX + width
+        val impulseX = dx * 0.7f
+        val impulseY = dy * 0.7f
+        bubbleStates.forEach { bubble ->
+            if (bubble.x in viewportLeft..viewportRight) {
+                val massFactor = (12000f / bubble.mass).coerceIn(0.12f, 0.85f)
+                bubble.vx += impulseX * massFactor
+                bubble.vy += impulseY * massFactor
+            }
+        }
+    }
+
+    private fun resolveBubbleCollisions(restitution: Float) {
+        for (i in 0 until bubbleStates.size) {
+            val a = bubbleStates[i]
+            for (j in i + 1 until bubbleStates.size) {
+                val b = bubbleStates[j]
+                if (abs(a.minX - b.minX) > 1f) continue
+                val dx = b.x - a.x
+                val dy = b.y - a.y
+                val distSq = dx * dx + dy * dy
+                val minDist = a.radius + b.radius
+                if (distSq <= 0f || distSq >= minDist * minDist) continue
+
+                val dist = kotlin.math.sqrt(distSq)
+                val nx = dx / dist
+                val ny = dy / dist
+                val overlap = minDist - dist
+
+                val invMassA = 1f / a.mass
+                val invMassB = 1f / b.mass
+                val invMassSum = invMassA + invMassB
+                if (invMassSum <= 0f) continue
+
+                a.x -= nx * overlap * (invMassA / invMassSum)
+                a.y -= ny * overlap * (invMassA / invMassSum)
+                b.x += nx * overlap * (invMassB / invMassSum)
+                b.y += ny * overlap * (invMassB / invMassSum)
+
+                val rvx = b.vx - a.vx
+                val rvy = b.vy - a.vy
+                val velAlongNormal = rvx * nx + rvy * ny
+                if (velAlongNormal > 0f) continue
+
+                val impulse = -(1f + restitution) * velAlongNormal / invMassSum
+                val impulseX = impulse * nx
+                val impulseY = impulse * ny
+
+                a.vx -= impulseX * invMassA
+                a.vy -= impulseY * invMassA
+                b.vx += impulseX * invMassB
+                b.vy += impulseY * invMassB
             }
         }
     }
