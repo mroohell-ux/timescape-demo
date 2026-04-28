@@ -37,4 +37,30 @@
             android:textSize="14sp" />
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/bubbleDecisionBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonBubbleRemember"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:text="@string/bubble_review_remember" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonBubbleDontRemember"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/bubble_review_dont_remember" />
+    </LinearLayout>
+
 </FrameLayout>

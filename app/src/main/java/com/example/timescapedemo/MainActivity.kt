@@ -2704,23 +2704,42 @@ class MainActivity : AppCompatActivity() {
         val content = layoutInflater.inflate(R.layout.dialog_bubble_mode, null)
         dialog.setContentView(content)
         val bubbleField = content.findViewById<BubbleModeView>(R.id.bubbleField)
+        val decisionBar = content.findViewById<View>(R.id.bubbleDecisionBar)
+        val rememberButton = content.findViewById<MaterialButton>(R.id.buttonBubbleRemember)
+        val dontRememberButton = content.findViewById<MaterialButton>(R.id.buttonBubbleDontRemember)
+        var focusedTarget: BubbleModeNoteTarget? = null
         val submitNextPage: () -> Unit = {
             val selected = selectBubblesForPage(allTargets, maxCount = 30)
             bubbleField.submitBubbles(selected.map { target -> bubbleItemFromTarget(target) })
+            focusedTarget = null
+            decisionBar.isVisible = false
             Log.d("BubbleMode", "submitted bubbles count=${selected.size}")
         }
         submitNextPage()
         bubbleField.onSwipeGesture = {
             submitNextPage()
         }
+        bubbleField.onBubbleFocusChanged = { item ->
+            focusedTarget = item?.payload as? BubbleModeNoteTarget
+            decisionBar.isVisible = focusedTarget != null
+        }
         bubbleField.onBubbleClick = { item ->
             val target = item.payload as? BubbleModeNoteTarget
             if (target != null) {
                 Log.d("BubbleMode", "bubble tapped noteId=${target.note.id} cardId=${target.card.id} score=${bubbleModeScores[target.note.id] ?: 0}")
-                showBubbleReviewDialog(target) {
-                    submitNextPage()
-                }
             }
+        }
+        rememberButton.setOnClickListener {
+            val target = focusedTarget ?: return@setOnClickListener
+            val current = bubbleModeScores[target.note.id] ?: 0
+            bubbleModeScores[target.note.id] = current - 1
+            submitNextPage()
+        }
+        dontRememberButton.setOnClickListener {
+            val target = focusedTarget ?: return@setOnClickListener
+            val current = bubbleModeScores[target.note.id] ?: 0
+            bubbleModeScores[target.note.id] = current + 1
+            submitNextPage()
         }
         dialog.show()
         Log.d("BubbleMode", "dialog shown")
@@ -2734,6 +2753,8 @@ class MainActivity : AppCompatActivity() {
         return BubbleModeView.BubbleItem(
             id = target.note.id,
             title = "$label (${score})",
+            frontText = target.note.frontText,
+            backText = target.note.backText,
             color = target.note.color,
             payload = target
         )
@@ -2768,56 +2789,6 @@ class MainActivity : AppCompatActivity() {
             if (remaining.isEmpty()) return@repeat
         }
         return selected
-    }
-
-    private fun showBubbleReviewDialog(
-        target: BubbleModeNoteTarget,
-        onScoreChanged: () -> Unit
-    ) {
-        val card = MaterialCardView(this).apply {
-            radius = 28f * resources.displayMetrics.density
-            setCardBackgroundColor(target.note.color)
-            cardElevation = 8f * resources.displayMetrics.density
-            setContentPadding(32, 32, 32, 32)
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        val textView = TextView(this).apply {
-            text = target.note.frontText
-            setTextColor(Color.WHITE)
-            textSize = 17f
-        }
-        card.addView(textView)
-        var showingBack = false
-        card.setOnClickListener {
-            val toBack = !showingBack
-            val out = ObjectAnimator.ofFloat(card, View.ROTATION_Y, 0f, 90f).apply { duration = 120 }
-            val inn = ObjectAnimator.ofFloat(card, View.ROTATION_Y, -90f, 0f).apply { duration = 140 }
-            out.addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    showingBack = toBack
-                    textView.text = if (showingBack) target.note.backText else target.note.frontText
-                    inn.start()
-                }
-            })
-            out.start()
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.bubble_review_title)
-            .setView(card)
-            .setPositiveButton(R.string.bubble_review_dont_remember) { _, _ ->
-                val current = bubbleModeScores[target.note.id] ?: 0
-                bubbleModeScores[target.note.id] = current + 1
-                onScoreChanged()
-            }
-            .setNegativeButton(R.string.bubble_review_remember) { _, _ ->
-                val current = bubbleModeScores[target.note.id] ?: 0
-                bubbleModeScores[target.note.id] = current - 1
-                onScoreChanged()
-            }
-            .show()
     }
 
     private fun ensureBubbleModeTestNotes(flow: CardFlow) {

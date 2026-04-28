@@ -18,6 +18,7 @@ import android.view.animation.DecelerateInterpolator
 import androidx.core.graphics.ColorUtils
 import android.util.Log
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -31,6 +32,8 @@ class BubbleModeView @JvmOverloads constructor(
     data class BubbleItem(
         val id: Long,
         val title: String,
+        val frontText: String,
+        val backText: String,
         val color: Int,
         val payload: Any? = null
     )
@@ -52,14 +55,10 @@ class BubbleModeView @JvmOverloads constructor(
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
     var onSwipeGesture: (() -> Unit)? = null
+    var onBubbleFocusChanged: ((BubbleItem?) -> Unit)? = null
 
     private val bubbleStates = mutableListOf<BubbleState>()
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val bubbleStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.8f * resources.displayMetrics.density
-        color = Color.argb(70, 255, 255, 255)
-    }
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
@@ -78,12 +77,24 @@ class BubbleModeView @JvmOverloads constructor(
     private var pendingItems: List<BubbleItem> = emptyList()
     private var swipeDistancePx = 0f
     private var transitionProgress = 1f
+    private var focusedBubbleId: Long? = null
+    private var flipProgress = 1f
+    private var focusedShowingBack = false
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             val bubble = bubbleAt(e.x, e.y) ?: return false
-            onBubbleClick?.invoke(bubble.item)
+            if (focusedBubbleId == bubble.item.id) {
+                animateFlip()
+            } else {
+                focusedBubbleId = bubble.item.id
+                focusedShowingBack = false
+                flipProgress = 1f
+                onBubbleFocusChanged?.invoke(bubble.item)
+                onBubbleClick?.invoke(bubble.item)
+                invalidate()
+            }
             return true
         }
     })
@@ -214,6 +225,8 @@ class BubbleModeView @JvmOverloads constructor(
                 }
                 velocityTracker = null
                 if (swipeDistancePx > 48f * density()) {
+                    focusedBubbleId = null
+                    onBubbleFocusChanged?.invoke(null)
                     onSwipeGesture?.invoke()
                 }
             }
@@ -234,7 +247,8 @@ class BubbleModeView @JvmOverloads constructor(
             if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return@forEach
 
             val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
-            val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
+            val isFocused = focusedBubbleId == bubble.item.id
+            val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias + if (isFocused) 0.18f else 0f).coerceIn(0.78f, 1.22f)
             val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress).coerceIn(0.1f, 0.98f)
             val radius = bubble.radius * prominence
             val alphaInt = (alpha * 255).toInt()
@@ -247,14 +261,26 @@ class BubbleModeView @JvmOverloads constructor(
             )
 
             canvas.drawCircle(drawX, drawY, radius, bubblePaint)
-            canvas.drawCircle(drawX, drawY, radius, bubbleStrokePaint)
             bubblePaint.shader = null
 
             val maxTextWidth = radius * 1.45f
-            val text = bubble.item.title.ifBlank { "Untitled" }
+            val text = if (isFocused) {
+                if (focusedShowingBack) bubble.item.backText else bubble.item.frontText
+            } else {
+                bubble.item.title
+            }.ifBlank { "Untitled" }
             val clipped = ellipsize(text, textPaint, maxTextWidth)
             textPaint.alpha = (180 + ((1f - distNorm) * 75f).toInt()).coerceIn(110, 255)
-            canvas.drawText(clipped, drawX, drawY + textPaint.textSize * 0.28f, textPaint)
+            if (isFocused) {
+                val effective = flipProgress.coerceIn(0f, 1f)
+                val sx = kotlin.math.abs(cos(Math.PI * effective)).toFloat().coerceAtLeast(0.05f)
+                canvas.save()
+                canvas.scale(sx, 1f, drawX, drawY)
+                canvas.drawText(clipped, drawX, drawY + textPaint.textSize * 0.28f, textPaint)
+                canvas.restore()
+            } else {
+                canvas.drawText(clipped, drawX, drawY + textPaint.textSize * 0.28f, textPaint)
+            }
         }
     }
 
@@ -403,18 +429,18 @@ class BubbleModeView @JvmOverloads constructor(
 
         val centerTone = floatArrayOf(
             hue,
-            (saturation * 0.95f + 0.05f).coerceIn(0f, 1f),
-            (value * 0.98f + 0.02f).coerceIn(0f, 1f)
+            (saturation * 1.08f + 0.08f).coerceIn(0f, 1f),
+            (value * 1.03f + 0.05f).coerceIn(0f, 1f)
         )
         val midTone = floatArrayOf(
             hue,
-            (saturation * 1.12f).coerceIn(0f, 1f),
-            (value * 0.66f).coerceIn(0f, 1f)
+            (saturation * 1.25f).coerceIn(0f, 1f),
+            (value * 0.78f).coerceIn(0f, 1f)
         )
         val edgeTone = floatArrayOf(
             hue,
-            (saturation * 1.35f).coerceIn(0f, 1f),
-            (value * 0.28f).coerceIn(0f, 1f)
+            (saturation * 1.45f).coerceIn(0f, 1f),
+            (value * 0.42f).coerceIn(0f, 1f)
         )
         val centerColor = ColorUtils.setAlphaComponent(Color.HSVToColor(centerTone), alpha)
         val midColor = ColorUtils.setAlphaComponent(Color.HSVToColor(midTone), alpha)
@@ -446,4 +472,19 @@ class BubbleModeView @JvmOverloads constructor(
     }
 
     private fun density(): Float = resources.displayMetrics.density
+
+    private fun animateFlip() {
+        val toBack = !focusedShowingBack
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 260
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { anim ->
+                val t = anim.animatedValue as Float
+                flipProgress = t
+                focusedShowingBack = if (toBack) t > 0.5f else t < 0.5f
+                invalidate()
+            }
+            start()
+        }
+    }
 }
