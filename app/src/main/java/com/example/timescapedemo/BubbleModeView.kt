@@ -50,7 +50,11 @@ class BubbleModeView @JvmOverloads constructor(
         val minX: Float,
         val maxX: Float,
         val minY: Float,
-        val maxY: Float
+        val maxY: Float,
+        val entryStartX: Float,
+        val entryStartY: Float,
+        var entryDelaySec: Float,
+        var entryProgress: Float
     )
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
@@ -137,10 +141,12 @@ class BubbleModeView @JvmOverloads constructor(
             val maxX = pageRight - radius
             val minY = radius
             val maxY = fieldHeight - radius
+            val targetX = random.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX
+            val targetY = random.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY
             bubbleStates += BubbleState(
                 item = item,
-                x = random.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX,
-                y = random.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY,
+                x = targetX,
+                y = targetY,
                 radius = radius,
                 vx = random.nextFloat() * 14f - 7f,
                 vy = random.nextFloat() * 14f - 7f,
@@ -149,7 +155,11 @@ class BubbleModeView @JvmOverloads constructor(
                 minX = minX,
                 maxX = maxX,
                 minY = minY,
-                maxY = maxY
+                maxY = maxY,
+                entryStartX = pageLeft + width * 0.5f + random.nextFloat() * width * 0.22f - width * 0.11f,
+                entryStartY = -radius * 2f - random.nextFloat() * (height * 0.35f),
+                entryDelaySec = index * 0.018f,
+                entryProgress = 0f
             )
         }
         offsetX = 0f
@@ -265,14 +275,17 @@ class BubbleModeView @JvmOverloads constructor(
         val cx = width / 2f
         val cy = height / 2f
         bubbleStates.forEach { bubble ->
-            val drawX = bubble.x - offsetX
-            val drawY = bubble.y - offsetY
+            val entryT = easeOutCubic(bubble.entryProgress.coerceIn(0f, 1f))
+            val worldX = lerp(bubble.entryStartX, bubble.x, entryT)
+            val worldY = lerp(bubble.entryStartY, bubble.y, entryT)
+            val drawX = worldX - offsetX
+            val drawY = worldY - offsetY
             if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return@forEach
 
             val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
             val isFocused = focusedBubbleId == bubble.item.id
             val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias + if (isFocused) 0.18f else 0f).coerceIn(0.78f, 1.22f)
-            val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress).coerceIn(0.1f, 0.98f)
+            val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT).coerceIn(0.1f, 0.98f)
             val radius = bubble.radius * prominence
             val alphaInt = (alpha * 255).toInt()
             bubblePaint.shader = createBubbleGradient(
@@ -325,6 +338,11 @@ class BubbleModeView @JvmOverloads constructor(
                 bubble.vx *= 0.995f
                 bubble.vy *= 0.995f
                 return@forEach
+            }
+            if (bubble.entryDelaySec > 0f) {
+                bubble.entryDelaySec = (bubble.entryDelaySec - dt).coerceAtLeast(0f)
+            } else if (bubble.entryProgress < 1f) {
+                bubble.entryProgress = (bubble.entryProgress + dt * 2.3f).coerceAtMost(1f)
             }
             bubble.vx += (random.nextFloat() - 0.5f) * 1.1f * dt
             bubble.vy += (random.nextFloat() - 0.5f) * 1.1f * dt
@@ -543,6 +561,13 @@ class BubbleModeView @JvmOverloads constructor(
     }
 
     private fun density(): Float = resources.displayMetrics.density
+
+    private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t
+
+    private fun easeOutCubic(t: Float): Float {
+        val inv = 1f - t
+        return 1f - inv * inv * inv
+    }
 
     private fun animateFlip() {
         val toBack = !focusedShowingBack
