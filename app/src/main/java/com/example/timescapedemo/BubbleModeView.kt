@@ -87,6 +87,7 @@ class BubbleModeView @JvmOverloads constructor(
     private var focusAnimProgress = 1f
     private var focusStartX = 0f
     private var focusStartY = 0f
+    private var focusStartRadius = 0f
     private var draggedBubbleId: Long? = null
     private var lastDragEventTimeMs: Long = 0L
 
@@ -279,57 +280,75 @@ class BubbleModeView @JvmOverloads constructor(
         }
         val cx = width / 2f
         val cy = height / 2f
+        val focused = bubbleStates.firstOrNull { it.item.id == focusedBubbleId }
+        val hasFocused = focused != null
         bubbleStates.forEach { bubble ->
-            val entryT = easeOutCubic(bubble.entryProgress.coerceIn(0f, 1f))
-            var worldX = lerp(bubble.entryStartX, bubble.x, entryT)
-            var worldY = lerp(bubble.entryStartY, bubble.y, entryT)
-            val drawX = worldX - offsetX
-            val drawY = worldY - offsetY
-            if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return@forEach
+            if (bubble.item.id == focusedBubbleId) return@forEach
+            drawBubble(canvas, bubble, cx, cy, isFocused = false, dimmed = hasFocused)
+        }
+        if (hasFocused) {
+            canvas.drawColor(Color.argb(66, 0, 0, 0))
+            focused?.let { drawBubble(canvas, it, cx, cy, isFocused = true, dimmed = false) }
+        }
+    }
 
-            val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
-            val isFocused = focusedBubbleId == bubble.item.id
-            if (isFocused) {
-                val centerWorldX = offsetX + width * 0.5f
-                val centerWorldY = offsetY + height * 0.5f
-                worldX = lerp(focusStartX, centerWorldX, focusAnimProgress)
-                worldY = lerp(focusStartY, centerWorldY, focusAnimProgress)
-            }
-            val renderX = worldX - offsetX
-            val renderY = worldY - offsetY
-            val prominence = (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
-            val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT).coerceIn(0.1f, 0.98f)
-            val radius = bubble.radius * prominence
-            val alphaInt = (alpha * 255).toInt()
-            bubblePaint.shader = createBubbleGradient(
-                item = bubble.item,
-                centerX = renderX,
-                centerY = renderY,
-                radius = radius,
-                alpha = alphaInt
-            )
+    private fun drawBubble(
+        canvas: Canvas,
+        bubble: BubbleState,
+        cx: Float,
+        cy: Float,
+        isFocused: Boolean,
+        dimmed: Boolean
+    ) {
+        val entryT = easeOutCubic(bubble.entryProgress.coerceIn(0f, 1f))
+        var worldX = lerp(bubble.entryStartX, bubble.x, entryT)
+        var worldY = lerp(bubble.entryStartY, bubble.y, entryT)
+        val drawX = worldX - offsetX
+        val drawY = worldY - offsetY
+        if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return
 
-            canvas.drawCircle(renderX, renderY, radius, bubblePaint)
-            bubblePaint.shader = null
+        val distNorm = (hypot(drawX - cx, drawY - cy) / hypot(cx, cy)).coerceIn(0f, 1.3f)
+        val baseRadius = bubble.radius * (1.05f - distNorm * 0.28f + bubble.depthBias).coerceIn(0.78f, 1.0f)
+        val reviewRadius = 96f * density()
+        if (isFocused) {
+            val centerWorldX = offsetX + width * 0.5f
+            val centerWorldY = offsetY + height * 0.5f
+            worldX = lerp(focusStartX, centerWorldX, focusAnimProgress)
+            worldY = lerp(focusStartY, centerWorldY, focusAnimProgress)
+        }
+        val renderX = worldX - offsetX
+        val renderY = worldY - offsetY
+        val radius = if (isFocused) lerp(focusStartRadius, reviewRadius, focusAnimProgress) else baseRadius
+        val dimFactor = if (dimmed) 0.35f else 1f
+        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor).coerceIn(0.05f, 0.98f)
+        val alphaInt = (alpha * 255).toInt()
+        bubblePaint.shader = createBubbleGradient(
+            item = bubble.item,
+            centerX = renderX,
+            centerY = renderY,
+            radius = radius,
+            alpha = alphaInt
+        )
+        canvas.drawCircle(renderX, renderY, radius, bubblePaint)
+        bubblePaint.shader = null
 
-            val maxTextWidth = radius * 1.45f
-            val text = if (isFocused) {
-                if (focusedShowingBack) bubble.item.backText else bubble.item.frontText
-            } else {
-                bubble.item.title
-            }.ifBlank { "Untitled" }
-            val clipped = ellipsize(text, textPaint, maxTextWidth)
-            textPaint.alpha = (180 + ((1f - distNorm) * 75f).toInt()).coerceIn(110, 255)
-            if (isFocused) {
-                val effective = flipProgress.coerceIn(0f, 1f)
-                val sx = kotlin.math.abs(cos(Math.PI * effective)).toFloat().coerceAtLeast(0.05f)
-                canvas.save()
-                canvas.scale(sx, 1f, renderX, renderY)
-                canvas.drawText(clipped, renderX, renderY + textPaint.textSize * 0.28f, textPaint)
-                canvas.restore()
-            } else {
-                canvas.drawText(clipped, renderX, renderY + textPaint.textSize * 0.28f, textPaint)
-            }
+        val maxTextWidth = radius * 1.45f
+        val text = if (isFocused) {
+            if (focusedShowingBack) bubble.item.backText else bubble.item.frontText
+        } else {
+            bubble.item.title
+        }.ifBlank { "Untitled" }
+        val clipped = ellipsize(text, textPaint, maxTextWidth)
+        textPaint.alpha = ((180 + ((1f - distNorm) * 75f).toInt()) * dimFactor).toInt().coerceIn(70, 255)
+        if (isFocused) {
+            val effective = flipProgress.coerceIn(0f, 1f)
+            val sx = kotlin.math.abs(cos(Math.PI * effective)).toFloat().coerceAtLeast(0.05f)
+            canvas.save()
+            canvas.scale(sx, 1f, renderX, renderY)
+            canvas.drawText(clipped, renderX, renderY + textPaint.textSize * 0.28f, textPaint)
+            canvas.restore()
+        } else {
+            canvas.drawText(clipped, renderX, renderY + textPaint.textSize * 0.28f, textPaint)
         }
     }
 
@@ -602,6 +621,7 @@ class BubbleModeView @JvmOverloads constructor(
     private fun startFocusAnimation(bubble: BubbleState) {
         focusStartX = bubble.x
         focusStartY = bubble.y
+        focusStartRadius = bubble.radius * 0.95f
         focusAnimProgress = 0f
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 320
