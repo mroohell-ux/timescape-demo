@@ -2684,6 +2684,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showBubbleMode() {
         val flow = currentFlow() ?: return
+        ensureBubbleModeTestNotes(flow)
         val targets = flow.cards.flatMap { card ->
             card.stickyNotes.map { note -> BubbleModeNoteTarget(flow, card, note) }
         }
@@ -2727,6 +2728,41 @@ class MainActivity : AppCompatActivity() {
         }
         dialog.show()
         Log.d("BubbleMode", "dialog shown")
+    }
+
+    private fun ensureBubbleModeTestNotes(flow: CardFlow) {
+        val existingNotes = flow.cards.sumOf { it.stickyNotes.size }
+        val targetCount = 100
+        if (existingNotes >= targetCount) return
+
+        val targetCard = flow.cards.firstOrNull() ?: CardItem(
+            id = nextCardId++,
+            title = "Bubble Test Card",
+            snippet = "Auto-generated sticky notes for Bubble Mode testing.",
+            textColor = Color.WHITE,
+            updatedAt = System.currentTimeMillis()
+        ).also { card ->
+            flow.cards.add(0, card)
+            flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
+        }
+
+        val missingCount = targetCount - existingNotes
+        repeat(missingCount) { idx ->
+            val noteIndex = existingNotes + idx + 1
+            val note = StickyNote(
+                id = System.currentTimeMillis() + Random.nextLong(1_000_000L) + noteIndex,
+                frontText = "Front side note $noteIndex: Bubble mode testing content with readable context and plenty of detail for layout checks.",
+                backText = "Back side note $noteIndex: Secondary testing text to validate flips, rendering depth, and interaction reliability in bubble mode.",
+                color = stickyNotePalette[noteIndex % stickyNotePalette.size],
+                rotation = Random.nextDouble(-12.0, 12.0).toFloat()
+            )
+            targetCard.stickyNotes.add(0, note)
+        }
+        targetCard.updatedAt = System.currentTimeMillis()
+        applyCardBackgrounds(flow)
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+        Log.d("BubbleMode", "Auto-generated $missingCount sticky notes for testing; total now=${targetCount.coerceAtMost(existingNotes + missingCount)}")
     }
 
     private fun showStickyNotesDialog(
