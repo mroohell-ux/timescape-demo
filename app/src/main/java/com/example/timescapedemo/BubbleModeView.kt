@@ -424,8 +424,10 @@ class BubbleModeView @JvmOverloads constructor(
     }
 
     private fun applyDragInfluence(dragged: BubbleState, speed: Float) {
-        val influenceRadius = dragged.radius * 5.2f
-        val baseForce = (speed * 1.8f).coerceIn(1.2f, 28f)
+        if (speed < 0.55f) return
+        val normalizedSpeed = ((speed - 0.55f) / 1.8f).coerceIn(0f, 1.2f)
+        val influenceRadius = dragged.radius * 3.9f
+        val baseForce = (normalizedSpeed * 8.0f).coerceIn(0.15f, 8.5f)
         bubbleStates.forEach { bubble ->
             if (bubble.item.id == dragged.item.id) return@forEach
             val dx = bubble.x - dragged.x
@@ -436,7 +438,7 @@ class BubbleModeView @JvmOverloads constructor(
             val ny = dy / dist
             val falloff = 1f - (dist / influenceRadius)
             val impulse = baseForce * falloff * falloff
-            val massFactor = (9000f / bubble.mass).coerceIn(0.12f, 0.95f)
+            val massFactor = (6500f / bubble.mass).coerceIn(0.08f, 0.55f)
             bubble.vx += nx * impulse * massFactor
             bubble.vy += ny * impulse * massFactor
         }
@@ -453,11 +455,11 @@ class BubbleModeView @JvmOverloads constructor(
             val nx = dx / dist
             val ny = dy / dist
             val overlap = minDist - dist
-            bubble.x += nx * overlap
-            bubble.y += ny * overlap
+            bubble.x += nx * overlap * 0.55f
+            bubble.y += ny * overlap * 0.55f
             bubble.x = bubble.x.coerceIn(bubble.minX, bubble.maxX)
             bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
-            val push = (overlap * 0.22f).coerceAtLeast(0.2f)
+            val push = (overlap * 0.08f).coerceAtLeast(0.03f)
             bubble.vx += nx * push
             bubble.vy += ny * push
         }
