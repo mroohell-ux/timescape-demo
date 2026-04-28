@@ -138,17 +138,13 @@ class BubbleModeView @JvmOverloads constructor(
             invalidate()
             return
         }
-        val bubblesPerPage = 30
-        val pageCount = (items.size + bubblesPerPage - 1) / bubblesPerPage
-        fieldWidth = width.toFloat() * pageCount.coerceAtLeast(1)
-        fieldHeight = height.toFloat()
+        val mapFactor = kotlin.math.sqrt(items.size.toFloat()).coerceAtLeast(1f)
+        fieldWidth = max(width.toFloat() * 1.8f, width.toFloat() + mapFactor * 92f * density())
+        fieldHeight = max(height.toFloat() * 1.8f, height.toFloat() + mapFactor * 84f * density())
         items.forEachIndexed { index, item ->
-            val pageIndex = index / bubblesPerPage
-            val pageLeft = pageIndex * width.toFloat()
-            val pageRight = pageLeft + width.toFloat()
             val radius = radiusForText(item)
-            val minX = pageLeft + radius
-            val maxX = pageRight - radius
+            val minX = radius
+            val maxX = fieldWidth - radius
             val minY = radius
             val maxY = fieldHeight - radius
             val targetX = random.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX
@@ -166,7 +162,7 @@ class BubbleModeView @JvmOverloads constructor(
                 maxX = maxX,
                 minY = minY,
                 maxY = maxY,
-                entryStartX = pageLeft + width * 0.5f + random.nextFloat() * width * 0.22f - width * 0.11f,
+                entryStartX = width * 0.5f + random.nextFloat() * width * 0.22f - width * 0.11f,
                 entryStartY = -radius * 2f - random.nextFloat() * (height * 0.35f),
                 entryDelaySec = index * 0.018f,
                 entryProgress = 0f
@@ -410,7 +406,6 @@ class BubbleModeView @JvmOverloads constructor(
             val a = bubbleStates[i]
             for (j in i + 1 until bubbleStates.size) {
                 val b = bubbleStates[j]
-                if (abs(a.minX - b.minX) > 1f) continue
                 val dx = b.x - a.x
                 val dy = b.y - a.y
                 val distSq = dx * dx + dy * dy
