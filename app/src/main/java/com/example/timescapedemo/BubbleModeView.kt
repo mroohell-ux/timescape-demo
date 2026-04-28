@@ -17,6 +17,7 @@ import android.view.View
 import android.view.animation.DecelerateInterpolator
 import androidx.core.graphics.ColorUtils
 import android.util.Log
+import android.os.SystemClock
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -54,7 +55,11 @@ class BubbleModeView @JvmOverloads constructor(
         val entryStartX: Float,
         val entryStartY: Float,
         var entryDelaySec: Float,
-        var entryProgress: Float
+        var entryProgress: Float,
+        val radiusScale: Float,
+        val phase: Float,
+        val indexPhase: Float,
+        val driftAmplitude: Float
     )
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
@@ -93,6 +98,7 @@ class BubbleModeView @JvmOverloads constructor(
     private var draggedBubbleId: Long? = null
     private var lastDragEventTimeMs: Long = 0L
     private var reviewGestureBlocked = false
+    private var bubbleShuffleSeed: Int = 0
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -142,13 +148,15 @@ class BubbleModeView @JvmOverloads constructor(
         fieldWidth = max(width.toFloat() * 1.8f, width.toFloat() + mapFactor * 92f * density())
         fieldHeight = max(height.toFloat() * 1.8f, height.toFloat() + mapFactor * 84f * density())
         items.forEachIndexed { index, item ->
+            val seededRandom = Random((item.id xor bubbleShuffleSeed.toLong()).toInt())
             val radius = radiusForText(item)
             val minX = radius
             val maxX = fieldWidth - radius
             val minY = radius
             val maxY = fieldHeight - radius
-            val targetX = random.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX
-            val targetY = random.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY
+            val targetX = seededRandom.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX
+            val targetY = seededRandom.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY
+            val radiusScale = seededRandom.nextFloat()
             bubbleStates += BubbleState(
                 item = item,
                 x = targetX,
@@ -162,10 +170,14 @@ class BubbleModeView @JvmOverloads constructor(
                 maxX = maxX,
                 minY = minY,
                 maxY = maxY,
-                entryStartX = width * 0.5f + random.nextFloat() * width * 0.22f - width * 0.11f,
-                entryStartY = -radius * 2f - random.nextFloat() * (height * 0.35f),
+                entryStartX = width * 0.5f + seededRandom.nextFloat() * width * 0.22f - width * 0.11f,
+                entryStartY = -radius * 2f - seededRandom.nextFloat() * (height * 0.35f),
                 entryDelaySec = index * 0.018f,
-                entryProgress = 0f
+                entryProgress = 0f,
+                radiusScale = radiusScale,
+                phase = seededRandom.nextFloat() * (Math.PI * 2.0).toFloat(),
+                indexPhase = ((index * 0.21f) % (Math.PI * 2.0)).toFloat(),
+                driftAmplitude = 0.35f + (1f - (items.size / 120f).coerceIn(0f, 1f)) * 0.65f
             )
         }
         offsetX = 0f
@@ -287,9 +299,11 @@ class BubbleModeView @JvmOverloads constructor(
         }
         val cx = width / 2f
         val cy = height / 2f
+        val visible = visibleBubbleIndices()
         val focused = bubbleStates.firstOrNull { it.item.id == focusedBubbleId }
         val hasFocused = focused != null
         bubbleStates.forEach { bubble ->
+            if (bubble.item.id !in visible) return@forEach
             if (bubble.item.id == focusedBubbleId) return@forEach
             drawBubble(canvas, bubble, cx, cy, isFocused = false, dimmed = hasFocused)
         }
@@ -308,8 +322,11 @@ class BubbleModeView @JvmOverloads constructor(
         dimmed: Boolean
     ) {
         val entryT = easeOutCubic(bubble.entryProgress.coerceIn(0f, 1f))
-        var worldX = lerp(bubble.entryStartX, bubble.x, entryT)
-        var worldY = lerp(bubble.entryStartY, bubble.y, entryT)
+        val t = (SystemClock.uptimeMillis() % 6800L).toFloat() / 6800f * (Math.PI * 2f).toFloat()
+        val driftX = kotlin.math.cos(t + bubble.phase) * (8f + bubble.radiusScale * 12f) * bubble.driftAmplitude
+        val driftY = kotlin.math.sin(t + bubble.indexPhase) * (6f + bubble.radiusScale * 10f) * bubble.driftAmplitude
+        var worldX = lerp(bubble.entryStartX, bubble.x + driftX, entryT)
+        var worldY = lerp(bubble.entryStartY, bubble.y + driftY, entryT)
         val drawX = worldX - offsetX
         val drawY = worldY - offsetY
         if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return
@@ -362,8 +379,6 @@ class BubbleModeView @JvmOverloads constructor(
 
     private fun stepPhysics(dt: Float) {
         if (bubbleStates.isEmpty()) return
-        val friction = 0.94f
-        val restitution = 0.74f
         val spring = (dt * 11.5f).coerceIn(0f, 1f)
         offsetX = lerp(offsetX, panTargetX, spring)
         offsetY = lerp(offsetY, panTargetY, spring)
@@ -372,8 +387,6 @@ class BubbleModeView @JvmOverloads constructor(
         bubbleStates.forEach { bubble ->
             val isDragged = bubble.item.id == draggedBubbleId
             if (isDragged) {
-                bubble.vx *= 0.995f
-                bubble.vy *= 0.995f
                 return@forEach
             }
             if (bubble.entryDelaySec > 0f) {
@@ -381,21 +394,28 @@ class BubbleModeView @JvmOverloads constructor(
             } else if (bubble.entryProgress < 1f) {
                 bubble.entryProgress = (bubble.entryProgress + dt * 2.3f).coerceAtMost(1f)
             }
-            bubble.vx *= friction
-            bubble.vy *= friction
-            if (abs(bubble.vx) < 0.018f) bubble.vx = 0f
-            if (abs(bubble.vy) < 0.018f) bubble.vy = 0f
-            bubble.x += bubble.vx * dt * 60f
-            bubble.y += bubble.vy * dt * 60f
-            if (bubble.x < bubble.minX || bubble.x > bubble.maxX) {
-                bubble.vx *= -restitution
-                bubble.x = bubble.x.coerceIn(bubble.minX, bubble.maxX)
-            }
-            if (bubble.y < bubble.minY || bubble.y > bubble.maxY) {
-                bubble.vy *= -restitution
-                bubble.y = bubble.y.coerceIn(bubble.minY, bubble.maxY)
-            }
         }
+    }
+
+    private fun visibleBubbleIndices(): Set<Long> {
+        val radiusPadding = 130f * density()
+        val left = offsetX - radiusPadding
+        val right = offsetX + width + radiusPadding
+        val top = offsetY - radiusPadding
+        val bottom = offsetY + height + radiusPadding
+        val candidates = bubbleStates.filter { it.x in left..right && it.y in top..bottom }
+        val noteCountDensity = ((bubbleStates.size - 1).coerceAtLeast(0) / 99f).coerceIn(0f, 1f)
+        val targetVisible = lerp(42f, 24f, kotlin.math.sqrt(noteCountDensity)).toInt().coerceIn(18, 52)
+        if (candidates.size <= targetVisible) return candidates.map { it.item.id }.toSet()
+        val sorted = candidates.sortedBy { kotlin.math.atan2((it.y - offsetY - height / 2f), (it.x - offsetX - width / 2f)) }
+        val stride = (sorted.size.toFloat() / targetVisible.toFloat()).coerceAtLeast(1f)
+        val selected = mutableSetOf<Long>()
+        var idx = 0f
+        while (selected.size < targetVisible && idx < sorted.size) {
+            selected += sorted[idx.toInt()].item.id
+            idx += stride
+        }
+        return selected
     }
 
     private fun clampOffsets(withResistance: Boolean) {
