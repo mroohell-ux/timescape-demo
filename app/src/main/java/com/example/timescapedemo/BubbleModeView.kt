@@ -95,8 +95,6 @@ class BubbleModeView @JvmOverloads constructor(
     private var focusStartX = 0f
     private var focusStartY = 0f
     private var focusStartRadius = 0f
-    private var draggedBubbleId: Long? = null
-    private var lastDragEventTimeMs: Long = 0L
     private var reviewGestureBlocked = false
     private var bubbleShuffleSeed: Int = 0
 
@@ -232,13 +230,10 @@ class BubbleModeView @JvmOverloads constructor(
                 val touched = bubbleAt(event.x, event.y)
                 reviewGestureBlocked = focusedBubbleId != null && touched?.item?.id != focusedBubbleId
                 if (reviewGestureBlocked) {
-                    draggedBubbleId = null
                     return true
                 }
-                draggedBubbleId = touched?.item?.id
                 lastTouchX = event.x
                 lastTouchY = event.y
-                lastDragEventTimeMs = event.eventTime
                 swipeDistancePx = 0f
                 parent.requestDisallowInterceptTouchEvent(true)
             }
@@ -247,22 +242,8 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityTracker?.addMovement(event)
                 val dx = lastTouchX - event.x
                 val dy = lastTouchY - event.y
-                val dragged = draggedBubbleId?.let { id -> bubbleStates.firstOrNull { it.item.id == id } }
-                if (dragged != null) {
-                    val worldX = event.x + offsetX
-                    val worldY = event.y + offsetY
-                    val dtSec = ((event.eventTime - lastDragEventTimeMs).coerceAtLeast(1L)) / 1000f
-                    val oldX = dragged.x
-                    val oldY = dragged.y
-                    dragged.x = worldX.coerceIn(dragged.minX, dragged.maxX)
-                    dragged.y = worldY.coerceIn(dragged.minY, dragged.maxY)
-                    dragged.vx = ((dragged.x - oldX) / dtSec) / 60f
-                    dragged.vy = ((dragged.y - oldY) / dtSec) / 60f
-                    lastDragEventTimeMs = event.eventTime
-                } else {
-                    swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
-                    updateBubblePan(dx, dy)
-                }
+                swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
+                updateBubblePan(dx, dy)
                 lastTouchX = event.x
                 lastTouchY = event.y
                 invalidate()
@@ -280,9 +261,7 @@ class BubbleModeView @JvmOverloads constructor(
                     recycle()
                 }
                 velocityTracker = null
-                val wasDraggingBubble = draggedBubbleId != null
-                draggedBubbleId = null
-                if (!wasDraggingBubble && swipeDistancePx > 48f * density()) {
+                if (swipeDistancePx > 48f * density()) {
                     focusedBubbleId = null
                     focusAnimProgress = 1f
                     onBubbleFocusChanged?.invoke(null)
@@ -385,10 +364,6 @@ class BubbleModeView @JvmOverloads constructor(
         clampPanTarget()
 
         bubbleStates.forEach { bubble ->
-            val isDragged = bubble.item.id == draggedBubbleId
-            if (isDragged) {
-                return@forEach
-            }
             if (bubble.entryDelaySec > 0f) {
                 bubble.entryDelaySec = (bubble.entryDelaySec - dt).coerceAtLeast(0f)
             } else if (bubble.entryProgress < 1f) {
