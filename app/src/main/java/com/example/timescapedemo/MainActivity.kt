@@ -2708,17 +2708,8 @@ class MainActivity : AppCompatActivity() {
         val rememberButton = content.findViewById<MaterialButton>(R.id.buttonBubbleRemember)
         val dontRememberButton = content.findViewById<MaterialButton>(R.id.buttonBubbleDontRemember)
         var focusedTarget: BubbleModeNoteTarget? = null
-        val submitNextPage: () -> Unit = {
-            val selected = selectBubblesForPage(allTargets, maxCount = 30)
-            bubbleField.submitBubbles(selected.map { target -> bubbleItemFromTarget(target) })
-            focusedTarget = null
-            decisionBar.isVisible = false
-            Log.d("BubbleMode", "submitted bubbles count=${selected.size}")
-        }
-        submitNextPage()
-        bubbleField.onSwipeGesture = {
-            submitNextPage()
-        }
+        bubbleField.submitBubbles(allTargets.map { target -> bubbleItemFromTarget(target) })
+        Log.d("BubbleMode", "submitted bubbles count=${allTargets.size}")
         bubbleField.onBubbleFocusChanged = { item ->
             focusedTarget = item?.payload as? BubbleModeNoteTarget
             decisionBar.isVisible = focusedTarget != null

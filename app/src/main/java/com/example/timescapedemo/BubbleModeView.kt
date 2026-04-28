@@ -73,6 +73,8 @@ class BubbleModeView @JvmOverloads constructor(
     private var fieldHeight = 0f
     private var offsetX = 0f
     private var offsetY = 0f
+    private var panTargetX = 0f
+    private var panTargetY = 0f
     private var velocityX = 0f
     private var velocityY = 0f
     private var velocityTracker: VelocityTracker? = null
@@ -172,6 +174,8 @@ class BubbleModeView @JvmOverloads constructor(
         }
         offsetX = 0f
         offsetY = 0f
+        panTargetX = 0f
+        panTargetY = 0f
         velocityX = 0f
         velocityY = 0f
         transitionProgress = 0f
@@ -251,10 +255,7 @@ class BubbleModeView @JvmOverloads constructor(
                     lastDragEventTimeMs = event.eventTime
                 } else {
                     swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
-                    offsetX += dx
-                    offsetY += dy
-                    applySwipeForce(-dx, -dy)
-                    clampOffsets(withResistance = true)
+                    updateBubblePan(dx, dy)
                 }
                 lastTouchX = event.x
                 lastTouchY = event.y
@@ -268,8 +269,8 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityTracker?.apply {
                     addMovement(event)
                     computeCurrentVelocity(1000)
-                    velocityX = xVelocity * -0.9f
-                    velocityY = yVelocity * -0.9f
+                    velocityX = 0f
+                    velocityY = 0f
                     recycle()
                 }
                 velocityTracker = null
@@ -279,7 +280,6 @@ class BubbleModeView @JvmOverloads constructor(
                     focusedBubbleId = null
                     focusAnimProgress = 1f
                     onBubbleFocusChanged?.invoke(null)
-                    onSwipeGesture?.invoke()
                 }
             }
         }
@@ -370,13 +370,10 @@ class BubbleModeView @JvmOverloads constructor(
         if (bubbleStates.isEmpty()) return
         val friction = 0.985f
         val restitution = 0.88f
-        offsetX += velocityX * dt
-        offsetY += velocityY * dt
-        velocityX *= friction
-        velocityY *= friction
-        if (abs(velocityX) < 2f) velocityX = 0f
-        if (abs(velocityY) < 2f) velocityY = 0f
-        clampOffsets(withResistance = false)
+        val spring = (dt * 11.5f).coerceIn(0f, 1f)
+        offsetX = lerp(offsetX, panTargetX, spring)
+        offsetY = lerp(offsetY, panTargetY, spring)
+        clampPanTarget()
 
         bubbleStates.forEach { bubble ->
             val isDragged = bubble.item.id == draggedBubbleId
@@ -406,21 +403,6 @@ class BubbleModeView @JvmOverloads constructor(
             }
         }
         resolveBubbleCollisions(restitution = 0.82f)
-    }
-
-    private fun applySwipeForce(dx: Float, dy: Float) {
-        if (bubbleStates.isEmpty()) return
-        val viewportLeft = offsetX
-        val viewportRight = offsetX + width
-        val impulseX = dx * 0.7f
-        val impulseY = dy * 0.7f
-        bubbleStates.forEach { bubble ->
-            if (bubble.x in viewportLeft..viewportRight) {
-                val massFactor = (12000f / bubble.mass).coerceIn(0.12f, 0.85f)
-                bubble.vx += impulseX * massFactor
-                bubble.vy += impulseY * massFactor
-            }
-        }
     }
 
     private fun resolveBubbleCollisions(restitution: Float) {
@@ -540,6 +522,19 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityY = 0f
             }
         }
+    }
+
+    private fun updateBubblePan(dx: Float, dy: Float) {
+        panTargetX = (panTargetX + dx * BUBBLE_PAN_SPEED)
+        panTargetY = (panTargetY + dy * BUBBLE_PAN_SPEED)
+        clampPanTarget()
+    }
+
+    private fun clampPanTarget() {
+        val maxOffsetX = max(0f, fieldWidth - width)
+        val maxOffsetY = max(0f, fieldHeight - height)
+        panTargetX = panTargetX.coerceIn(0f, maxOffsetX)
+        panTargetY = panTargetY.coerceIn(0f, maxOffsetY)
     }
 
     private fun bubbleAt(x: Float, y: Float): BubbleState? {
@@ -711,5 +706,9 @@ class BubbleModeView @JvmOverloads constructor(
         focusedShowingBack = false
         onBubbleFocusChanged?.invoke(null)
         invalidate()
+    }
+
+    private companion object {
+        const val BUBBLE_PAN_SPEED = 9.8f
     }
 }
