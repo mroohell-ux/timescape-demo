@@ -101,6 +101,9 @@ class BubbleModeView @JvmOverloads constructor(
     private var focusStartRadius = 0f
     private var reviewGestureBlocked = false
     private var bubbleShuffleSeed: Int = 0
+    private var areaTransitionProgress = 1f
+    private var areaTransitionDirX = 0f
+    private var areaTransitionDirY = 0f
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -290,11 +293,25 @@ class BubbleModeView @JvmOverloads constructor(
                     val absX = kotlin.math.abs(velocityX)
                     val absY = kotlin.math.abs(velocityY)
                     if (absX >= absY) {
-                        if (velocityX > 0) areaX = (areaX + 1).coerceAtMost(areaCols - 1)
-                        else areaX = (areaX - 1).coerceAtLeast(0)
+                        if (velocityX > 0) {
+                            areaX = (areaX + 1).coerceAtMost(areaCols - 1)
+                            areaTransitionDirX = -1f
+                            areaTransitionDirY = 0f
+                        } else {
+                            areaX = (areaX - 1).coerceAtLeast(0)
+                            areaTransitionDirX = 1f
+                            areaTransitionDirY = 0f
+                        }
                     } else {
-                        if (velocityY > 0) areaY = (areaY + 1).coerceAtMost(areaRows - 1)
-                        else areaY = (areaY - 1).coerceAtLeast(0)
+                        if (velocityY > 0) {
+                            areaY = (areaY + 1).coerceAtMost(areaRows - 1)
+                            areaTransitionDirX = 0f
+                            areaTransitionDirY = -1f
+                        } else {
+                            areaY = (areaY - 1).coerceAtLeast(0)
+                            areaTransitionDirX = 0f
+                            areaTransitionDirY = 1f
+                        }
                     }
                     beginAreaRevealAnimation()
                 }
@@ -341,6 +358,14 @@ class BubbleModeView @JvmOverloads constructor(
         val pulse = 1f
         var worldX = lerp(bubble.entryStartX, bubble.x, entryT) + driftX * entryT
         var worldY = lerp(bubble.entryStartY, bubble.y, entryT) + driftY * entryT
+        val delay = ((bubble.phase / (Math.PI * 2f).toFloat()) * 0.24f).coerceIn(0f, 0.24f)
+        val localTransition = ((areaTransitionProgress - delay) / (1f - delay).coerceAtLeast(0.1f)).coerceIn(0f, 1f)
+        val settleT = easeOutCubic(localTransition)
+        val transitionOffsetBase = (1f - settleT) * (18f + bubble.radiusScale * 22f) * density()
+        val wobble = kotlin.math.sin((1f - localTransition) * Math.PI.toFloat() * 2f + bubble.indexPhase) *
+            (4f + bubble.radiusScale * 6f) * density()
+        worldX += areaTransitionDirX * transitionOffsetBase + areaTransitionDirY * wobble
+        worldY += areaTransitionDirY * transitionOffsetBase - areaTransitionDirX * wobble
         val drawX = worldX - offsetX
         val drawY = worldY - offsetY
         if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return
@@ -358,7 +383,7 @@ class BubbleModeView @JvmOverloads constructor(
         val renderY = worldY - offsetY
         val radius = if (isFocused) lerp(focusStartRadius, reviewRadius, focusAnimProgress) else baseRadius * pulse
         val dimFactor = if (dimmed) 0.35f else 1f
-        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor * revealProgress).coerceIn(0.05f, 0.98f)
+        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor * revealProgress * (0.42f + settleT * 0.58f)).coerceIn(0.05f, 0.98f)
         val alphaInt = (alpha * 255).toInt()
         bubblePaint.shader = createBubbleGradient(
             item = bubble.item,
@@ -399,6 +424,7 @@ class BubbleModeView @JvmOverloads constructor(
         offsetX = lerp(offsetX, targetOffsetX, spring)
         offsetY = lerp(offsetY, targetOffsetY, spring)
         revealProgress = (revealProgress + dt * 2.4f).coerceAtMost(1f)
+        areaTransitionProgress = (areaTransitionProgress + dt * 2.8f).coerceAtMost(1f)
 
         bubbleStates.forEach { bubble ->
             if (bubble.entryDelaySec > 0f) {
@@ -455,6 +481,7 @@ class BubbleModeView @JvmOverloads constructor(
 
     private fun beginAreaRevealAnimation() {
         revealProgress = 0f
+        areaTransitionProgress = 0f
     }
 
     private fun bubbleAt(x: Float, y: Float): BubbleState? {
