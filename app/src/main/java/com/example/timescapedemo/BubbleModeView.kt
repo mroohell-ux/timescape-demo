@@ -339,8 +339,8 @@ class BubbleModeView @JvmOverloads constructor(
         val driftX = kotlin.math.cos(t + bubble.phase) * (8f + bubble.radiusScale * 12f) * bubble.driftAmplitude
         val driftY = kotlin.math.sin(t + bubble.indexPhase) * (6f + bubble.radiusScale * 10f) * bubble.driftAmplitude
         val pulse = 1f
-        var worldX = lerp(bubble.entryStartX, bubble.x + driftX, entryT)
-        var worldY = lerp(bubble.entryStartY, bubble.y + driftY, entryT)
+        var worldX = lerp(bubble.entryStartX, bubble.x, entryT) + driftX * entryT
+        var worldY = lerp(bubble.entryStartY, bubble.y, entryT) + driftY * entryT
         val drawX = worldX - offsetX
         val drawY = worldY - offsetY
         if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return
