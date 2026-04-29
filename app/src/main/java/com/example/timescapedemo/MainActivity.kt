@@ -2805,10 +2805,21 @@ class MainActivity : AppCompatActivity() {
         val missingCount = targetCount - existingNotes
         repeat(missingCount) { idx ->
             val noteIndex = existingNotes + idx + 1
+            val detailCount = 1 + (noteIndex % 6)
+            val frontExtra = buildString {
+                repeat(detailCount) { part ->
+                    append(" focus-$part")
+                }
+            }
+            val backExtra = buildString {
+                repeat(detailCount + 2) { part ->
+                    append(" recall-$part")
+                }
+            }
             val note = StickyNote(
                 id = System.currentTimeMillis() + Random.nextLong(1_000_000L) + noteIndex,
-                frontText = "Front side note $noteIndex: Bubble mode testing content with readable context and plenty of detail for layout checks.",
-                backText = "Back side note $noteIndex: Secondary testing text to validate flips, rendering depth, and interaction reliability in bubble mode.",
+                frontText = "Front side note $noteIndex: Bubble mode testing content with readable context and plenty of detail for layout checks.$frontExtra",
+                backText = "Back side note $noteIndex: Secondary testing text to validate flips, rendering depth, and interaction reliability in bubble mode.$backExtra",
                 color = stickyNotePalette[noteIndex % stickyNotePalette.size],
                 rotation = Random.nextDouble(-12.0, 12.0).toFloat()
             )
