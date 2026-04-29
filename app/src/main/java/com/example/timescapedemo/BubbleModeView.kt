@@ -19,6 +19,7 @@ import androidx.core.graphics.ColorUtils
 import android.util.Log
 import android.os.SystemClock
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.hypot
@@ -145,6 +146,15 @@ class BubbleModeView @JvmOverloads constructor(
         val mapFactor = kotlin.math.sqrt(items.size.toFloat()).coerceAtLeast(1f)
         fieldWidth = max(width.toFloat() * 1.8f, width.toFloat() + mapFactor * 92f * density())
         fieldHeight = max(height.toFloat() * 1.8f, height.toFloat() + mapFactor * 84f * density())
+        val sortedSlots = items.indices.sortedBy { idx ->
+            val id = items[idx].id
+            (id xor bubbleShuffleSeed.toLong())
+        }
+        val aspect = (fieldWidth / fieldHeight).coerceAtLeast(0.4f)
+        val cols = ceil(kotlin.math.sqrt(items.size * aspect.toDouble())).toInt().coerceAtLeast(1)
+        val rows = ceil(items.size / cols.toDouble()).toInt().coerceAtLeast(1)
+        val cellWidth = fieldWidth / cols
+        val cellHeight = fieldHeight / rows
         items.forEachIndexed { index, item ->
             val seededRandom = Random((item.id xor bubbleShuffleSeed.toLong()).toInt())
             val radius = radiusForText(item)
@@ -152,13 +162,18 @@ class BubbleModeView @JvmOverloads constructor(
             val maxX = fieldWidth - radius
             val minY = radius
             val maxY = fieldHeight - radius
-            val targetX = seededRandom.nextFloat() * (maxX - minX).coerceAtLeast(1f) + minX
-            val targetY = seededRandom.nextFloat() * (maxY - minY).coerceAtLeast(1f) + minY
+            val slot = sortedSlots[index]
+            val col = slot % cols
+            val row = slot / cols
+            val jitterX = (seededRandom.nextFloat() - 0.5f) * cellWidth * 0.26f
+            val jitterY = (seededRandom.nextFloat() - 0.5f) * cellHeight * 0.26f
+            val targetX = (col + 0.5f) * cellWidth + jitterX
+            val targetY = (row + 0.5f) * cellHeight + jitterY
             val radiusScale = seededRandom.nextFloat()
             bubbleStates += BubbleState(
                 item = item,
-                x = targetX,
-                y = targetY,
+                x = targetX.coerceIn(minX, maxX),
+                y = targetY.coerceIn(minY, maxY),
                 radius = radius,
                 vx = 0f,
                 vy = 0f,
@@ -304,6 +319,7 @@ class BubbleModeView @JvmOverloads constructor(
         val t = (SystemClock.uptimeMillis() % 6800L).toFloat() / 6800f * (Math.PI * 2f).toFloat()
         val driftX = kotlin.math.cos(t + bubble.phase) * (8f + bubble.radiusScale * 12f) * bubble.driftAmplitude
         val driftY = kotlin.math.sin(t + bubble.indexPhase) * (6f + bubble.radiusScale * 10f) * bubble.driftAmplitude
+        val pulse = 0.92f + 0.08f * kotlin.math.sin(t * 1.7f + bubble.phase)
         var worldX = lerp(bubble.entryStartX, bubble.x + driftX, entryT)
         var worldY = lerp(bubble.entryStartY, bubble.y + driftY, entryT)
         val drawX = worldX - offsetX
@@ -321,9 +337,9 @@ class BubbleModeView @JvmOverloads constructor(
         }
         val renderX = worldX - offsetX
         val renderY = worldY - offsetY
-        val radius = if (isFocused) lerp(focusStartRadius, reviewRadius, focusAnimProgress) else baseRadius
+        val radius = if (isFocused) lerp(focusStartRadius, reviewRadius, focusAnimProgress) else baseRadius * pulse
         val dimFactor = if (dimmed) 0.35f else 1f
-        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor).coerceIn(0.05f, 0.98f)
+        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor * pulse).coerceIn(0.05f, 0.98f)
         val alphaInt = (alpha * 255).toInt()
         bubblePaint.shader = createBubbleGradient(
             item = bubble.item,
