@@ -79,8 +79,10 @@ class BubbleModeView @JvmOverloads constructor(
     private var fieldHeight = 0f
     private var offsetX = 0f
     private var offsetY = 0f
-    private var panTargetX = 0f
-    private var panTargetY = 0f
+    private var areaCols = 1
+    private var areaRows = 1
+    private var areaX = 0
+    private var areaY = 0
     private var velocityX = 0f
     private var velocityY = 0f
     private var velocityTracker: VelocityTracker? = null
@@ -89,6 +91,7 @@ class BubbleModeView @JvmOverloads constructor(
     private var pendingItems: List<BubbleItem> = emptyList()
     private var swipeDistancePx = 0f
     private var transitionProgress = 1f
+    private var revealProgress = 1f
     private var focusedBubbleId: Long? = null
     private var flipProgress = 1f
     private var focusedShowingBack = false
@@ -146,6 +149,12 @@ class BubbleModeView @JvmOverloads constructor(
         val mapFactor = kotlin.math.sqrt(items.size.toFloat()).coerceAtLeast(1f)
         fieldWidth = max(width.toFloat() * 1.8f, width.toFloat() + mapFactor * 92f * density())
         fieldHeight = max(height.toFloat() * 1.8f, height.toFloat() + mapFactor * 84f * density())
+        areaCols = ceil(fieldWidth / width.toFloat()).toInt().coerceAtLeast(1)
+        areaRows = ceil(fieldHeight / height.toFloat()).toInt().coerceAtLeast(1)
+        areaX = areaX.coerceIn(0, areaCols - 1)
+        areaY = areaY.coerceIn(0, areaRows - 1)
+        offsetX = areaX * width.toFloat()
+        offsetY = areaY * height.toFloat()
         val sortedSlots = items.indices.sortedBy { idx ->
             val id = items[idx].id
             (id xor bubbleShuffleSeed.toLong())
@@ -193,10 +202,7 @@ class BubbleModeView @JvmOverloads constructor(
                 driftAmplitude = 0.35f + (1f - (items.size / 120f).coerceIn(0f, 1f)) * 0.65f
             )
         }
-        offsetX = 0f
-        offsetY = 0f
-        panTargetX = 0f
-        panTargetY = 0f
+        revealProgress = 0f
         velocityX = 0f
         velocityY = 0f
         transitionProgress = 0f
@@ -258,7 +264,8 @@ class BubbleModeView @JvmOverloads constructor(
                 val dx = lastTouchX - event.x
                 val dy = lastTouchY - event.y
                 swipeDistancePx += kotlin.math.abs(dx) + kotlin.math.abs(dy)
-                updateBubblePan(dx, dy)
+                velocityX += dx
+                velocityY += dy
                 lastTouchX = event.x
                 lastTouchY = event.y
                 invalidate()
@@ -271,8 +278,8 @@ class BubbleModeView @JvmOverloads constructor(
                 velocityTracker?.apply {
                     addMovement(event)
                     computeCurrentVelocity(1000)
-                    velocityX = 0f
-                    velocityY = 0f
+                    velocityX += xVelocity * -0.12f
+                    velocityY += yVelocity * -0.12f
                     recycle()
                 }
                 velocityTracker = null
@@ -280,7 +287,19 @@ class BubbleModeView @JvmOverloads constructor(
                     focusedBubbleId = null
                     focusAnimProgress = 1f
                     onBubbleFocusChanged?.invoke(null)
+                    val absX = kotlin.math.abs(velocityX)
+                    val absY = kotlin.math.abs(velocityY)
+                    if (absX >= absY) {
+                        if (velocityX > 0) areaX = (areaX + 1).coerceAtMost(areaCols - 1)
+                        else areaX = (areaX - 1).coerceAtLeast(0)
+                    } else {
+                        if (velocityY > 0) areaY = (areaY + 1).coerceAtMost(areaRows - 1)
+                        else areaY = (areaY - 1).coerceAtLeast(0)
+                    }
+                    beginAreaRevealAnimation()
                 }
+                velocityX = 0f
+                velocityY = 0f
             }
         }
         return true
@@ -319,7 +338,7 @@ class BubbleModeView @JvmOverloads constructor(
         val t = (SystemClock.uptimeMillis() % 6800L).toFloat() / 6800f * (Math.PI * 2f).toFloat()
         val driftX = kotlin.math.cos(t + bubble.phase) * (8f + bubble.radiusScale * 12f) * bubble.driftAmplitude
         val driftY = kotlin.math.sin(t + bubble.indexPhase) * (6f + bubble.radiusScale * 10f) * bubble.driftAmplitude
-        val pulse = 0.92f + 0.08f * kotlin.math.sin(t * 1.7f + bubble.phase)
+        val pulse = 1f
         var worldX = lerp(bubble.entryStartX, bubble.x + driftX, entryT)
         var worldY = lerp(bubble.entryStartY, bubble.y + driftY, entryT)
         val drawX = worldX - offsetX
@@ -339,7 +358,7 @@ class BubbleModeView @JvmOverloads constructor(
         val renderY = worldY - offsetY
         val radius = if (isFocused) lerp(focusStartRadius, reviewRadius, focusAnimProgress) else baseRadius * pulse
         val dimFactor = if (dimmed) 0.35f else 1f
-        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor * pulse).coerceIn(0.05f, 0.98f)
+        val alpha = ((0.68f + (1f - distNorm) * 0.30f) * transitionProgress * entryT * dimFactor * revealProgress).coerceIn(0.05f, 0.98f)
         val alphaInt = (alpha * 255).toInt()
         bubblePaint.shader = createBubbleGradient(
             item = bubble.item,
@@ -374,10 +393,12 @@ class BubbleModeView @JvmOverloads constructor(
 
     private fun stepPhysics(dt: Float) {
         if (bubbleStates.isEmpty()) return
-        val spring = (dt * 11.5f).coerceIn(0f, 1f)
-        offsetX = lerp(offsetX, panTargetX, spring)
-        offsetY = lerp(offsetY, panTargetY, spring)
-        clampPanTarget()
+        val spring = (dt * 9.8f).coerceIn(0f, 1f)
+        val targetOffsetX = areaX * width.toFloat()
+        val targetOffsetY = areaY * height.toFloat()
+        offsetX = lerp(offsetX, targetOffsetX, spring)
+        offsetY = lerp(offsetY, targetOffsetY, spring)
+        revealProgress = (revealProgress + dt * 2.4f).coerceAtMost(1f)
 
         bubbleStates.forEach { bubble ->
             if (bubble.entryDelaySec > 0f) {
@@ -432,17 +453,8 @@ class BubbleModeView @JvmOverloads constructor(
         }
     }
 
-    private fun updateBubblePan(dx: Float, dy: Float) {
-        panTargetX = (panTargetX + dx * BUBBLE_PAN_SPEED)
-        panTargetY = (panTargetY + dy * BUBBLE_PAN_SPEED)
-        clampPanTarget()
-    }
-
-    private fun clampPanTarget() {
-        val maxOffsetX = max(0f, fieldWidth - width)
-        val maxOffsetY = max(0f, fieldHeight - height)
-        panTargetX = panTargetX.coerceIn(0f, maxOffsetX)
-        panTargetY = panTargetY.coerceIn(0f, maxOffsetY)
+    private fun beginAreaRevealAnimation() {
+        revealProgress = 0f
     }
 
     private fun bubbleAt(x: Float, y: Float): BubbleState? {
@@ -614,9 +626,5 @@ class BubbleModeView @JvmOverloads constructor(
         focusedShowingBack = false
         onBubbleFocusChanged?.invoke(null)
         invalidate()
-    }
-
-    private companion object {
-        const val BUBBLE_PAN_SPEED = 9.8f
     }
 }
