@@ -108,6 +108,8 @@ class BubbleModeView @JvmOverloads constructor(
     private var areaTransitionProgress = 1f
     private var areaTransitionDirX = 0f
     private var areaTransitionDirY = 0f
+    private var areaTransitionDistancePx = 0f
+    private var areaTransitionCurvePx = 0f
 
     private val random = Random(System.currentTimeMillis())
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -338,6 +340,11 @@ class BubbleModeView @JvmOverloads constructor(
                             areaTransitionDirY = 1f
                         }
                     }
+                    val speed = hypot(velocityX, velocityY)
+                    val distanceBoost = (speed * 0.028f).coerceIn(0f, 120f * density())
+                    areaTransitionDistancePx = 48f * density() + distanceBoost + random.nextFloat() * 34f * density()
+                    areaTransitionCurvePx = (18f + random.nextFloat() * 56f) * density() *
+                        if (random.nextBoolean()) 1f else -1f
                     beginAreaRevealAnimation()
                 }
                 velocityX = 0f
@@ -386,11 +393,14 @@ class BubbleModeView @JvmOverloads constructor(
         val delay = ((bubble.phase / (Math.PI * 2f).toFloat()) * 0.24f).coerceIn(0f, 0.24f)
         val localTransition = ((areaTransitionProgress - delay) / (1f - delay).coerceAtLeast(0.1f)).coerceIn(0f, 1f)
         val settleT = easeOutCubic(localTransition)
-        val transitionOffsetBase = (1f - settleT) * (18f + bubble.radiusScale * 22f) * density()
-        val wobble = kotlin.math.sin((1f - localTransition) * Math.PI.toFloat() * 2f + bubble.indexPhase) *
-            (4f + bubble.radiusScale * 6f) * density()
-        worldX += areaTransitionDirX * transitionOffsetBase + areaTransitionDirY * wobble
-        worldY += areaTransitionDirY * transitionOffsetBase - areaTransitionDirX * wobble
+        val fallbackDistance = (18f + bubble.radiusScale * 22f) * density()
+        val transitionOffsetBase = (1f - settleT) * max(fallbackDistance, areaTransitionDistancePx)
+        val wave = kotlin.math.sin((1f - localTransition) * Math.PI.toFloat() * 2f + bubble.indexPhase)
+        val wobble = wave * (8f + bubble.radiusScale * 12f) * density()
+        val arc = kotlin.math.sin((1f - localTransition) * Math.PI.toFloat()) *
+            (areaTransitionCurvePx * (0.45f + bubble.radiusScale * 0.7f))
+        worldX += areaTransitionDirX * transitionOffsetBase + areaTransitionDirY * (wobble + arc)
+        worldY += areaTransitionDirY * transitionOffsetBase - areaTransitionDirX * (wobble + arc)
         val drawX = worldX - offsetX
         val drawY = worldY - offsetY
         if (drawX + bubble.radius < 0f || drawX - bubble.radius > width || drawY + bubble.radius < 0f || drawY - bubble.radius > height) return
