@@ -19,11 +19,15 @@ import androidx.core.graphics.ColorUtils
 import android.util.Log
 import android.os.SystemClock
 import kotlin.math.abs
+import kotlin.math.acos
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.hypot
+import kotlin.math.PI
 import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 class BubbleModeView @JvmOverloads constructor(
@@ -162,11 +166,6 @@ class BubbleModeView @JvmOverloads constructor(
             val id = items[idx].id
             (id xor bubbleShuffleSeed.toLong())
         }
-        val aspect = (fieldWidth / fieldHeight).coerceAtLeast(0.4f)
-        val cols = ceil(kotlin.math.sqrt(items.size * aspect.toDouble())).toInt().coerceAtLeast(1)
-        val rows = ceil(items.size / cols.toDouble()).toInt().coerceAtLeast(1)
-        val cellWidth = fieldWidth / cols
-        val cellHeight = fieldHeight / rows
         items.forEachIndexed { index, item ->
             val seededRandom = Random((item.id xor bubbleShuffleSeed.toLong()).toInt())
             val radius = radiusForText(item)
@@ -175,12 +174,38 @@ class BubbleModeView @JvmOverloads constructor(
             val minY = radius
             val maxY = fieldHeight - radius
             val slot = sortedSlots[index]
-            val col = slot % cols
-            val row = slot / cols
-            val jitterX = (seededRandom.nextFloat() - 0.5f) * cellWidth * 0.26f
-            val jitterY = (seededRandom.nextFloat() - 0.5f) * cellHeight * 0.26f
-            val targetX = (col + 0.5f) * cellWidth + jitterX
-            val targetY = (row + 0.5f) * cellHeight + jitterY
+            val goldenAngle = 2.3999631f
+            val spiralRadius = sqrt((slot + 0.5f) / items.size.toFloat()) * min(fieldWidth, fieldHeight) * 0.45f
+            val spiralAngle = slot * goldenAngle + seededRandom.nextFloat() * 0.9f
+            val centerBiasX = fieldWidth * 0.5f + cos(spiralAngle) * spiralRadius
+            val centerBiasY = fieldHeight * 0.5f + sin(spiralAngle) * spiralRadius
+            val maxAllowedCoverage = 0.66f
+            var targetX = centerBiasX
+            var targetY = centerBiasY
+            var bestCoverage = Float.MAX_VALUE
+            val attempts = 42
+            repeat(attempts) {
+                val candidateX = (centerBiasX + (seededRandom.nextFloat() - 0.5f) * fieldWidth * 0.38f).coerceIn(minX, maxX)
+                val candidateY = (centerBiasY + (seededRandom.nextFloat() - 0.5f) * fieldHeight * 0.38f).coerceIn(minY, maxY)
+                var peakCoverage = 0f
+                for (existing in bubbleStates) {
+                    val intersection = circleIntersectionArea(
+                        x1 = candidateX, y1 = candidateY, r1 = radius,
+                        x2 = existing.x, y2 = existing.y, r2 = existing.radius
+                    )
+                    if (intersection <= 0f) continue
+                    val candidateCoverage = (intersection / (PI.toFloat() * radius * radius)).coerceIn(0f, 1f)
+                    val existingCoverage = (intersection / (PI.toFloat() * existing.radius * existing.radius)).coerceIn(0f, 1f)
+                    peakCoverage = max(peakCoverage, max(candidateCoverage, existingCoverage))
+                    if (peakCoverage > maxAllowedCoverage) break
+                }
+                if (peakCoverage < bestCoverage) {
+                    bestCoverage = peakCoverage
+                    targetX = candidateX
+                    targetY = candidateY
+                }
+                if (peakCoverage <= maxAllowedCoverage) return@repeat
+            }
             val radiusScale = seededRandom.nextFloat()
             bubbleStates += BubbleState(
                 item = item,
@@ -548,6 +573,28 @@ class BubbleModeView @JvmOverloads constructor(
         val target = minRadius + (maxRadius - minRadius) * kotlin.math.sqrt(normalized.coerceIn(0f, 1f))
         val jitter = (random.nextFloat() - 0.5f) * (8f * density())
         return (target + jitter).coerceIn(minRadius, maxRadius)
+    }
+
+    private fun circleIntersectionArea(
+        x1: Float,
+        y1: Float,
+        r1: Float,
+        x2: Float,
+        y2: Float,
+        r2: Float
+    ): Float {
+        val d = hypot(x2 - x1, y2 - y1)
+        if (d >= r1 + r2) return 0f
+        val minRadius = min(r1, r2)
+        if (d <= abs(r1 - r2)) return PI.toFloat() * minRadius * minRadius
+        val dD = d.toDouble()
+        val r1D = r1.toDouble()
+        val r2D = r2.toDouble()
+        val alpha = 2.0 * acos(((dD * dD) + (r1D * r1D) - (r2D * r2D)) / (2.0 * dD * r1D))
+        val beta = 2.0 * acos(((dD * dD) + (r2D * r2D) - (r1D * r1D)) / (2.0 * dD * r2D))
+        val area1 = 0.5 * r1D * r1D * (alpha - kotlin.math.sin(alpha))
+        val area2 = 0.5 * r2D * r2D * (beta - kotlin.math.sin(beta))
+        return (area1 + area2).toFloat()
     }
 
     private fun buildWrappedLines(
