@@ -64,7 +64,9 @@ class BubbleModeView @JvmOverloads constructor(
         val radiusScale: Float,
         val phase: Float,
         val indexPhase: Float,
-        val driftAmplitude: Float
+        val driftAmplitude: Float,
+        val transitionWaveScale: Float,
+        val transitionArcScale: Float
     )
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
@@ -73,6 +75,9 @@ class BubbleModeView @JvmOverloads constructor(
 
     private val bubbleStates = mutableListOf<BubbleState>()
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(15, 18, 28)
+    }
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
@@ -230,6 +235,9 @@ class BubbleModeView @JvmOverloads constructor(
                 phase = seededRandom.nextFloat() * (Math.PI * 2.0).toFloat(),
                 indexPhase = ((index * 0.21f) % (Math.PI * 2.0)).toFloat(),
                 driftAmplitude = 0.35f + (1f - (items.size / 120f).coerceIn(0f, 1f)) * 0.65f
+                ,
+                transitionWaveScale = 0.55f + seededRandom.nextFloat() * 1.35f,
+                transitionArcScale = 0.5f + seededRandom.nextFloat() * 1.5f
             )
         }
         revealProgress = 0f
@@ -355,7 +363,7 @@ class BubbleModeView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
         if (bubbleStates.isEmpty() && pendingItems.isNotEmpty()) {
             Log.d("BubbleModeView", "onDraw with empty state despite pending=${pendingItems.size}")
         }
@@ -396,9 +404,9 @@ class BubbleModeView @JvmOverloads constructor(
         val fallbackDistance = (18f + bubble.radiusScale * 22f) * density()
         val transitionOffsetBase = (1f - settleT) * max(fallbackDistance, areaTransitionDistancePx)
         val wave = kotlin.math.sin((1f - localTransition) * Math.PI.toFloat() * 2f + bubble.indexPhase)
-        val wobble = wave * (8f + bubble.radiusScale * 12f) * density()
+        val wobble = wave * (8f + bubble.radiusScale * 12f) * density() * bubble.transitionWaveScale
         val arc = kotlin.math.sin((1f - localTransition) * Math.PI.toFloat()) *
-            (areaTransitionCurvePx * (0.45f + bubble.radiusScale * 0.7f))
+            (areaTransitionCurvePx * (0.45f + bubble.radiusScale * 0.7f) * bubble.transitionArcScale)
         worldX += areaTransitionDirX * transitionOffsetBase + areaTransitionDirY * (wobble + arc)
         worldY += areaTransitionDirY * transitionOffsetBase - areaTransitionDirX * (wobble + arc)
         val drawX = worldX - offsetX
@@ -515,7 +523,7 @@ class BubbleModeView @JvmOverloads constructor(
     }
 
     private fun beginAreaRevealAnimation() {
-        revealProgress = 0f
+        revealProgress = 0.72f
         areaTransitionProgress = 0f
     }
 
