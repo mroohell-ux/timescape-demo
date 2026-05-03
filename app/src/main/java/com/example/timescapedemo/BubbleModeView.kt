@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
@@ -78,6 +79,14 @@ class BubbleModeView @JvmOverloads constructor(
 
     private val bubbleStates = mutableListOf<BubbleState>()
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val balloonRopePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = Color.argb(150, 240, 240, 240)
+    }
+    private val balloonHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(15, 18, 28)
     }
@@ -482,6 +491,38 @@ class BubbleModeView @JvmOverloads constructor(
         )
         canvas.drawCircle(renderX, renderY, radius, bubblePaint)
         bubblePaint.shader = null
+        if (!isFocused) {
+            val ropeLength = radius * (0.65f + bubble.radiusScale * 0.45f)
+            balloonRopePaint.strokeWidth = (1.6f + bubble.radiusScale * 1.8f) * density()
+            canvas.drawLine(
+                renderX + radius * 0.08f,
+                renderY + radius * 0.88f,
+                renderX + kotlin.math.sin(bubble.phase) * radius * 0.18f,
+                renderY + radius + ropeLength,
+                balloonRopePaint
+            )
+        }
+        balloonHighlightPaint.shader = LinearGradient(
+            renderX - radius * 0.35f,
+            renderY - radius * 0.72f,
+            renderX + radius * 0.18f,
+            renderY - radius * 0.1f,
+            intArrayOf(
+                Color.argb((alphaInt * 0.38f).toInt(), 255, 255, 255),
+                Color.argb((alphaInt * 0.07f).toInt(), 255, 255, 255),
+                Color.argb(0, 255, 255, 255)
+            ),
+            floatArrayOf(0f, 0.56f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawOval(
+            renderX - radius * 0.46f,
+            renderY - radius * 0.72f,
+            renderX + radius * 0.08f,
+            renderY - radius * 0.05f,
+            balloonHighlightPaint
+        )
+        balloonHighlightPaint.shader = null
 
         val maxTextWidth = radius * 1.62f
         val text = if (isFocused) {
