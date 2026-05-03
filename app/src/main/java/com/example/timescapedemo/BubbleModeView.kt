@@ -65,7 +65,11 @@ class BubbleModeView @JvmOverloads constructor(
         val indexPhase: Float,
         val driftAmplitude: Float,
         val transitionWaveScale: Float,
-        val transitionArcScale: Float
+        val transitionArcScale: Float,
+        val orbitRadiusX: Float,
+        val orbitRadiusY: Float,
+        val orbitSpeed: Float,
+        val orbitTilt: Float
     )
 
     var onBubbleClick: ((BubbleItem) -> Unit)? = null
@@ -269,7 +273,11 @@ class BubbleModeView @JvmOverloads constructor(
                 driftAmplitude = 0.35f + (1f - (items.size / 120f).coerceIn(0f, 1f)) * 0.65f
                 ,
                 transitionWaveScale = 0.55f + seededRandom.nextFloat() * 1.35f,
-                transitionArcScale = 0.5f + seededRandom.nextFloat() * 1.5f
+                transitionArcScale = 0.5f + seededRandom.nextFloat() * 1.5f,
+                orbitRadiusX = (10f + seededRandom.nextFloat() * 28f) * density(),
+                orbitRadiusY = (7f + seededRandom.nextFloat() * 24f) * density(),
+                orbitSpeed = 0.42f + seededRandom.nextFloat() * 0.95f,
+                orbitTilt = seededRandom.nextFloat() * (Math.PI * 2f).toFloat()
             )
         }
         revealProgress = 0f
@@ -424,9 +432,14 @@ class BubbleModeView @JvmOverloads constructor(
         dimmed: Boolean
     ) {
         val entryT = easeOutCubic(bubble.entryProgress.coerceIn(0f, 1f))
-        val t = (SystemClock.uptimeMillis() % 6800L).toFloat() / 6800f * (Math.PI * 2f).toFloat()
-        val driftX = kotlin.math.cos(t + bubble.phase) * (8f + bubble.radiusScale * 12f) * bubble.driftAmplitude
-        val driftY = kotlin.math.sin(t + bubble.indexPhase) * (6f + bubble.radiusScale * 10f) * bubble.driftAmplitude
+        val timeSec = SystemClock.uptimeMillis().toFloat() / 1000f
+        val orbitalAngle = timeSec * bubble.orbitSpeed + bubble.phase
+        val localX = kotlin.math.cos(orbitalAngle) * bubble.orbitRadiusX * bubble.driftAmplitude
+        val localY = kotlin.math.sin(orbitalAngle + bubble.indexPhase * 0.35f) * bubble.orbitRadiusY * bubble.driftAmplitude
+        val ct = kotlin.math.cos(bubble.orbitTilt)
+        val st = kotlin.math.sin(bubble.orbitTilt)
+        val driftX = localX * ct - localY * st
+        val driftY = localX * st + localY * ct
         val pulse = 1f
         var worldX = lerp(bubble.entryStartX, bubble.x, entryT) + driftX * entryT
         var worldY = lerp(bubble.entryStartY, bubble.y, entryT) + driftY * entryT
