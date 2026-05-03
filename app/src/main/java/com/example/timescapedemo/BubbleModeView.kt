@@ -160,8 +160,8 @@ class BubbleModeView @JvmOverloads constructor(
             return
         }
         val densityCurve = (items.size / 120f).coerceIn(0f, 1f)
-        val bubbleSpaceWidthPx = width.toFloat() * (0.98f + (densityCurve * 1.62f))
-        val bubbleSpaceHeightPx = height.toFloat() * (1.02f + (densityCurve * 1.86f))
+        val bubbleSpaceWidthPx = width.toFloat() * (1.18f + (densityCurve * 1.95f))
+        val bubbleSpaceHeightPx = height.toFloat() * (1.22f + (densityCurve * 2.15f))
         fieldWidth = max(width.toFloat(), bubbleSpaceWidthPx)
         fieldHeight = max(height.toFloat(), bubbleSpaceHeightPx)
         areaCols = ceil(fieldWidth / width.toFloat()).toInt().coerceAtLeast(1)
@@ -175,7 +175,7 @@ class BubbleModeView @JvmOverloads constructor(
             (id xor bubbleShuffleSeed.toLong())
         }
         val avgRadius = items.map { radiusForText(it) }.average().toFloat().coerceAtLeast(1f)
-        val minSpacing = (avgRadius * 2f * (0.60f + (densityCurve * 0.24f))).coerceAtLeast(14f * density())
+        val minSpacing = (avgRadius * 2f * (0.82f + (densityCurve * 0.30f))).coerceAtLeast(18f * density())
         val anchorCount = (items.size / 8).coerceIn(5, 16)
         val clusterAnchors = List(anchorCount) {
             val a = random.nextFloat() * (Math.PI * 2f).toFloat()
