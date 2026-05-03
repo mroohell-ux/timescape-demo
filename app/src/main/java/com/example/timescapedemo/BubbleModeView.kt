@@ -159,9 +159,11 @@ class BubbleModeView @JvmOverloads constructor(
             invalidate()
             return
         }
-        val mapFactor = kotlin.math.sqrt(items.size.toFloat()).coerceAtLeast(1f)
-        fieldWidth = max(width.toFloat() * 1.8f, width.toFloat() + mapFactor * 92f * density())
-        fieldHeight = max(height.toFloat() * 1.8f, height.toFloat() + mapFactor * 84f * density())
+        val densityCurve = (items.size / 120f).coerceIn(0f, 1f)
+        val bubbleSpaceWidthPx = width.toFloat() * (0.98f + (densityCurve * 1.62f))
+        val bubbleSpaceHeightPx = height.toFloat() * (1.02f + (densityCurve * 1.86f))
+        fieldWidth = max(width.toFloat(), bubbleSpaceWidthPx)
+        fieldHeight = max(height.toFloat(), bubbleSpaceHeightPx)
         areaCols = ceil(fieldWidth / width.toFloat()).toInt().coerceAtLeast(1)
         areaRows = ceil(fieldHeight / height.toFloat()).toInt().coerceAtLeast(1)
         areaX = areaX.coerceIn(0, areaCols - 1)
@@ -172,7 +174,9 @@ class BubbleModeView @JvmOverloads constructor(
             val id = items[idx].id
             (id xor bubbleShuffleSeed.toLong())
         }
-        val anchorCount = (items.size / 9).coerceIn(4, 14)
+        val avgRadius = items.map { radiusForText(it) }.average().toFloat().coerceAtLeast(1f)
+        val minSpacing = (avgRadius * 2f * (0.60f + (densityCurve * 0.24f))).coerceAtLeast(14f * density())
+        val anchorCount = (items.size / 8).coerceIn(5, 16)
         val clusterAnchors = List(anchorCount) {
             val a = random.nextFloat() * (Math.PI * 2f).toFloat()
             val r = (0.12f + random.nextFloat() * 0.48f) * min(fieldWidth, fieldHeight)
@@ -198,6 +202,7 @@ class BubbleModeView @JvmOverloads constructor(
             var targetX = centerBiasX
             var targetY = centerBiasY
             var bestCoverage = Float.MAX_VALUE
+            var bestNearestDistance = Float.NEGATIVE_INFINITY
             val attempts = 68
             repeat(attempts) {
                 val t = it.toFloat() / attempts.toFloat()
@@ -214,7 +219,9 @@ class BubbleModeView @JvmOverloads constructor(
                         (seededRandom.nextFloat() - 0.5f) * fieldHeight * jitterScale
                     ).coerceIn(minY, maxY)
                 var peakCoverage = 0f
+                var nearestDistance = Float.MAX_VALUE
                 for (existing in bubbleStates) {
+                    nearestDistance = min(nearestDistance, hypot(candidateX - existing.x, candidateY - existing.y))
                     val intersection = circleIntersectionArea(
                         x1 = candidateX, y1 = candidateY, r1 = radius,
                         x2 = existing.x, y2 = existing.y, r2 = existing.radius
@@ -225,12 +232,18 @@ class BubbleModeView @JvmOverloads constructor(
                     peakCoverage = max(peakCoverage, max(candidateCoverage, existingCoverage))
                     if (peakCoverage > maxAllowedCoverage) break
                 }
-                if (peakCoverage < bestCoverage) {
+                if (nearestDistance >= minSpacing && peakCoverage <= maxAllowedCoverage) {
+                    targetX = candidateX
+                    targetY = candidateY
                     bestCoverage = peakCoverage
+                    return@repeat
+                }
+                if (peakCoverage < bestCoverage || (peakCoverage <= maxAllowedCoverage && nearestDistance > bestNearestDistance)) {
+                    bestCoverage = peakCoverage
+                    bestNearestDistance = nearestDistance
                     targetX = candidateX
                     targetY = candidateY
                 }
-                if (peakCoverage <= maxAllowedCoverage) return@repeat
             }
             val radiusScale = seededRandom.nextFloat()
             bubbleStates += BubbleState(
