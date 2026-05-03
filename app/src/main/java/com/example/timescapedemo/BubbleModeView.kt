@@ -27,7 +27,6 @@ import kotlin.math.hypot
 import kotlin.math.PI
 import kotlin.math.min
 import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.random.Random
 
 class BubbleModeView @JvmOverloads constructor(
@@ -173,6 +172,15 @@ class BubbleModeView @JvmOverloads constructor(
             val id = items[idx].id
             (id xor bubbleShuffleSeed.toLong())
         }
+        val anchorCount = (items.size / 9).coerceIn(4, 14)
+        val clusterAnchors = List(anchorCount) {
+            val a = random.nextFloat() * (Math.PI * 2f).toFloat()
+            val r = (0.12f + random.nextFloat() * 0.48f) * min(fieldWidth, fieldHeight)
+            Pair(
+                fieldWidth * 0.5f + kotlin.math.cos(a) * r,
+                fieldHeight * 0.5f + kotlin.math.sin(a) * r
+            )
+        }
         items.forEachIndexed { index, item ->
             val seededRandom = Random((item.id xor bubbleShuffleSeed.toLong()).toInt())
             val radius = radiusForText(item)
@@ -181,19 +189,30 @@ class BubbleModeView @JvmOverloads constructor(
             val minY = radius
             val maxY = fieldHeight - radius
             val slot = sortedSlots[index]
-            val goldenAngle = 2.3999631f
-            val spiralRadius = sqrt((slot + 0.5f) / items.size.toFloat()) * min(fieldWidth, fieldHeight) * 0.45f
-            val spiralAngle = slot * goldenAngle + seededRandom.nextFloat() * 0.9f
-            val centerBiasX = fieldWidth * 0.5f + cos(spiralAngle) * spiralRadius
-            val centerBiasY = fieldHeight * 0.5f + sin(spiralAngle) * spiralRadius
+            val anchor = clusterAnchors[(slot + index) % clusterAnchors.size]
+            val orbitAngle = seededRandom.nextFloat() * (Math.PI * 2f).toFloat()
+            val orbitRadius = (18f + seededRandom.nextFloat() * min(fieldWidth, fieldHeight) * 0.22f)
+            val centerBiasX = (anchor.first + cos(orbitAngle) * orbitRadius).coerceIn(minX, maxX)
+            val centerBiasY = (anchor.second + sin(orbitAngle) * orbitRadius).coerceIn(minY, maxY)
             val maxAllowedCoverage = 0.66f
             var targetX = centerBiasX
             var targetY = centerBiasY
             var bestCoverage = Float.MAX_VALUE
-            val attempts = 42
+            val attempts = 68
             repeat(attempts) {
-                val candidateX = (centerBiasX + (seededRandom.nextFloat() - 0.5f) * fieldWidth * 0.38f).coerceIn(minX, maxX)
-                val candidateY = (centerBiasY + (seededRandom.nextFloat() - 0.5f) * fieldHeight * 0.38f).coerceIn(minY, maxY)
+                val t = it.toFloat() / attempts.toFloat()
+                val anchorWeight = (1f - t * 0.8f).coerceIn(0.28f, 1f)
+                val jitterScale = lerp(0.18f, 0.52f, t)
+                val candidateX = (
+                    centerBiasX * anchorWeight +
+                        (fieldWidth * (0.18f + seededRandom.nextFloat() * 0.64f)) * (1f - anchorWeight) +
+                        (seededRandom.nextFloat() - 0.5f) * fieldWidth * jitterScale
+                    ).coerceIn(minX, maxX)
+                val candidateY = (
+                    centerBiasY * anchorWeight +
+                        (fieldHeight * (0.16f + seededRandom.nextFloat() * 0.68f)) * (1f - anchorWeight) +
+                        (seededRandom.nextFloat() - 0.5f) * fieldHeight * jitterScale
+                    ).coerceIn(minY, maxY)
                 var peakCoverage = 0f
                 for (existing in bubbleStates) {
                     val intersection = circleIntersectionArea(
