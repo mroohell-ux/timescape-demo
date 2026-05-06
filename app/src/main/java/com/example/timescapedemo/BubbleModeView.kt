@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import android.text.TextPaint
@@ -87,8 +88,11 @@ class BubbleModeView @JvmOverloads constructor(
     private val balloonHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
+    private val balloonKnotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(15, 18, 28)
+        color = Color.rgb(92, 152, 211)
     }
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -489,18 +493,31 @@ class BubbleModeView @JvmOverloads constructor(
             radius = radius,
             alpha = alphaInt
         )
-        canvas.drawCircle(renderX, renderY, radius, bubblePaint)
+        val balloonTop = renderY - radius * 1.02f
+        val balloonBottom = renderY + radius * 0.84f
+        val balloonLeft = renderX - radius * 0.94f
+        val balloonRight = renderX + radius * 0.94f
+        canvas.drawOval(balloonLeft, balloonTop, balloonRight, balloonBottom, bubblePaint)
         bubblePaint.shader = null
+
+        balloonKnotPaint.color = ColorUtils.setAlphaComponent(bubble.item.color, (alphaInt * 0.88f).toInt().coerceIn(0, 255))
+        val knotTop = renderY + radius * 0.74f
+        val knotBottom = renderY + radius * 1.02f
+        val knotPath = Path().apply {
+            moveTo(renderX - radius * 0.16f, knotTop)
+            lineTo(renderX + radius * 0.16f, knotTop)
+            lineTo(renderX + radius * 0.09f, knotBottom)
+            lineTo(renderX - radius * 0.09f, knotBottom)
+            close()
+        }
+        canvas.drawPath(knotPath, balloonKnotPaint)
+
         if (!isFocused) {
-            val ropeLength = radius * (0.65f + bubble.radiusScale * 0.45f)
-            balloonRopePaint.strokeWidth = (1.6f + bubble.radiusScale * 1.8f) * density()
-            canvas.drawLine(
-                renderX + radius * 0.08f,
-                renderY + radius * 0.88f,
-                renderX + kotlin.math.sin(bubble.phase) * radius * 0.18f,
-                renderY + radius + ropeLength,
-                balloonRopePaint
-            )
+            val stringEndY = renderY + radius * (1.55f + bubble.radiusScale * 0.35f)
+            val stringEndX = renderX + kotlin.math.sin(timeSec * 0.9f + bubble.phase) * radius * 0.18f
+            balloonRopePaint.strokeWidth = (1.2f + bubble.radiusScale * 1.2f) * density()
+            canvas.drawLine(renderX - radius * 0.08f, knotBottom, stringEndX, stringEndY, balloonRopePaint)
+            canvas.drawLine(renderX + radius * 0.08f, knotBottom, stringEndX, stringEndY, balloonRopePaint)
         }
         balloonHighlightPaint.shader = LinearGradient(
             renderX - radius * 0.35f,
