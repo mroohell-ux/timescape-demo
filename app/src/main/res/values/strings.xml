@@ -9,6 +9,7 @@
     <string name="dialog_delete">Delete</string>
     <string name="menu_add_card">Add card</string>
     <string name="menu_add_image_card">Add image</string>
+    <string name="menu_add_pdf_card">Add PDF</string>
     <string name="menu_add_handwriting">Add handwriting</string>
     <string name="menu_add_flow">Add flow</string>
     <string name="menu_add_content">Add</string>
@@ -77,6 +78,20 @@
     <string name="snackbar_deleted_card">Card deleted</string>
     <string name="snackbar_added_handwriting">Added handwriting card</string>
     <string name="snackbar_added_image_card">Added image card</string>
+    <plurals name="snackbar_added_pdf_pages">
+        <item quantity="one">Added 1 PDF page</item>
+        <item quantity="other">Added %1$d PDF pages</item>
+    </plurals>
+    <string name="snackbar_no_pdf_selected">No PDF selected</string>
+    <string name="snackbar_pdf_import_failed">Couldnt import that PDF.</string>
+    <string name="snackbar_pdf_import_empty">That PDF did not have any pages.</string>
+    <string name="dialog_large_pdf_import_title">Import large PDF?</string>
+    <string name="dialog_large_pdf_import_message">This PDF has %1$d pages. Timescape will create one image card per page, which can take a while and use storage. Continue?</string>
+    <string name="dialog_large_pdf_import_positive">Import all pages</string>
+    <string name="pdf_import_progress_counting_message">Opening PDF…</string>
+    <string name="pdf_import_progress_pages_message">Imported pages %1$d/%2$d</string>
+    <string name="pdf_card_default_title">PDF</string>
+    <string name="pdf_card_page_title">%1$s page %2$d</string>
     <string name="snackbar_image_card_updated">Updated image card</string>
     <string name="snackbar_no_photo_selected">No photo selected</string>
     <string name="snackbar_merged_flows">Merged "%1$s" into "%2$s"</string>

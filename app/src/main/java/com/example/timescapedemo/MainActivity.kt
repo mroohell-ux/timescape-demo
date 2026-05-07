@@ -21,6 +21,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.*
+import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
@@ -296,6 +297,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var pendingImageCardRequest: ImageCardRequest? = null
+    private var pendingPdfImportFlowId: Long? = null
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
     private var activeFlowReorderDragId: Long? = null
@@ -388,6 +390,11 @@ class MainActivity : AppCompatActivity() {
     private val openImageCard =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             handleImageCardResult(uri)
+        }
+
+    private val openPdfCard =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            handlePdfCardResult(uri)
         }
 
     private val pickAppBackground =
@@ -488,6 +495,8 @@ class MainActivity : AppCompatActivity() {
         pendingImageCardRequest = ImageCardRequest.fromBundle(
             savedInstanceState?.getBundle(STATE_PENDING_IMAGE_CARD_REQUEST)
         )
+        pendingPdfImportFlowId = savedInstanceState?.getLong(STATE_PENDING_PDF_IMPORT_FLOW_ID, Long.MIN_VALUE)
+            ?.takeIf { it != Long.MIN_VALUE }
         pendingExportFlowId = savedInstanceState?.getLong(STATE_PENDING_EXPORT_FLOW_ID, Long.MIN_VALUE)
             ?.takeIf { it != Long.MIN_VALUE }
         pendingExportFileName = savedInstanceState?.getString(STATE_PENDING_EXPORT_FILE_NAME)
@@ -797,6 +806,12 @@ class MainActivity : AppCompatActivity() {
                     if (currentFlow()?.id == VIDEO_FLOW_ID) {
                         snackbar(getString(R.string.snackbar_video_folder_missing))
                     } else showAddImageCardDialog()
+                    true
+                }
+                R.id.action_add_pdf_card -> {
+                    if (currentFlow()?.id == VIDEO_FLOW_ID) {
+                        snackbar(getString(R.string.snackbar_video_folder_missing))
+                    } else showAddPdfCardDialog()
                     true
                 }
                 R.id.action_add_handwriting -> {
@@ -2178,6 +2193,16 @@ class MainActivity : AppCompatActivity() {
             return
         }
         startImageCardPicker(ImageCardRequest.Create(flow.id))
+    }
+
+    private fun showAddPdfCardDialog() {
+        val flow = currentFlow()
+        if (flow == null) {
+            snackbar(getString(R.string.snackbar_add_flow_first))
+            return
+        }
+        pendingPdfImportFlowId = flow.id
+        openPdfCard.launch(arrayOf("application/pdf"))
     }
 
     private fun showAddHandwritingDialog() {
@@ -4128,6 +4153,55 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun handlePdfCardResult(uri: Uri?) {
+        val flowId = pendingPdfImportFlowId
+        pendingPdfImportFlowId = null
+        if (flowId == null) return
+        if (uri == null) {
+            snackbar(getString(R.string.snackbar_no_pdf_selected))
+            return
+        }
+        persistReadPermission(uri)
+        preparePdfImport(flowId, uri)
+    }
+
+    private fun preparePdfImport(flowId: Long, uri: Uri) {
+        lifecycleScope.launch {
+            val pageCountResult = withContext(Dispatchers.IO) { countPdfPages(uri) }
+            val pageCount = pageCountResult.getOrElse {
+                Log.w(TAG, "Failed to open PDF $uri", it)
+                snackbar(getString(R.string.snackbar_pdf_import_failed))
+                return@launch
+            }
+            if (pageCount <= 0) {
+                snackbar(getString(R.string.snackbar_pdf_import_empty))
+                return@launch
+            }
+            if (pageCount >= LARGE_PDF_PAGE_WARNING_THRESHOLD) {
+                showLargePdfImportConfirmation(flowId, uri, pageCount)
+            } else {
+                addPdfPagesToFlow(flowId, uri, pageCount)
+            }
+        }
+    }
+
+    private fun showLargePdfImportConfirmation(flowId: Long, uri: Uri, pageCount: Int) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_large_pdf_import_title))
+            .setMessage(getString(R.string.dialog_large_pdf_import_message, pageCount))
+            .setPositiveButton(R.string.dialog_large_pdf_import_positive) { _, _ ->
+                addPdfPagesToFlow(flowId, uri, pageCount)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun countPdfPages(uri: Uri): Result<Int> = runCatching {
+        contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+            PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
+        } ?: 0
+    }
+
     private fun handleImageCardResult(uri: Uri?) {
         val request = pendingImageCardRequest
         pendingImageCardRequest = null
@@ -4164,6 +4238,154 @@ class MainActivity : AppCompatActivity() {
         saveState()
         analyzeImageCardText(flow, card)
         snackbar(getString(R.string.snackbar_added_image_card))
+    }
+
+    private fun addPdfPagesToFlow(flowId: Long, uri: Uri, pageCount: Int) {
+        val flow = flows.firstOrNull { it.id == flowId } ?: return
+        val displayName = queryDisplayName(uri)
+            ?.substringBeforeLast('.')
+            ?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.pdf_card_default_title)
+
+        lifecycleScope.launch {
+            val progressUi = showOperationProgressDialog(
+                title = getString(R.string.menu_add_pdf_card),
+                message = getString(R.string.pdf_import_progress_pages_message, 0, pageCount),
+                indeterminate = false
+            )
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    renderPdfPagesToImages(uri, pageCount) { done, total ->
+                        runOnUiThread {
+                            updateOperationProgress(
+                                progressUi,
+                                message = getString(R.string.pdf_import_progress_pages_message, done, total),
+                                current = done,
+                                total = total
+                            )
+                        }
+                    }
+                }
+            } finally {
+                progressUi.dismiss()
+            }
+
+            val renderedPages = result.getOrElse {
+                Log.w(TAG, "Failed to import PDF $uri", it)
+                snackbar(getString(R.string.snackbar_pdf_import_failed))
+                return@launch
+            }
+            if (renderedPages.isEmpty()) {
+                snackbar(getString(R.string.snackbar_pdf_import_empty))
+                return@launch
+            }
+            val now = System.currentTimeMillis()
+            val cards = renderedPages.map { rendered ->
+                CardItem(
+                    id = nextCardId++,
+                    title = getString(R.string.pdf_card_page_title, displayName, rendered.pageNumber),
+                    snippet = "",
+                    image = CardImage(Uri.fromFile(rendered.file), "image/png", ownedByApp = true),
+                    updatedAt = now
+                )
+            }
+            flow.cards.addAll(0, cards)
+            flowShuffleStates[flow.id]?.originalOrder?.addAll(0, cards.map { it.id })
+            refreshFlow(flow, scrollToTop = true)
+            saveState()
+            analyzePdfImageCardsText(flow, cards)
+            snackbar(resources.getQuantityString(R.plurals.snackbar_added_pdf_pages, cards.size, cards.size))
+        }
+    }
+
+    private fun renderPdfPagesToImages(
+        uri: Uri,
+        expectedPageCount: Int,
+        onProgress: (done: Int, total: Int) -> Unit
+    ): Result<List<RenderedPdfPage>> = runCatching {
+        val createdFiles = mutableListOf<File>()
+        try {
+            contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    val total = renderer.pageCount
+                    if (total <= 0) return@use emptyList<RenderedPdfPage>()
+                    val progressTotal = max(expectedPageCount, total)
+                    onProgress(0, progressTotal)
+                    (0 until total).map { pageIndex ->
+                        val file = File(filesDir, "pdf_page_${System.currentTimeMillis()}_${UUID.randomUUID()}.png")
+                        createdFiles += file
+                        renderer.openPage(pageIndex).use { page ->
+                            renderPdfPageToFile(page, file)
+                        }
+                        onProgress(pageIndex + 1, progressTotal)
+                        RenderedPdfPage(pageNumber = pageIndex + 1, file = file)
+                    }
+                }
+            } ?: emptyList()
+        } catch (e: Exception) {
+            createdFiles.forEach { file -> runCatching { file.delete() } }
+            throw e
+        }
+    }
+
+    private fun renderPdfPageToFile(page: PdfRenderer.Page, file: File) {
+        val scale = calculatePdfRenderScale(page.width, page.height)
+        val bitmap = Bitmap.createBitmap(
+            (page.width * scale).roundToInt().coerceAtLeast(1),
+            (page.height * scale).roundToInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888
+        )
+        try {
+            bitmap.eraseColor(Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            FileOutputStream(file).use { out ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                    error("Unable to encode PDF page")
+                }
+                out.flush()
+                runCatching { out.fd.sync() }
+            }
+            BackgroundImageLoader.invalidate(Uri.fromFile(file))
+        } catch (e: Exception) {
+            runCatching { file.delete() }
+            throw e
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun calculatePdfRenderScale(width: Int, height: Int): Float {
+        val maxDimension = max(width, height).coerceAtLeast(1)
+        val fitScale = PDF_PAGE_IMAGE_MAX_DIMENSION_PX / maxDimension.toFloat()
+        return min(PDF_PAGE_IMAGE_BASE_SCALE, fitScale).coerceAtLeast(1f)
+    }
+
+    private fun analyzePdfImageCardsText(flow: CardFlow, cards: List<CardItem>) {
+        lifecycleScope.launch {
+            var hasChanges = false
+            cards.forEachIndexed { index, card ->
+                val image = card.image ?: return@forEachIndexed
+                val recognized = recognizeTextFromImage(image)
+                if (!recognized.isNullOrBlank() && recognized != card.recognizedText) {
+                    card.recognizedText = recognized
+                    card.updatedAt = System.currentTimeMillis()
+                    hasChanges = true
+                }
+                val completed = index + 1
+                if (hasChanges && completed % PDF_OCR_SAVE_BATCH_SIZE == 0) {
+                    refreshFlow(flow, scrollToTop = false)
+                    saveState()
+                    hasChanges = false
+                }
+            }
+            if (hasChanges) {
+                refreshFlow(flow, scrollToTop = false)
+                saveState()
+            }
+            if (flowSearchQueryNormalized.isNotEmpty()) {
+                updateFlowSearchResults(restoreStateWhenCleared = false)
+            }
+        }
     }
 
     private fun replaceImageOnCard(flowId: Long, cardId: Long, uri: Uri) {
@@ -6545,6 +6767,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        pendingPdfImportFlowId?.let { outState.putLong(STATE_PENDING_PDF_IMPORT_FLOW_ID, it) }
         pendingExportFlowId?.let { outState.putLong(STATE_PENDING_EXPORT_FLOW_ID, it) }
         pendingExportFileName?.let { outState.putString(STATE_PENDING_EXPORT_FILE_NAME, it) }
         pendingImageCardRequest?.toBundle()?.let { bundle ->
@@ -7276,6 +7499,8 @@ class MainActivity : AppCompatActivity() {
 
     private data class ExportPayload(val flowCount: Int, val cardCount: Int, val warnings: List<String>)
 
+    private data class RenderedPdfPage(val pageNumber: Int, val file: File)
+
     private data class OperationProgressDialog(
         val dialog: AlertDialog,
         val progressBar: ProgressBar,
@@ -7360,6 +7585,7 @@ private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_ty
 private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
 private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
 private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
+private const val STATE_PENDING_PDF_IMPORT_FLOW_ID = "state/pending_pdf_import_flow_id"
 private const val STATE_PENDING_EXPORT_FLOW_ID = "state/pending_export_flow_id"
 private const val STATE_PENDING_EXPORT_FILE_NAME = "state/pending_export_file_name"
 private const val STATE_PENDING_IMAGE_CARD_REQUEST = "state/pending_image_card_request"
@@ -7387,6 +7613,10 @@ private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
 private const val FLOW_LABELS_INTERACTION_MAX_DURATION_MS = 20_000L
 private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
+private const val PDF_PAGE_IMAGE_BASE_SCALE = 2f
+private const val PDF_PAGE_IMAGE_MAX_DIMENSION_PX = 2200
+private const val LARGE_PDF_PAGE_WARNING_THRESHOLD = 100
+private const val PDF_OCR_SAVE_BATCH_SIZE = 10
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
 private const val MAX_HANDWRITING_BRUSH_SIZE_DP = 12f
 private const val DEFAULT_HANDWRITING_BRUSH_SIZE_DP = 3.5f
