@@ -4285,7 +4285,7 @@ class MainActivity : AppCompatActivity() {
                     id = nextCardId++,
                     title = getString(R.string.pdf_card_page_title, displayName, rendered.pageNumber),
                     snippet = "",
-                    image = CardImage(Uri.fromFile(rendered.file), "image/png", ownedByApp = true),
+                    image = CardImage(Uri.fromFile(rendered.file), PDF_PAGE_IMAGE_MIME_TYPE, ownedByApp = true),
                     updatedAt = now
                 )
             }
@@ -4312,7 +4312,7 @@ class MainActivity : AppCompatActivity() {
                     val progressTotal = max(expectedPageCount, total)
                     onProgress(0, progressTotal)
                     (0 until total).map { pageIndex ->
-                        val file = File(filesDir, "pdf_page_${System.currentTimeMillis()}_${UUID.randomUUID()}.png")
+                        val file = File(filesDir, "pdf_page_${System.currentTimeMillis()}_${UUID.randomUUID()}.jpg")
                         createdFiles += file
                         renderer.openPage(pageIndex).use { page ->
                             renderPdfPageToFile(page, file)
@@ -4339,7 +4339,7 @@ class MainActivity : AppCompatActivity() {
             bitmap.eraseColor(Color.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             FileOutputStream(file).use { out ->
-                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                if (!bitmap.compress(PDF_PAGE_IMAGE_COMPRESS_FORMAT, PDF_PAGE_IMAGE_JPEG_QUALITY, out)) {
                     error("Unable to encode PDF page")
                 }
                 out.flush()
@@ -7615,6 +7615,9 @@ private const val DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR = 0
 private const val DEFAULT_CARD_FONT_SIZE_SP = 18f
 private const val PDF_PAGE_IMAGE_BASE_SCALE = 2f
 private const val PDF_PAGE_IMAGE_MAX_DIMENSION_PX = 2200
+private const val PDF_PAGE_IMAGE_JPEG_QUALITY = 88
+private const val PDF_PAGE_IMAGE_MIME_TYPE = "image/jpeg"
+private val PDF_PAGE_IMAGE_COMPRESS_FORMAT = Bitmap.CompressFormat.JPEG
 private const val LARGE_PDF_PAGE_WARNING_THRESHOLD = 100
 private const val PDF_OCR_SAVE_BATCH_SIZE = 10
 private const val MIN_HANDWRITING_BRUSH_SIZE_DP = 0.75f
