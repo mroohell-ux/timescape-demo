@@ -41,6 +41,7 @@ import android.view.DragEvent
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -474,6 +475,31 @@ class MainActivity : AppCompatActivity() {
                 importNotes(uri)
             } else snackbar(getString(R.string.snackbar_import_cancelled))
         }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (handleCardArrowKey(delta = 1)) return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun handleCardArrowKey(delta: Int): Boolean {
+        if (delta == 0 || !::flowPager.isInitialized) return false
+        if (isKeyboardNavigationSuppressed()) return false
+        val flow = currentFlow() ?: return false
+        val controller = flowControllers[flow.id] ?: return false
+        return controller.moveSelectionBy(delta, flow)
+    }
+
+    private fun isKeyboardNavigationSuppressed(): Boolean {
+        if (::drawerLayout.isInitialized && drawerLayout.isDrawerOpen(GravityCompat.START)) return true
+        val focused = currentFocus
+        if (focused?.onCheckIsTextEditor() == true) return true
+        return searchView?.hasFocus() == true || searchResultsSearchView?.hasFocus() == true
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -7334,6 +7360,20 @@ class MainActivity : AppCompatActivity() {
             flow.lastViewedCardIndex = resolved
             flow.lastViewedCardId = adapter.getItemAt(resolved)?.id
             flow.lastViewedCardFocused = layoutManager.hasSelection()
+        }
+
+        fun moveSelectionBy(delta: Int, flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val current = layoutManager.currentSelectionIndex()
+                ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            val target = (current + delta).coerceIn(0, adapter.itemCount - 1)
+            recycler.stopScroll()
+            layoutManager.restoreState(target, focus = true)
+            recycler.post { layoutManager.restoreState(target, focus = true) }
+            captureState(flow)
+            updateCardCounter(target)
+            maybeAutoPlayCenteredVideo(target)
+            return true
         }
 
         fun dispose() {
