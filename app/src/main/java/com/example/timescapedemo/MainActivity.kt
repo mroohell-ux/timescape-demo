@@ -481,6 +481,8 @@ class MainActivity : AppCompatActivity() {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
                 KeyEvent.KEYCODE_DPAD_DOWN -> if (handleCardArrowKey(delta = 1)) return true
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (handleFlowArrowKey(delta = -1)) return true
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (handleFlowArrowKey(delta = 1)) return true
             }
         }
         return super.dispatchKeyEvent(event)
@@ -492,6 +494,19 @@ class MainActivity : AppCompatActivity() {
         val flow = currentFlow() ?: return false
         val controller = flowControllers[flow.id] ?: return false
         return controller.moveSelectionBy(delta, flow)
+    }
+
+    private fun handleFlowArrowKey(delta: Int): Boolean {
+        if (delta == 0 || !::flowPager.isInitialized || flows.isEmpty()) return false
+        if (isKeyboardNavigationSuppressed()) return false
+        val current = flowPager.currentItem.coerceIn(0, flows.lastIndex)
+        val target = (current + delta).coerceIn(0, flows.lastIndex)
+        captureVisibleFlowStates()
+        if (target != current) {
+            flowPager.setCurrentItem(target, true)
+            showFlowLabelsWidgetTemporarily()
+        }
+        return true
     }
 
     private fun isKeyboardNavigationSuppressed(): Boolean {
@@ -7265,6 +7280,7 @@ class MainActivity : AppCompatActivity() {
         private var activeQuery: String = ""
         private var indicatorTotal: Int = 0
         private var lastHapticSelection: Int? = null
+        private var pendingKeyboardSelectionIndex: Int? = null
         private val selectionCallback: (Int?) -> Unit = { index ->
             vibrateOnCardChange(index)
             updateCardCounter(index)
@@ -7274,7 +7290,16 @@ class MainActivity : AppCompatActivity() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     layoutManager.settleScrollIfNeeded {
-                        owningFlow()?.let { ensureMainCard(it) }
+                        val pendingTarget = pendingKeyboardSelectionIndex
+                        pendingKeyboardSelectionIndex = null
+                        val flow = owningFlow()
+                        if (pendingTarget != null && flow != null && adapter.itemCount > 0) {
+                            val target = pendingTarget.coerceIn(0, adapter.itemCount - 1)
+                            layoutManager.restoreState(target, focus = true)
+                            captureState(flow)
+                        } else {
+                            flow?.let { ensureMainCard(it) }
+                        }
                     }
                 }
             }
@@ -7364,13 +7389,21 @@ class MainActivity : AppCompatActivity() {
 
         fun moveSelectionBy(delta: Int, flow: CardFlow): Boolean {
             if (adapter.itemCount == 0) return false
-            val current = layoutManager.currentSelectionIndex()
+            val current = pendingKeyboardSelectionIndex
+                ?: layoutManager.currentSelectionIndex()
                 ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
             val target = (current + delta).coerceIn(0, adapter.itemCount - 1)
             recycler.stopScroll()
-            layoutManager.restoreState(target, focus = true)
-            recycler.post { layoutManager.restoreState(target, focus = true) }
-            captureState(flow)
+            pendingKeyboardSelectionIndex = target
+            val scrollDelta = layoutManager.offsetTo(target)
+            layoutManager.clearFocus(immediate = true)
+            if (abs(scrollDelta) > 1) {
+                recycler.smoothScrollBy(0, scrollDelta)
+            } else {
+                pendingKeyboardSelectionIndex = null
+                layoutManager.restoreState(target, focus = true)
+                captureState(flow)
+            }
             updateCardCounter(target)
             maybeAutoPlayCenteredVideo(target)
             return true
