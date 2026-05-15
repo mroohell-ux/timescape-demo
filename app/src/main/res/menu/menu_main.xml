@@ -39,6 +39,12 @@
                 app:showAsAction="never"/>
 
             <item
+                android:id="@+id/action_add_pdf_card"
+                android:title="@string/menu_add_pdf_card"
+                android:icon="@drawable/ic_folder_open"
+                app:showAsAction="never"/>
+
+            <item
                 android:id="@+id/action_add_handwriting"
                 android:title="@string/menu_add_handwriting"
                 android:icon="@drawable/ic_handwriting"
