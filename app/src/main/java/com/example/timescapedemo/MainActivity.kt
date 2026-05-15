@@ -3490,10 +3490,19 @@ class MainActivity : AppCompatActivity() {
         val handwritingView = dialogView.findViewById<HandwritingView>(R.id.handwritingView)
         val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
+        val redoButton = dialogView.findViewById<MaterialButton>(R.id.buttonRedoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
+        val saveButton = dialogView.findViewById<MaterialButton>(R.id.buttonSaveHandwriting)
+        val doneButton = dialogView.findViewById<MaterialButton>(R.id.buttonDoneHandwriting)
+        val cancelButton = dialogView.findViewById<MaterialButton>(R.id.buttonCancelHandwriting)
         val toolToggleGroup = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.groupPaletteToggles)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
+        val textButton = dialogView.findViewById<MaterialButton>(R.id.buttonTextTool)
+        val imageButton = dialogView.findViewById<MaterialButton>(R.id.buttonImageTool)
+        val selectButton = dialogView.findViewById<MaterialButton>(R.id.buttonSelectTool)
+        val shapeButton = dialogView.findViewById<MaterialButton>(R.id.buttonShapeTool)
+        val highlighterButton = dialogView.findViewById<MaterialButton>(R.id.buttonHighlighterTool)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         canvasButton.isGone = extras.disableCanvasPalette
         val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
@@ -3679,20 +3688,14 @@ class MainActivity : AppCompatActivity() {
 
         fun applyCanvasCardDisplaySize(contentWidthPx: Int, contentHeightPx: Int) {
             if (contentWidthPx <= 0 || contentHeightPx <= 0) return
-            val widthScale = maxCanvasWidth.toFloat() / contentWidthPx.toFloat()
-            val heightScale = maxCanvasHeight.toFloat() / contentHeightPx.toFloat()
-            val scale = listOf(widthScale, heightScale)
-                .filter { it.isFinite() && it > 0f }
-                .minOrNull()
-                ?: 1f
-            val targetWidth = (contentWidthPx * scale).roundToInt().coerceAtLeast(1)
-            val targetHeight = (contentHeightPx * scale).roundToInt().coerceAtLeast(1)
+            // The redesigned handwriting editor is a viewport into an auto-expanding
+            // virtual notebook, so the visible paper fills available space instead
+            // of resizing to a fixed exported page ratio.
             handwritingCard.updateLayoutParams<ViewGroup.LayoutParams> {
-                if (width != targetWidth) {
-                    width = targetWidth
-                }
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = 0
             }
-            handwritingView.minimumHeight = targetHeight
+            handwritingView.minimumHeight = (420 * resources.displayMetrics.density).roundToInt()
         }
 
         fun createChoiceChip(
@@ -3840,6 +3843,7 @@ class MainActivity : AppCompatActivity() {
 
         fun updateHistoryButtons() {
             undoButton.isEnabled = handwritingView.canUndo()
+            redoButton?.isEnabled = handwritingView.canRedo()
             clearButton.isEnabled = handwritingView.hasDrawing()
         }
 
@@ -3864,6 +3868,9 @@ class MainActivity : AppCompatActivity() {
 
         undoButton.setOnClickListener {
             if (handwritingView.undo()) updateHistoryButtons()
+        }
+        redoButton?.setOnClickListener {
+            if (handwritingView.redo()) updateHistoryButtons()
         }
         clearButton.setOnClickListener {
             handwritingView.clear()
@@ -3955,7 +3962,10 @@ class MainActivity : AppCompatActivity() {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
                 HandwritingPaletteSection.CANVAS -> if (extras.disableCanvasPalette) View.NO_ID else canvasButton.id
-                else -> View.NO_ID
+                else -> when (selectedDrawingTool) {
+                    HandwritingDrawingTool.PEN -> penButton.id
+                    HandwritingDrawingTool.ERASER -> eraserButton.id
+                }
             }
             if (checkedId == View.NO_ID) {
                 toolToggleGroup.clearChecked()
@@ -4097,6 +4107,32 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        textButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.TEXT)
+            toolToggleGroup.check(textButton.id)
+        }
+        imageButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.IMAGE)
+            toolToggleGroup.check(imageButton.id)
+        }
+        selectButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.SELECT)
+            toolToggleGroup.check(selectButton.id)
+        }
+        shapeButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.SHAPE)
+            toolToggleGroup.check(shapeButton.id)
+        }
+        highlighterButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.HIGHLIGHTER)
+            toolToggleGroup.check(highlighterButton.id)
+        }
+
         if (!extras.disableCanvasPalette) {
             canvasButton.setOnClickListener { view ->
                 if (visiblePalette == HandwritingPaletteSection.CANVAS) {
@@ -4109,10 +4145,7 @@ class MainActivity : AppCompatActivity() {
         updateHistoryButtons()
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle(getString(titleRes))
             .setView(dialogView)
-            .setPositiveButton(R.string.dialog_save, null)
-            .setNegativeButton(android.R.string.cancel, null)
             .apply {
                 if (onDelete != null) {
                     setNeutralButton(R.string.dialog_delete, null)
@@ -4120,23 +4153,18 @@ class MainActivity : AppCompatActivity() {
             }
             .create()
 
-        dialog.setOnShowListener {
-            dialog.window?.setLayout(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
-                val exportBitmap = handwritingView.exportBitmap()
+        fun saveHandwritingAndDismiss() {
+            val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
-                    return@setOnClickListener
+                    return
                 }
                 val options = HandwritingOptions(
                     backgroundColor = selectedPaperColor.color,
                     brushColor = selectedBrushColor.color,
                     brushSizeDp = selectedBrushSize,
-                    canvasWidth = selectedSize.width,
-                    canvasHeight = selectedSize.height,
+                    canvasWidth = exportBitmap.width,
+                    canvasHeight = exportBitmap.height,
                     format = selectedFormat,
                     paperStyle = selectedPaperStyle,
                     penType = selectedPenType,
@@ -4148,18 +4176,28 @@ class MainActivity : AppCompatActivity() {
                     exportBitmap.recycle()
                     persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
                     dialog.dismiss()
-                    return@setOnClickListener
+                    return
                 }
                 val saved = saveHandwritingContent(exportBitmap, options, existing)
                 exportBitmap.recycle()
                 if (saved == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
-                    return@setOnClickListener
+                    return
                 }
                 persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
                 onSave(saved)
                 dialog.dismiss()
-            }
+        }
+
+        dialog.setOnShowListener {
+            dialog.window?.setLayout(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            saveButton?.setOnClickListener { saveHandwritingAndDismiss() }
+            doneButton?.setOnClickListener { saveHandwritingAndDismiss() }
+            cancelButton?.setOnClickListener { dialog.dismiss() }
             onDelete?.let { deleteCallback ->
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
                     deleteCallback()

@@ -1,124 +1,363 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:overScrollMode="never">
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_handwriting_editor">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
         android:orientation="vertical"
-        android:paddingStart="16dp"
-        android:paddingTop="16dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="16dp">
+        android:paddingStart="18dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="18dp"
+        android:paddingBottom="18dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonCancelHandwriting"
+                style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center_vertical|start"
+                    android:contentDescription="@android:string/cancel"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                app:backgroundTint="#00FFFFFF"
+                app:icon="@drawable/ic_handwriting_back"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="#43384F" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:fontFamily="sans"
+                android:letterSpacing="0.01"
+                android:text="Untitled note"
+                android:textColor="#372D44"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonDoneHandwriting"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_gravity="center_vertical|end"
+                android:fontFamily="sans"
+                android:text="Done"
+                android:textAllCaps="false"
+                android:textColor="#8E6AD8"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                app:backgroundTint="#00FFFFFF" />
+        </FrameLayout>
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardHandwritingCanvas"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            app:cardCornerRadius="20dp"
-            app:cardElevation="2dp"
-            app:cardUseCompatPadding="false">
+            android:layout_height="0dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="108dp"
+            android:layout_weight="1"
+            app:cardBackgroundColor="#FFF8EA"
+            app:cardCornerRadius="28dp"
+            app:cardElevation="10dp"
+            app:cardUseCompatPadding="true"
+            app:strokeWidth="0dp">
 
-            <com.example.timescapedemo.HandwritingView
-                android:id="@+id/handwritingView"
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@android:color/transparent"
-                android:contentDescription="@string/handwriting_card_content_desc"
-                android:importantForAccessibility="no"
-                android:minHeight="220dp" />
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_handwriting_paper_card"
+                android:clipToOutline="true">
+
+                <com.example.timescapedemo.HandwritingView
+                    android:id="@+id/handwritingView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/handwriting_card_content_desc"
+                    android:importantForAccessibility="no"
+                    android:minHeight="420dp" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="90dp"
+                    android:layout_gravity="bottom"
+                    android:background="@drawable/bg_handwriting_bottom_fade"
+                    android:clickable="false"
+                    android:focusable="false" />
+            </FrameLayout>
         </com.google.android.material.card.MaterialCardView>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:gravity="end"
-            android:orientation="horizontal"
-            android:paddingHorizontal="4dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonUndoHandwriting"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="@string/handwriting_action_undo"
-                app:icon="@drawable/ic_handwriting_undo"
-                app:iconPadding="8dp"
-                app:iconGravity="textStart" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonClearHandwriting"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/handwriting_action_clear"
-                app:icon="@drawable/ic_handwriting_clear"
-                app:iconPadding="8dp"
-                app:iconGravity="textStart" />
-        </LinearLayout>
-
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/groupPaletteToggles"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center"
-            app:selectionRequired="false"
-            app:singleSelection="true">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonPenOptions"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:layout_weight="1"
-                android:contentDescription="@string/handwriting_tool_pen"
-                android:checkable="true"
-                android:minWidth="0dp"
-                android:paddingHorizontal="12dp"
-                app:icon="@drawable/ic_handwriting_pen"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp"
-                app:iconSize="24dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonEraserOptions"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:layout_weight="1"
-                android:contentDescription="@string/handwriting_tool_eraser"
-                android:checkable="true"
-                android:minWidth="0dp"
-                android:paddingHorizontal="12dp"
-                app:icon="@drawable/ic_handwriting_eraser"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp"
-                app:iconSize="24dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonCanvasOptions"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:contentDescription="@string/handwriting_tool_canvas"
-                android:checkable="true"
-                android:minWidth="0dp"
-                android:paddingHorizontal="12dp"
-                app:icon="@drawable/ic_handwriting_paper"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp"
-                app:iconSize="24dp" />
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-
     </LinearLayout>
-</ScrollView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardFloatingHandwritingToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="82dp"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="22dp"
+        android:layout_marginEnd="22dp"
+        android:layout_marginBottom="76dp"
+        app:cardBackgroundColor="#EFFFFFFF"
+        app:cardCornerRadius="32dp"
+        app:cardElevation="12dp"
+        app:strokeColor="#40FFFFFF"
+        app:strokeWidth="1dp">
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="false"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/groupPaletteToggles"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:paddingHorizontal="10dp"
+                app:selectionRequired="false"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonPenOptions"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="@string/handwriting_tool_pen"
+                    android:text="Pen"
+                    android:textAllCaps="false"
+                    android:textColor="#8E6AD8"
+                    android:textSize="10sp"
+                    app:backgroundTint="#1F8E6AD8"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_handwriting_pen"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#8E6AD8" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonEraserOptions"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="@string/handwriting_tool_eraser"
+                    android:text="Eraser"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_handwriting_eraser"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonTextTool"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="Text tool"
+                    android:text="Text"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_note_text"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonImageTool"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="Image tool"
+                    android:text="Image"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_note_image"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonSelectTool"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="Select tool"
+                    android:text="Select"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_note_select"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonShapeTool"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="Shape tool"
+                    android:text="Shape"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_note_shape"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonHighlighterTool"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="Highlighter tool"
+                    android:text="Highlight"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_note_highlighter"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonUndoHandwriting"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:contentDescription="Undo"
+                    android:text="Undo"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_handwriting_undo"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonRedoHandwriting"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:contentDescription="Redo"
+                    android:text="Redo"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_handwriting_redo"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonCanvasOptions"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="74dp"
+                    android:layout_height="match_parent"
+                    android:checkable="true"
+                    android:contentDescription="@string/handwriting_tool_canvas"
+                    android:text="More"
+                    android:textAllCaps="false"
+                    android:textColor="#7F7787"
+                    android:textSize="10sp"
+                    app:backgroundTint="#00FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:icon="@drawable/ic_handwriting_paper"
+                    app:iconGravity="top"
+                    app:iconPadding="3dp"
+                    app:iconSize="23dp"
+                    app:iconTint="#7F7787" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+        </HorizontalScrollView>
+    </com.google.android.material.card.MaterialCardView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_gravity="bottom"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:paddingBottom="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonClearHandwriting"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="Clear"
+            android:textAllCaps="false"
+            android:textColor="#8A808F"
+            app:backgroundTint="#00FFFFFF" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonSaveHandwriting"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="132dp"
+            android:layout_height="48dp"
+            android:text="Save"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            app:backgroundTint="#8E6AD8"
+            app:cornerRadius="24dp" />
+    </LinearLayout>
+</FrameLayout>
