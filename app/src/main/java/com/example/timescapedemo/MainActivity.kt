@@ -3498,6 +3498,11 @@ class MainActivity : AppCompatActivity() {
         val toolToggleGroup = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.groupPaletteToggles)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
+        val textButton = dialogView.findViewById<MaterialButton>(R.id.buttonTextTool)
+        val imageButton = dialogView.findViewById<MaterialButton>(R.id.buttonImageTool)
+        val selectButton = dialogView.findViewById<MaterialButton>(R.id.buttonSelectTool)
+        val shapeButton = dialogView.findViewById<MaterialButton>(R.id.buttonShapeTool)
+        val highlighterButton = dialogView.findViewById<MaterialButton>(R.id.buttonHighlighterTool)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         canvasButton.isGone = extras.disableCanvasPalette
         val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
@@ -3957,7 +3962,10 @@ class MainActivity : AppCompatActivity() {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
                 HandwritingPaletteSection.CANVAS -> if (extras.disableCanvasPalette) View.NO_ID else canvasButton.id
-                else -> View.NO_ID
+                else -> when (selectedDrawingTool) {
+                    HandwritingDrawingTool.PEN -> penButton.id
+                    HandwritingDrawingTool.ERASER -> eraserButton.id
+                }
             }
             if (checkedId == View.NO_ID) {
                 toolToggleGroup.clearChecked()
@@ -4097,6 +4105,32 @@ class MainActivity : AppCompatActivity() {
             } else {
                 showPalette(HandwritingPaletteSection.ERASER, view)
             }
+        }
+
+        textButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.TEXT)
+            toolToggleGroup.check(textButton.id)
+        }
+        imageButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.IMAGE)
+            toolToggleGroup.check(imageButton.id)
+        }
+        selectButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.SELECT)
+            toolToggleGroup.check(selectButton.id)
+        }
+        shapeButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.SHAPE)
+            toolToggleGroup.check(shapeButton.id)
+        }
+        highlighterButton.setOnClickListener {
+            visiblePalette = null
+            handwritingView.setEditorTool(NoteEditorTool.HIGHLIGHTER)
+            toolToggleGroup.check(highlighterButton.id)
         }
 
         if (!extras.disableCanvasPalette) {

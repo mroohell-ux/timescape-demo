@@ -107,3 +107,129 @@ data class HandwritingContent(
         HandwritingSide(path, options)
     }
 }
+
+enum class NoteEditorTool {
+    PEN,
+    ERASER,
+    TEXT,
+    IMAGE,
+    SELECT,
+    LASSO,
+    SHAPE,
+    HIGHLIGHTER,
+    COLOR,
+    WIDTH,
+    MORE,
+    PAN
+}
+
+enum class NoteElementType {
+    HANDWRITING_STROKE,
+    TEXT_BLOCK,
+    IMAGE_BLOCK,
+    SHAPE_BLOCK,
+    CHECKBOX_BLOCK,
+    STICKER_BLOCK,
+    AUDIO_BLOCK,
+    LINK_BLOCK
+}
+
+data class NoteViewportState(
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val zoom: Float = 1f
+)
+
+data class NoteDocument(
+    val id: String,
+    val title: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val canvasWidth: Float,
+    val canvasHeight: Float,
+    val viewportState: NoteViewportState,
+    val elements: List<NoteDocumentElement>
+)
+
+sealed class NoteDocumentElement {
+    abstract val id: String
+    abstract val type: NoteElementType
+    abstract val x: Float
+    abstract val y: Float
+    abstract val width: Float
+    abstract val height: Float
+    abstract val rotation: Float
+    abstract val scale: Float
+    abstract val zIndex: Int
+}
+
+data class StrokeElement(
+    override val id: String,
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    override val rotation: Float = 0f,
+    override val scale: Float = 1f,
+    override val zIndex: Int = 0,
+    val points: List<StrokePointElement>,
+    @ColorInt val color: Int,
+    val strokeWidth: Float,
+    val toolType: NoteEditorTool
+) : NoteDocumentElement() {
+    override val type: NoteElementType = NoteElementType.HANDWRITING_STROKE
+}
+
+data class StrokePointElement(
+    val x: Float,
+    val y: Float,
+    val pressure: Float,
+    val timestamp: Long
+)
+
+data class TextElement(
+    override val id: String,
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    override val rotation: Float = 0f,
+    override val scale: Float = 1f,
+    override val zIndex: Int = 0,
+    val text: String,
+    val textSizeSp: Float,
+    @ColorInt val color: Int,
+    val bold: Boolean = false,
+    val italic: Boolean = false
+) : NoteDocumentElement() {
+    override val type: NoteElementType = NoteElementType.TEXT_BLOCK
+}
+
+data class ImageElement(
+    override val id: String,
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    override val rotation: Float = 0f,
+    override val scale: Float = 1f,
+    override val zIndex: Int = 0,
+    val imagePath: String?
+) : NoteDocumentElement() {
+    override val type: NoteElementType = NoteElementType.IMAGE_BLOCK
+}
+
+data class ShapeElement(
+    override val id: String,
+    override val x: Float,
+    override val y: Float,
+    override val width: Float,
+    override val height: Float,
+    override val rotation: Float = 0f,
+    override val scale: Float = 1f,
+    override val zIndex: Int = 0,
+    @ColorInt val strokeColor: Int,
+    @ColorInt val fillColor: Int
+) : NoteDocumentElement() {
+    override val type: NoteElementType = NoteElementType.SHAPE_BLOCK
+}

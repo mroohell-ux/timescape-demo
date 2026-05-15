@@ -11,8 +11,6 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PathDashPathEffect
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
@@ -26,9 +24,11 @@ import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import java.util.UUID
 
 class HandwritingView @JvmOverloads constructor(
     context: Context,
@@ -37,21 +37,68 @@ class HandwritingView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private data class StrokePoint(val x: Float, val y: Float, val pressure: Float, val time: Long)
-    private data class HandwritingStroke(
+    private data class NoteStroke(
+        val id: String = UUID.randomUUID().toString(),
         val points: MutableList<StrokePoint>,
         @ColorInt val color: Int,
         val width: Float,
-        val tool: HandwritingDrawingTool,
+        val tool: NoteEditorTool,
         val penType: HandwritingPenType,
         val eraserType: HandwritingEraserType,
         val bounds: RectF = RectF()
     )
 
+    private enum class BlockType { TEXT, IMAGE, SHAPE }
+
+    private data class CanvasBlock(
+        val id: String = UUID.randomUUID().toString(),
+        val type: BlockType,
+        var x: Float,
+        var y: Float,
+        var width: Float,
+        var height: Float,
+        var rotation: Float = 0f,
+        var scale: Float = 1f,
+        var zIndex: Int = 0,
+        var text: String = "",
+        var imagePath: String? = null,
+        @ColorInt var strokeColor: Int = Color.parseColor("#8E6AD8"),
+        @ColorInt var fillColor: Int = ColorUtils.setAlphaComponent(Color.parseColor("#BFA7F2"), 46)
+    ) {
+        fun bounds(): RectF = RectF(x, y, x + width * scale, y + height * scale)
+    }
+
+    private sealed class NoteCommand {
+        abstract fun undo(view: HandwritingView)
+        abstract fun redo(view: HandwritingView)
+    }
+
+    private data class AddStrokeCommand(val stroke: NoteStroke) : NoteCommand() {
+        override fun undo(view: HandwritingView) { view.strokes.remove(stroke) }
+        override fun redo(view: HandwritingView) { view.strokes.add(stroke) }
+    }
+
+    private data class RemoveStrokeCommand(val stroke: NoteStroke, val index: Int) : NoteCommand() {
+        override fun undo(view: HandwritingView) { view.strokes.add(index.coerceIn(0, view.strokes.size), stroke) }
+        override fun redo(view: HandwritingView) { view.strokes.remove(stroke) }
+    }
+
+    private data class AddBlockCommand(val block: CanvasBlock) : NoteCommand() {
+        override fun undo(view: HandwritingView) { view.blocks.remove(block); if (view.selectedBlockId == block.id) view.selectedBlockId = null }
+        override fun redo(view: HandwritingView) { view.blocks.add(block) }
+    }
+
+    private data class MoveBlockCommand(val blockId: String, val fromX: Float, val fromY: Float, val toX: Float, val toY: Float) : NoteCommand() {
+        override fun undo(view: HandwritingView) { view.findBlock(blockId)?.let { it.x = fromX; it.y = fromY } }
+        override fun redo(view: HandwritingView) { view.findBlock(blockId)?.let { it.x = toX; it.y = toY } }
+    }
+
     private val density = resources.displayMetrics.density
-    private val strokes = mutableListOf<HandwritingStroke>()
-    private val undoneStrokes = mutableListOf<HandwritingStroke>()
-    private var activeStroke: HandwritingStroke? = null
-    private var activePath = Path()
+    private val strokes = mutableListOf<NoteStroke>()
+    private val blocks = mutableListOf<CanvasBlock>()
+    private val undoStack = mutableListOf<NoteCommand>()
+    private val redoStack = mutableListOf<NoteCommand>()
+    private var activeStroke: NoteStroke? = null
 
     private var pendingBitmap: Bitmap? = null
     private var baseBitmap: Bitmap? = null
@@ -60,10 +107,23 @@ class HandwritingView @JvmOverloads constructor(
 
     private var lastTouchX = 0f
     private var lastTouchY = 0f
-    private var lastPanY = 0f
+    private var lastCanvasX = 0f
+    private var lastCanvasY = 0f
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var selectedBlockStartX = 0f
+    private var selectedBlockStartY = 0f
+    private var initialPinchDistance = 0f
+    private var initialPinchZoom = 1f
+    private var pinchFocusCanvasX = 0f
+    private var pinchFocusCanvasY = 0f
     private val touchTolerance = 3f * density
+    private var brushWidthPx = 6f * density
 
+    private var viewportOffsetX = 0f
     private var viewportOffsetY = 0f
+    private var zoom = 1f
+    private var virtualCanvasWidth = 0f
     private var virtualCanvasHeight = 0f
     private var exportWidth = 0
     private var exportHeight = 0
@@ -75,7 +135,9 @@ class HandwritingView @JvmOverloads constructor(
     private var penType: HandwritingPenType = HandwritingPenType.ROUND
     private var eraserType: HandwritingEraserType = HandwritingEraserType.ROUND
     private var drawingTool: HandwritingDrawingTool = PEN
-    private var isPanning = false
+    private var editorTool: NoteEditorTool = NoteEditorTool.PEN
+    private var selectedBlockId: String? = null
+    private var isDraggingSelectedBlock = false
     private var showExpansionHintUntil = 0L
 
     private var contentChangedListener: (() -> Unit)? = null
@@ -84,21 +146,13 @@ class HandwritingView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
-        strokeWidth = 6f * density
+        strokeWidth = brushWidthPx
     }
-    private val eraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val highlighterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
-        strokeCap = Paint.Cap.ROUND
-        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-        strokeWidth = 16f * density
-    }
-    private val eraserPreviewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeJoin = Paint.Join.ROUND
-        strokeCap = Paint.Cap.ROUND
-        strokeWidth = 16f * density
-        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.22f * 255).roundToInt())
+        strokeCap = Paint.Cap.SQUARE
+        strokeWidth = brushWidthPx * 2.2f
     }
     private val bitmapPaint = Paint(Paint.DITHER_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -111,6 +165,16 @@ class HandwritingView @JvmOverloads constructor(
         color = Color.parseColor("#8E6AD8")
         textAlign = Paint.Align.CENTER
         textSize = 12f * density
+    }
+    private val blockPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#3C314A")
+        textSize = 18f * density
+    }
+    private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * density
+        color = Color.parseColor("#8E6AD8")
     }
 
     init {
@@ -127,17 +191,16 @@ class HandwritingView @JvmOverloads constructor(
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         val ratio = targetAspectRatio
         if (ratio != null && ratio > 0f) {
-            val width = measuredWidth
-            if (width > 0) setMeasuredDimension(width, resolveSize((width * ratio).roundToInt(), heightMeasureSpec))
+            val measuredW = measuredWidth
+            if (measuredW > 0) setMeasuredDimension(measuredW, resolveSize((measuredW * ratio).roundToInt(), heightMeasureSpec))
         }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w <= 0 || h <= 0) return
-        if (virtualCanvasHeight <= 0f) {
-            virtualCanvasHeight = max(h.toFloat() * 1.35f, (exportHeight.takeIf { it > 0 } ?: h).toFloat())
-        }
+        if (virtualCanvasWidth <= 0f) virtualCanvasWidth = max(w.toFloat() * 1.35f, (exportWidth.takeIf { it > 0 } ?: w).toFloat())
+        if (virtualCanvasHeight <= 0f) virtualCanvasHeight = max(h.toFloat() * 1.8f, (exportHeight.takeIf { it > 0 } ?: h).toFloat())
         pendingBitmap?.let { bitmap ->
             installBaseBitmap(bitmap)
             pendingBitmap = null
@@ -149,10 +212,11 @@ class HandwritingView @JvmOverloads constructor(
         super.onDraw(canvas)
         canvas.drawColor(backgroundColorInt)
         drawPaperTexture(canvas)
-        drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f, viewportOffsetY)
+        drawPaperGuides(canvas, width.toFloat(), height.toFloat(), zoom, viewportOffsetX, viewportOffsetY)
         drawBaseBitmap(canvas)
         drawVisibleStrokes(canvas)
-        activeStroke?.let { canvas.drawPath(activePath, paintForStroke(it, preview = true)) }
+        activeStroke?.let { canvas.drawPath(buildScreenPath(it, viewportOffsetX, viewportOffsetY, zoom), paintForStroke(it, zoom)) }
+        drawBlocks(canvas)
         drawInfiniteCanvasCues(canvas)
     }
 
@@ -161,35 +225,21 @@ class HandwritingView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 disallowParentIntercept(true)
-                isPanning = false
-                lastPanY = event.y
-                touchStart(event.x.coerceIn(0f, width.toFloat()), event.y.coerceIn(0f, height.toFloat()), event)
+                handleDown(event)
             }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                isPanning = true
-                activeStroke = null
-                activePath.reset()
-                lastPanY = averagePointerY(event)
-            }
+            MotionEvent.ACTION_POINTER_DOWN -> startPinch(event)
             MotionEvent.ACTION_MOVE -> {
-                if (isPanning || event.pointerCount > 1) {
-                    val panY = averagePointerY(event)
-                    scrollByVirtual(lastPanY - panY)
-                    lastPanY = panY
-                } else {
-                    touchMove(event.x.coerceIn(0f, width.toFloat()), event.y.coerceIn(0f, height.toFloat()), event)
-                }
+                if (event.pointerCount > 1) updatePinch(event) else handleMove(event)
             }
-            MotionEvent.ACTION_POINTER_UP -> lastPanY = averagePointerY(event)
+            MotionEvent.ACTION_POINTER_UP -> startPinch(event)
             MotionEvent.ACTION_UP -> {
-                if (!isPanning) touchUp()
-                isPanning = false
+                handleUp(event)
                 disallowParentIntercept(false)
                 performClick()
             }
             MotionEvent.ACTION_CANCEL -> {
-                touchCancel()
-                isPanning = false
+                activeStroke = null
+                isDraggingSelectedBlock = false
                 disallowParentIntercept(false)
             }
         }
@@ -205,46 +255,52 @@ class HandwritingView @JvmOverloads constructor(
     fun clear() {
         val hadAnyContent = hasDrawing()
         activeStroke = null
-        activePath.reset()
         strokes.clear()
-        undoneStrokes.clear()
+        blocks.clear()
+        undoStack.clear()
+        redoStack.clear()
+        selectedBlockId = null
         baseBitmap?.recycle()
         baseBitmap = null
         pendingBitmap?.recycle()
         pendingBitmap = null
         hasBaseImage = false
+        viewportOffsetX = 0f
         viewportOffsetY = 0f
+        zoom = 1f
         if (hadAnyContent) notifyContentChanged()
         invalidate()
     }
 
     fun undo(): Boolean {
-        activeStroke?.let { stroke ->
+        activeStroke?.let {
             activeStroke = null
-            activePath.reset()
-            undoneStrokes.add(stroke)
             invalidate()
             notifyContentChanged()
             return true
         }
-        if (strokes.isEmpty()) return false
-        undoneStrokes.add(strokes.removeAt(strokes.lastIndex))
+        if (undoStack.isEmpty()) return false
+        val command = undoStack.removeAt(undoStack.lastIndex)
+        command.undo(this)
+        redoStack.add(command)
         invalidate()
         notifyContentChanged()
         return true
     }
 
     fun redo(): Boolean {
-        if (undoneStrokes.isEmpty()) return false
-        strokes.add(undoneStrokes.removeAt(undoneStrokes.lastIndex))
+        if (redoStack.isEmpty()) return false
+        val command = redoStack.removeAt(redoStack.lastIndex)
+        command.redo(this)
+        undoStack.add(command)
         invalidate()
         notifyContentChanged()
         return true
     }
 
-    fun canUndo(): Boolean = activeStroke != null || strokes.isNotEmpty()
-    fun canRedo(): Boolean = undoneStrokes.isNotEmpty()
-    fun hasDrawing(): Boolean = hasBaseImage || strokes.isNotEmpty() || activeStroke != null
+    fun canUndo(): Boolean = activeStroke != null || undoStack.isNotEmpty()
+    fun canRedo(): Boolean = redoStack.isNotEmpty()
+    fun hasDrawing(): Boolean = hasBaseImage || strokes.isNotEmpty() || blocks.isNotEmpty() || activeStroke != null
 
     fun setBitmap(bitmap: Bitmap?) {
         pendingBitmap?.recycle()
@@ -263,21 +319,23 @@ class HandwritingView @JvmOverloads constructor(
     fun exportBitmap(): Bitmap? {
         commitActiveStroke()
         val targetW = exportWidth.takeIf { it > 0 } ?: width.takeIf { it > 0 } ?: return null
-        val visibleRatioHeight = height.takeIf { it > 0 } ?: targetW
-        val targetH = min(
-            (virtualCanvasHeight * (targetW.toFloat() / width.coerceAtLeast(1).toFloat())).roundToInt().coerceAtLeast(visibleRatioHeight),
-            4096
-        )
+        val contentBounds = contentBounds().takeIf { !it.isEmpty } ?: visibleCanvasRect()
+        val aspectHeight = (contentBounds.height() * (targetW.toFloat() / contentBounds.width().coerceAtLeast(1f))).roundToInt()
+        val minTargetH = (height.takeIf { it > 0 } ?: targetW).coerceAtMost(4096)
+        val targetH = aspectHeight.coerceIn(minTargetH, 4096)
         val result = Bitmap.createBitmap(targetW, targetH, Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
-        val scale = targetW.toFloat() / width.coerceAtLeast(1).toFloat()
-        canvas.save()
-        canvas.scale(scale, scale)
-        drawPaperGuides(canvas, width.toFloat(), targetH / scale, 1f, 0f)
-        baseBitmap?.let { bitmap -> canvas.drawBitmap(bitmap, null, baseDrawRect, bitmapPaint) }
-        drawStrokes(canvas, 0f, targetH / scale, targetH / scale)
-        canvas.restore()
+        val exportZoom = min(targetW / contentBounds.width().coerceAtLeast(1f), targetH / contentBounds.height().coerceAtLeast(1f))
+        drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), exportZoom, contentBounds.left, contentBounds.top)
+        baseBitmap?.let { bitmap ->
+            if (RectF.intersects(baseDrawRect, contentBounds)) {
+                val dest = canvasToExportRect(baseDrawRect, contentBounds, exportZoom)
+                canvas.drawBitmap(bitmap, Rect(0, 0, bitmap.width, bitmap.height), dest, bitmapPaint)
+            }
+        }
+        drawStrokes(canvas, contentBounds, exportZoom, contentBounds.left, contentBounds.top)
+        drawBlocks(canvas, contentBounds.left, contentBounds.top, exportZoom)
         return result
     }
 
@@ -293,22 +351,27 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun getPaperStyle(): HandwritingPaperStyle = paperStyle
-
-    fun setBrushColor(@ColorInt color: Int) { brushColorInt = color; updatePenColor() }
+    fun setBrushColor(@ColorInt color: Int) { brushColorInt = color; updatePenColor(); invalidate() }
     fun setBrushSizeDp(sizeDp: Float) = setBrushSizePx(sizeDp * density)
-    fun setBrushSizePx(sizePx: Float) { penPaint.strokeWidth = sizePx; applyPenType(penType); updatePenColor(); invalidate() }
-    fun getBrushSizeDp(): Float = penPaint.strokeWidth / density
+    fun setBrushSizePx(sizePx: Float) { brushWidthPx = sizePx; penPaint.strokeWidth = brushWidthPx; highlighterPaint.strokeWidth = brushWidthPx * 2.2f; applyPenType(penType); updatePenColor(); invalidate() }
+    fun getBrushSizeDp(): Float = brushWidthPx / density
     fun setPenType(type: HandwritingPenType) { penType = type; applyPenType(type); updatePenColor(); invalidate() }
     fun getPenType(): HandwritingPenType = penType
-    fun setEraserSizeDp(sizeDp: Float) { eraserPaint.strokeWidth = sizeDp * density; eraserPreviewPaint.strokeWidth = eraserPaint.strokeWidth; invalidate() }
-    fun getEraserSizeDp(): Float = eraserPaint.strokeWidth / density
+    fun setEraserSizeDp(sizeDp: Float) { eraserWidthPx = sizeDp * density; invalidate() }
+    fun getEraserSizeDp(): Float = eraserWidthPx / density
     fun setEraserType(type: HandwritingEraserType) { eraserType = type; applyEraserType(type); invalidate() }
     fun getEraserType(): HandwritingEraserType = eraserType
 
     fun setDrawingTool(tool: HandwritingDrawingTool) {
-        if (drawingTool == tool) return
-        commitActiveStroke()
         drawingTool = tool
+        setEditorTool(if (tool == ERASER) NoteEditorTool.ERASER else NoteEditorTool.PEN)
+    }
+
+    fun setEditorTool(tool: NoteEditorTool) {
+        commitActiveStroke()
+        editorTool = tool
+        drawingTool = if (tool == NoteEditorTool.ERASER) ERASER else PEN
+        selectedBlockId = selectedBlockId.takeIf { tool == NoteEditorTool.SELECT }
         invalidate()
     }
 
@@ -317,12 +380,53 @@ class HandwritingView @JvmOverloads constructor(
         exportWidth = widthPx
         exportHeight = heightPx
         targetAspectRatio = null
+        virtualCanvasWidth = max(virtualCanvasWidth, widthPx.toFloat())
         virtualCanvasHeight = max(virtualCanvasHeight, heightPx.toFloat())
         requestLayout()
         invalidate()
     }
 
     fun setOnContentChangedListener(listener: (() -> Unit)?) { contentChangedListener = listener }
+
+    fun currentDocumentSnapshot(title: String = "Handwriting"): NoteDocument {
+        val now = System.currentTimeMillis()
+        val elements = mutableListOf<NoteDocumentElement>()
+        strokes.forEachIndexed { index, stroke ->
+            elements.add(
+                StrokeElement(
+                    id = stroke.id,
+                    x = stroke.bounds.left,
+                    y = stroke.bounds.top,
+                    width = stroke.bounds.width(),
+                    height = stroke.bounds.height(),
+                    zIndex = index,
+                    points = stroke.points.map { StrokePointElement(it.x, it.y, it.pressure, it.time) },
+                    color = stroke.color,
+                    strokeWidth = stroke.width,
+                    toolType = stroke.tool
+                )
+            )
+        }
+        blocks.forEach { block ->
+            elements.add(
+                when (block.type) {
+                    BlockType.TEXT -> TextElement(block.id, block.x, block.y, block.width, block.height, block.rotation, block.scale, block.zIndex, block.text, 18f, Color.parseColor("#3C314A"))
+                    BlockType.IMAGE -> ImageElement(block.id, block.x, block.y, block.width, block.height, block.rotation, block.scale, block.zIndex, block.imagePath)
+                    BlockType.SHAPE -> ShapeElement(block.id, block.x, block.y, block.width, block.height, block.rotation, block.scale, block.zIndex, block.strokeColor, block.fillColor)
+                }
+            )
+        }
+        return NoteDocument(
+            id = "handwriting-${hashCode()}",
+            title = title,
+            createdAt = now,
+            updatedAt = now,
+            canvasWidth = virtualCanvasWidth,
+            canvasHeight = virtualCanvasHeight,
+            viewportState = NoteViewportState(viewportOffsetX, viewportOffsetY, zoom),
+            elements = elements.sortedBy { it.zIndex }
+        )
+    }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
@@ -332,65 +436,199 @@ class HandwritingView @JvmOverloads constructor(
         pendingBitmap = null
     }
 
-    private fun touchStart(x: Float, y: Float, event: MotionEvent) {
-        // Convert viewport touch coordinates into virtual notebook coordinates so
-        // strokes remain fixed on the infinite canvas while the viewport scrolls.
-        val canvasY = y + viewportOffsetY
-        val widthPx = if (drawingTool == PEN) penPaint.strokeWidth else eraserPaint.strokeWidth
-        val color = if (drawingTool == PEN) penPaint.color else Color.TRANSPARENT
-        activeStroke = HandwritingStroke(
-            points = mutableListOf(StrokePoint(x, canvasY, event.getPressure(0), event.eventTime)),
-            color = color,
-            width = widthPx,
-            tool = drawingTool,
-            penType = penType,
-            eraserType = eraserType
-        ).also { it.bounds.set(x, canvasY, x, canvasY) }
-        activePath.reset()
-        activePath.moveTo(x, y)
+    private var eraserWidthPx = 18f * density
+
+    private fun handleDown(event: MotionEvent) {
+        val x = event.x.coerceIn(0f, width.toFloat())
+        val y = event.y.coerceIn(0f, height.toFloat())
+        val canvasX = screenToCanvasX(x)
+        val canvasY = screenToCanvasY(y)
         lastTouchX = x
         lastTouchY = y
-        maybeExpandFor(canvasY)
-    }
-
-    private fun touchMove(x: Float, y: Float, event: MotionEvent) {
-        val stroke = activeStroke ?: return
-        val dx = abs(x - lastTouchX)
-        val dy = abs(y - lastTouchY)
-        if (dx >= touchTolerance || dy >= touchTolerance) {
-            activePath.quadTo(lastTouchX, lastTouchY, (x + lastTouchX) / 2f, (y + lastTouchY) / 2f)
-            val canvasY = y + viewportOffsetY
-            stroke.points.add(StrokePoint(x, canvasY, event.getPressure(0), event.eventTime))
-            stroke.bounds.union(x, canvasY)
-            lastTouchX = x
-            lastTouchY = y
-            maybeExpandFor(canvasY)
+        lastCanvasX = canvasX
+        lastCanvasY = canvasY
+        when (editorTool) {
+            NoteEditorTool.PEN, NoteEditorTool.HIGHLIGHTER -> startStroke(canvasX, canvasY, event)
+            NoteEditorTool.ERASER -> eraseStrokeAt(canvasX, canvasY)
+            NoteEditorTool.TEXT -> addTextBlock(canvasX, canvasY)
+            NoteEditorTool.IMAGE -> addImageBlock(canvasX, canvasY)
+            NoteEditorTool.SHAPE -> addShapeBlock(canvasX, canvasY)
+            NoteEditorTool.SELECT -> startSelection(canvasX, canvasY)
+            NoteEditorTool.PAN, NoteEditorTool.MORE, NoteEditorTool.COLOR, NoteEditorTool.WIDTH, NoteEditorTool.LASSO -> startSelection(canvasX, canvasY)
         }
     }
 
-    private fun touchUp() {
-        activeStroke?.let { stroke ->
-            val canvasY = lastTouchY + viewportOffsetY
-            stroke.points.add(StrokePoint(lastTouchX, canvasY, 1f, System.currentTimeMillis()))
-            activePath.lineTo(lastTouchX, lastTouchY)
+    private fun handleMove(event: MotionEvent) {
+        val x = event.x.coerceIn(0f, width.toFloat())
+        val y = event.y.coerceIn(0f, height.toFloat())
+        val canvasX = screenToCanvasX(x)
+        val canvasY = screenToCanvasY(y)
+        when (editorTool) {
+            NoteEditorTool.PEN, NoteEditorTool.HIGHLIGHTER -> moveStroke(canvasX, canvasY, event)
+            NoteEditorTool.ERASER -> eraseStrokeAt(canvasX, canvasY)
+            NoteEditorTool.SELECT, NoteEditorTool.MORE, NoteEditorTool.COLOR, NoteEditorTool.WIDTH, NoteEditorTool.LASSO -> dragSelection(canvasX, canvasY)
+            NoteEditorTool.PAN -> panByScreen(lastTouchX - x, lastTouchY - y)
+            else -> Unit
         }
-        commitActiveStroke()
+        lastTouchX = x
+        lastTouchY = y
+        lastCanvasX = canvasX
+        lastCanvasY = canvasY
     }
 
-    private fun touchCancel() {
+    private fun handleUp(event: MotionEvent) {
+        when (editorTool) {
+            NoteEditorTool.PEN, NoteEditorTool.HIGHLIGHTER -> commitActiveStroke()
+            NoteEditorTool.SELECT, NoteEditorTool.MORE, NoteEditorTool.COLOR, NoteEditorTool.WIDTH, NoteEditorTool.LASSO -> endSelectionDrag()
+            else -> Unit
+        }
+        isDraggingSelectedBlock = false
+    }
+
+    private fun startPinch(event: MotionEvent) {
+        if (event.pointerCount < 2) return
         activeStroke = null
-        activePath.reset()
+        initialPinchDistance = pointerDistance(event)
+        initialPinchZoom = zoom
+        val focusX = averagePointerX(event)
+        val focusY = averagePointerY(event)
+        pinchFocusCanvasX = screenToCanvasX(focusX)
+        pinchFocusCanvasY = screenToCanvasY(focusY)
+    }
+
+    private fun updatePinch(event: MotionEvent) {
+        if (event.pointerCount < 2 || initialPinchDistance <= 0f) return
+        val focusX = averagePointerX(event)
+        val focusY = averagePointerY(event)
+        val newZoom = (initialPinchZoom * (pointerDistance(event) / initialPinchDistance)).coerceIn(0.45f, 2.8f)
+        zoom = newZoom
+        viewportOffsetX = pinchFocusCanvasX - focusX / zoom
+        viewportOffsetY = pinchFocusCanvasY - focusY / zoom
+        clampViewport()
+    }
+
+    private fun startStroke(canvasX: Float, canvasY: Float, event: MotionEvent) {
+        val strokeTool = editorTool
+        val widthPx = if (strokeTool == NoteEditorTool.HIGHLIGHTER) brushWidthPx * 2.2f else brushWidthPx
+        val color = if (strokeTool == NoteEditorTool.HIGHLIGHTER) {
+            ColorUtils.setAlphaComponent(ColorUtils.blendARGB(brushColorInt, Color.YELLOW, 0.18f), 105)
+        } else {
+            penPaint.color
+        }
+        activeStroke = NoteStroke(
+            points = mutableListOf(StrokePoint(canvasX, canvasY, event.getPressure(0), event.eventTime)),
+            color = color,
+            width = widthPx,
+            tool = strokeTool,
+            penType = penType,
+            eraserType = eraserType
+        ).also { it.bounds.set(canvasX, canvasY, canvasX, canvasY) }
+        maybeExpandFor(canvasX, canvasY)
+    }
+
+    private fun moveStroke(canvasX: Float, canvasY: Float, event: MotionEvent) {
+        val stroke = activeStroke ?: return
+        val dx = abs(canvasX - lastCanvasX)
+        val dy = abs(canvasY - lastCanvasY)
+        if (dx >= touchTolerance / zoom || dy >= touchTolerance / zoom) {
+            stroke.points.add(StrokePoint(canvasX, canvasY, event.getPressure(0), event.eventTime))
+            stroke.bounds.union(canvasX, canvasY)
+            maybeExpandFor(canvasX, canvasY)
+        }
     }
 
     private fun commitActiveStroke() {
         val stroke = activeStroke ?: return
-        if (stroke.points.isNotEmpty()) {
-            strokes.add(stroke)
-            undoneStrokes.clear()
-        }
         activeStroke = null
-        activePath.reset()
+        if (stroke.points.size < 2) {
+            stroke.points.add(StrokePoint(stroke.points.first().x + 0.01f, stroke.points.first().y + 0.01f, 1f, System.currentTimeMillis()))
+        }
+        strokes.add(stroke)
+        pushUndo(AddStrokeCommand(stroke))
         notifyContentChanged()
+    }
+
+    private fun eraseStrokeAt(canvasX: Float, canvasY: Float) {
+        val hitIndex = strokes.indexOfLast { stroke -> strokeHitTest(stroke, canvasX, canvasY, eraserWidthPx / zoom) }
+        if (hitIndex < 0) return
+        val removed = strokes.removeAt(hitIndex)
+        pushUndo(RemoveStrokeCommand(removed, hitIndex))
+        notifyContentChanged()
+    }
+
+    private fun addTextBlock(canvasX: Float, canvasY: Float) {
+        val block = CanvasBlock(
+            type = BlockType.TEXT,
+            x = canvasX,
+            y = canvasY,
+            width = 220f * density,
+            height = 72f * density,
+            zIndex = nextBlockZ(),
+            text = "Tap to edit memory…"
+        )
+        blocks.add(block)
+        selectedBlockId = block.id
+        pushUndo(AddBlockCommand(block))
+        notifyContentChanged()
+    }
+
+    private fun addImageBlock(canvasX: Float, canvasY: Float) {
+        val block = CanvasBlock(
+            type = BlockType.IMAGE,
+            x = canvasX,
+            y = canvasY,
+            width = 180f * density,
+            height = 130f * density,
+            zIndex = nextBlockZ(),
+            text = "Image"
+        )
+        blocks.add(block)
+        selectedBlockId = block.id
+        pushUndo(AddBlockCommand(block))
+        notifyContentChanged()
+    }
+
+    private fun addShapeBlock(canvasX: Float, canvasY: Float) {
+        val block = CanvasBlock(
+            type = BlockType.SHAPE,
+            x = canvasX,
+            y = canvasY,
+            width = 160f * density,
+            height = 96f * density,
+            zIndex = nextBlockZ()
+        )
+        blocks.add(block)
+        selectedBlockId = block.id
+        pushUndo(AddBlockCommand(block))
+        notifyContentChanged()
+    }
+
+    private fun startSelection(canvasX: Float, canvasY: Float) {
+        val block = blocks.sortedByDescending { it.zIndex }.firstOrNull { it.bounds().contains(canvasX, canvasY) }
+        selectedBlockId = block?.id
+        if (block != null) {
+            isDraggingSelectedBlock = true
+            dragStartX = canvasX
+            dragStartY = canvasY
+            selectedBlockStartX = block.x
+            selectedBlockStartY = block.y
+        }
+    }
+
+    private fun dragSelection(canvasX: Float, canvasY: Float) {
+        if (!isDraggingSelectedBlock) return
+        val block = selectedBlockId?.let { findBlock(it) } ?: return
+        block.x = selectedBlockStartX + (canvasX - dragStartX)
+        block.y = selectedBlockStartY + (canvasY - dragStartY)
+        maybeExpandFor(block.x + block.width, block.y + block.height)
+    }
+
+    private fun endSelectionDrag() {
+        val block = selectedBlockId?.let { findBlock(it) } ?: return
+        if (abs(block.x - selectedBlockStartX) > 0.5f || abs(block.y - selectedBlockStartY) > 0.5f) {
+            pushUndo(MoveBlockCommand(block.id, selectedBlockStartX, selectedBlockStartY, block.x, block.y))
+            notifyContentChanged()
+        }
     }
 
     private fun installBaseBitmap(bitmap: Bitmap) {
@@ -401,54 +639,122 @@ class HandwritingView @JvmOverloads constructor(
         val srcRatio = bitmap.width.toFloat() / bitmap.height.toFloat().coerceAtLeast(1f)
         val scaledHeight = destRect.width() / srcRatio
         baseDrawRect.set(destRect.left, destRect.top, destRect.right, min(scaledHeight, virtualCanvasHeight))
+        virtualCanvasWidth = max(virtualCanvasWidth, baseDrawRect.right)
         virtualCanvasHeight = max(virtualCanvasHeight, baseDrawRect.bottom)
         notifyContentChanged()
     }
 
     private fun drawBaseBitmap(canvas: Canvas) {
         val bitmap = baseBitmap ?: return
-        val visible = RectF(0f, viewportOffsetY, width.toFloat(), viewportOffsetY + height)
+        val visible = visibleCanvasRect()
         if (!RectF.intersects(baseDrawRect, visible)) return
-        val dest = RectF(baseDrawRect).apply { offset(0f, -viewportOffsetY) }
+        val dest = canvasToScreenRect(baseDrawRect)
         canvas.drawBitmap(bitmap, Rect(0, 0, bitmap.width, bitmap.height), dest, bitmapPaint)
     }
 
     private fun drawVisibleStrokes(canvas: Canvas) {
-        drawStrokes(canvas, viewportOffsetY, viewportOffsetY + height, height.toFloat())
+        drawStrokes(canvas, visibleCanvasRect(), zoom, viewportOffsetX, viewportOffsetY)
     }
 
-    private fun drawStrokes(canvas: Canvas, visibleTop: Float, visibleBottom: Float, layerHeight: Float) {
-        val checkpoint = canvas.saveLayer(0f, 0f, width.toFloat(), layerHeight, null)
+    private fun drawStrokes(canvas: Canvas, visible: RectF, scale: Float, offsetX: Float, offsetY: Float) {
         strokes.forEach { stroke ->
-            if (stroke.bounds.bottom + stroke.width < visibleTop || stroke.bounds.top - stroke.width > visibleBottom) return@forEach
-            val path = buildScreenPath(stroke, visibleTop)
-            canvas.drawPath(path, paintForStroke(stroke, preview = false))
+            if (stroke.bounds.right + stroke.width < visible.left || stroke.bounds.left - stroke.width > visible.right || stroke.bounds.bottom + stroke.width < visible.top || stroke.bounds.top - stroke.width > visible.bottom) return@forEach
+            canvas.drawPath(buildScreenPath(stroke, offsetX, offsetY, scale), paintForStroke(stroke, scale))
         }
-        canvas.restoreToCount(checkpoint)
     }
 
-    private fun buildScreenPath(stroke: HandwritingStroke, offsetY: Float): Path {
+    private fun buildScreenPath(stroke: NoteStroke, offsetX: Float, offsetY: Float, scale: Float): Path {
         val path = Path()
         val points = stroke.points
         if (points.isEmpty()) return path
-        // Convert virtual notebook coordinates back into viewport coordinates for rendering.
-        path.moveTo(points.first().x, points.first().y - offsetY)
+        path.moveTo((points.first().x - offsetX) * scale, (points.first().y - offsetY) * scale)
         for (i in 1 until points.size) {
             val previous = points[i - 1]
             val point = points[i]
-            path.quadTo(previous.x, previous.y - offsetY, (point.x + previous.x) / 2f, ((point.y + previous.y) / 2f) - offsetY)
+            path.quadTo(
+                (previous.x - offsetX) * scale,
+                (previous.y - offsetY) * scale,
+                (((point.x + previous.x) / 2f) - offsetX) * scale,
+                (((point.y + previous.y) / 2f) - offsetY) * scale
+            )
         }
         return path
     }
 
-    private fun paintForStroke(stroke: HandwritingStroke, preview: Boolean): Paint {
-        return if (stroke.tool == ERASER) {
-            if (preview) eraserPreviewPaint else eraserPaint
+    private fun paintForStroke(stroke: NoteStroke, scale: Float): Paint {
+        return if (stroke.tool == NoteEditorTool.HIGHLIGHTER) {
+            highlighterPaint.color = stroke.color
+            highlighterPaint.strokeWidth = stroke.width * scale
+            highlighterPaint
         } else {
             penPaint.color = stroke.color
-            penPaint.strokeWidth = stroke.width
+            penPaint.strokeWidth = stroke.width * scale
             applyPenType(stroke.penType)
             penPaint
+        }
+    }
+
+    private fun drawBlocks(canvas: Canvas) = drawBlocks(canvas, viewportOffsetX, viewportOffsetY, zoom)
+
+    private fun drawBlocks(canvas: Canvas, offsetX: Float, offsetY: Float, scale: Float) {
+        blocks.sortedBy { it.zIndex }.forEach { block ->
+            val screen = canvasToScreenRect(block.bounds(), offsetX, offsetY, scale)
+            if (!RectF.intersects(screen, RectF(0f, 0f, width.toFloat(), height.toFloat()))) return@forEach
+            when (block.type) {
+                BlockType.TEXT -> drawTextBlock(canvas, block, screen)
+                BlockType.IMAGE -> drawImageBlock(canvas, block, screen)
+                BlockType.SHAPE -> drawShapeBlock(canvas, block, screen)
+            }
+            if (block.id == selectedBlockId) drawSelection(canvas, screen)
+        }
+    }
+
+    private fun drawTextBlock(canvas: Canvas, block: CanvasBlock, screen: RectF) {
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.color = ColorUtils.setAlphaComponent(Color.WHITE, 205)
+        canvas.drawRoundRect(screen, 18f * density, 18f * density, blockPaint)
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = 1f * density
+        blockPaint.color = ColorUtils.setAlphaComponent(Color.parseColor("#8E6AD8"), 55)
+        canvas.drawRoundRect(screen, 18f * density, 18f * density, blockPaint)
+        textPaint.textSize = 18f * density * zoom
+        textPaint.color = Color.parseColor("#3C314A")
+        canvas.drawText(block.text, screen.left + 14f * density * zoom, screen.top + 32f * density * zoom, textPaint)
+    }
+
+    private fun drawImageBlock(canvas: Canvas, block: CanvasBlock, screen: RectF) {
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.shader = LinearGradient(screen.left, screen.top, screen.right, screen.bottom, Color.parseColor("#F8ECFF"), Color.parseColor("#FFF2D8"), Shader.TileMode.CLAMP)
+        canvas.drawRoundRect(screen, 22f * density, 22f * density, blockPaint)
+        blockPaint.shader = null
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = 1.2f * density
+        blockPaint.color = ColorUtils.setAlphaComponent(Color.parseColor("#8E6AD8"), 100)
+        canvas.drawRoundRect(screen, 22f * density, 22f * density, blockPaint)
+        textPaint.textSize = 14f * density * zoom
+        textPaint.color = ColorUtils.setAlphaComponent(Color.parseColor("#7358B7"), 190)
+        canvas.drawText("Image block", screen.left + 18f * density * zoom, screen.centerY(), textPaint)
+    }
+
+    private fun drawShapeBlock(canvas: Canvas, block: CanvasBlock, screen: RectF) {
+        blockPaint.shader = null
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.color = block.fillColor
+        canvas.drawRoundRect(screen, 20f * density, 20f * density, blockPaint)
+        blockPaint.style = Paint.Style.STROKE
+        blockPaint.strokeWidth = 2f * density
+        blockPaint.color = block.strokeColor
+        canvas.drawRoundRect(screen, 20f * density, 20f * density, blockPaint)
+    }
+
+    private fun drawSelection(canvas: Canvas, screen: RectF) {
+        canvas.drawRoundRect(screen, 18f * density, 18f * density, selectionPaint)
+        blockPaint.style = Paint.Style.FILL
+        blockPaint.color = Color.WHITE
+        val r = 5f * density
+        listOf(screen.left to screen.top, screen.right to screen.top, screen.left to screen.bottom, screen.right to screen.bottom).forEach { (x, y) ->
+            canvas.drawCircle(x, y, r, blockPaint)
+            canvas.drawCircle(x, y, r, selectionPaint)
         }
     }
 
@@ -457,8 +763,8 @@ class HandwritingView @JvmOverloads constructor(
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), texturePaint)
         texturePaint.shader = null
         texturePaint.color = ColorUtils.setAlphaComponent(Color.parseColor("#B9855D"), 10)
-        val step = 18f * density
-        var y = (-(viewportOffsetY % step))
+        val step = 18f * density * zoom
+        var y = (-(viewportOffsetY * zoom) % step)
         while (y < height) {
             canvas.drawPoint((width * 0.18f + y * 3f) % width, y, texturePaint)
             canvas.drawPoint((width * 0.73f + y * 1.7f) % width, y + step / 2f, texturePaint)
@@ -466,64 +772,127 @@ class HandwritingView @JvmOverloads constructor(
         }
     }
 
-    private fun drawPaperGuides(canvas: Canvas, width: Float, height: Float, scale: Float, offsetY: Float) {
+    private fun drawPaperGuides(canvas: Canvas, screenWidth: Float, screenHeight: Float, scale: Float, offsetX: Float, offsetY: Float) {
         val spacing = 31f * density * scale
         val stroke = max(1f, 0.75f * density * scale)
         guidePaint.strokeWidth = stroke
         marginPaint.strokeWidth = max(1f, 1f * density * scale)
         if (paperStyle == HandwritingPaperStyle.GRID) {
-            var x = spacing
-            while (x < width) { canvas.drawLine(x, 0f, x, height, guidePaint); x += spacing }
+            val firstColumnIndex = floor(offsetX * scale / spacing).toInt() - 1
+            var x = firstColumnIndex * spacing - (offsetX * scale % spacing)
+            while (x < screenWidth) {
+                if (x >= 0f) canvas.drawLine(x, 0f, x, screenHeight, guidePaint)
+                x += spacing
+            }
         }
-        val firstLineIndex = floor(offsetY / spacing).toInt() - 1
-        var y = firstLineIndex * spacing - offsetY
-        while (y < height) {
-            if (y >= 0f) canvas.drawLine(0f, y, width, y, guidePaint)
+        val firstLineIndex = floor(offsetY * scale / spacing).toInt() - 1
+        var y = firstLineIndex * spacing - (offsetY * scale % spacing)
+        while (y < screenHeight) {
+            if (y >= 0f) canvas.drawLine(0f, y, screenWidth, y, guidePaint)
             y += spacing
         }
-        val marginX = 42f * density * scale
-        canvas.drawLine(marginX, 0f, marginX, height, marginPaint)
+        val marginX = (42f * density - offsetX) * scale
+        canvas.drawLine(marginX, 0f, marginX, screenHeight, marginPaint)
     }
 
     private fun drawInfiniteCanvasCues(canvas: Canvas) {
         fadePaint.shader = LinearGradient(0f, height - 96f * density, 0f, height.toFloat(), Color.TRANSPARENT, backgroundColorInt, Shader.TileMode.CLAMP)
         canvas.drawRect(0f, height - 96f * density, width.toFloat(), height.toFloat(), fadePaint)
         fadePaint.shader = null
-
-        val trackHeight = height * 0.72f
-        val trackTop = height * 0.12f
+        val trackHeight = height * 0.68f
+        val trackTop = height * 0.14f
         val trackRight = width - 10f * density
         val trackWidth = 3f * density
         canvas.drawRoundRect(trackRight, trackTop, trackRight + trackWidth, trackTop + trackHeight, trackWidth, trackWidth, minimapTrackPaint)
-        val viewportRatio = (height / virtualCanvasHeight.coerceAtLeast(height.toFloat())).coerceIn(0.12f, 1f)
+        val viewportRatio = ((height / zoom) / virtualCanvasHeight.coerceAtLeast(height / zoom)).coerceIn(0.10f, 1f)
         val thumbHeight = trackHeight * viewportRatio
-        val scrollable = (virtualCanvasHeight - height).coerceAtLeast(1f)
+        val scrollable = (virtualCanvasHeight - height / zoom).coerceAtLeast(1f)
         val thumbTop = trackTop + (trackHeight - thumbHeight) * (viewportOffsetY / scrollable).coerceIn(0f, 1f)
-        canvas.drawRoundRect(trackRight - 1f * density, thumbTop, trackRight + trackWidth + 1f * density, thumbTop + thumbHeight, 4f * density, 4f * density, minimapThumbPaint)
-
-        val shouldHint = System.currentTimeMillis() < showExpansionHintUntil || viewportOffsetY + height > virtualCanvasHeight - 360f * density
-        if (shouldHint) {
-            hintPaint.alpha = 170
-            canvas.drawText("More space appears automatically ↓", width / 2f, height - 26f * density, hintPaint)
-            hintPaint.alpha = 255
-        }
+        canvas.drawRoundRect(trackRight - density, thumbTop, trackRight + trackWidth + density, thumbTop + thumbHeight, 4f * density, 4f * density, minimapThumbPaint)
+        hintPaint.alpha = 176
+        canvas.drawText("${(zoom * 100).roundToInt()}% · two fingers pan/zoom", width / 2f, 24f * density, hintPaint)
+        val shouldHint = System.currentTimeMillis() < showExpansionHintUntil || viewportOffsetY + height / zoom > virtualCanvasHeight - 360f * density
+        if (shouldHint) canvas.drawText("More space appears automatically ↓", width / 2f, height - 26f * density, hintPaint)
+        hintPaint.alpha = 255
     }
 
-    private fun scrollByVirtual(deltaY: Float) {
-        viewportOffsetY += deltaY
+    private fun pushUndo(command: NoteCommand) {
+        undoStack.add(command)
+        redoStack.clear()
+        invalidate()
+    }
+
+    private fun panByScreen(deltaScreenX: Float, deltaScreenY: Float) {
+        viewportOffsetX += deltaScreenX / zoom
+        viewportOffsetY += deltaScreenY / zoom
         clampViewport()
     }
 
     private fun clampViewport() {
-        viewportOffsetY = viewportOffsetY.coerceIn(0f, (virtualCanvasHeight - height).coerceAtLeast(0f))
+        viewportOffsetX = viewportOffsetX.coerceIn(0f, (virtualCanvasWidth - width / zoom).coerceAtLeast(0f))
+        viewportOffsetY = viewportOffsetY.coerceIn(0f, (virtualCanvasHeight - height / zoom).coerceAtLeast(0f))
     }
 
-    private fun maybeExpandFor(canvasY: Float) {
+    private fun maybeExpandFor(canvasX: Float, canvasY: Float) {
         val threshold = 240f * density
+        var expanded = false
+        if (canvasX > virtualCanvasWidth - threshold) {
+            virtualCanvasWidth += 720f * density
+            expanded = true
+        }
         if (canvasY > virtualCanvasHeight - threshold) {
             virtualCanvasHeight += 960f * density
-            showExpansionHintUntil = System.currentTimeMillis() + 2200L
+            expanded = true
         }
+        if (expanded) showExpansionHintUntil = System.currentTimeMillis() + 2200L
+    }
+
+    private fun visibleCanvasRect(): RectF = RectF(viewportOffsetX, viewportOffsetY, viewportOffsetX + width / zoom, viewportOffsetY + height / zoom)
+
+    private fun contentBounds(): RectF {
+        val bounds = RectF()
+        if (hasBaseImage) bounds.union(baseDrawRect)
+        strokes.forEach { bounds.union(it.bounds) }
+        blocks.forEach { bounds.union(it.bounds()) }
+        if (bounds.isEmpty) bounds.set(visibleCanvasRect()) else bounds.inset(-48f * density, -48f * density)
+        bounds.left = max(0f, bounds.left)
+        bounds.top = max(0f, bounds.top)
+        return bounds
+    }
+
+    private fun screenToCanvasX(screenX: Float): Float = (screenX / zoom) + viewportOffsetX
+    private fun screenToCanvasY(screenY: Float): Float = (screenY / zoom) + viewportOffsetY
+    private fun canvasToScreenRect(rect: RectF): RectF = canvasToScreenRect(rect, viewportOffsetX, viewportOffsetY, zoom)
+    private fun canvasToScreenRect(rect: RectF, offsetX: Float, offsetY: Float, scale: Float): RectF = RectF((rect.left - offsetX) * scale, (rect.top - offsetY) * scale, (rect.right - offsetX) * scale, (rect.bottom - offsetY) * scale)
+    private fun canvasToExportRect(rect: RectF, bounds: RectF, scale: Float): RectF = RectF((rect.left - bounds.left) * scale, (rect.top - bounds.top) * scale, (rect.right - bounds.left) * scale, (rect.bottom - bounds.top) * scale)
+
+    private fun strokeHitTest(stroke: NoteStroke, x: Float, y: Float, radius: Float): Boolean {
+        if (!RectF(stroke.bounds).apply { inset(-radius, -radius) }.contains(x, y)) return false
+        val points = stroke.points
+        if (points.size < 2) return false
+        for (i in 1 until points.size) {
+            if (distanceToSegment(x, y, points[i - 1].x, points[i - 1].y, points[i].x, points[i].y) <= radius + stroke.width / 2f) return true
+        }
+        return false
+    }
+
+    private fun distanceToSegment(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+        val dx = bx - ax
+        val dy = by - ay
+        if (dx == 0f && dy == 0f) return hypot(px - ax, py - ay)
+        val t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).coerceIn(0f, 1f)
+        return hypot(px - (ax + t * dx), py - (ay + t * dy))
+    }
+
+    private fun pointerDistance(event: MotionEvent): Float {
+        if (event.pointerCount < 2) return 0f
+        return hypot(event.getX(1) - event.getX(0), event.getY(1) - event.getY(0))
+    }
+
+    private fun averagePointerX(event: MotionEvent): Float {
+        var total = 0f
+        for (i in 0 until event.pointerCount) total += event.getX(i)
+        return total / event.pointerCount.coerceAtLeast(1)
     }
 
     private fun averagePointerY(event: MotionEvent): Float {
@@ -531,6 +900,9 @@ class HandwritingView @JvmOverloads constructor(
         for (i in 0 until event.pointerCount) total += event.getY(i)
         return total / event.pointerCount.coerceAtLeast(1)
     }
+
+    private fun findBlock(id: String): CanvasBlock? = blocks.firstOrNull { it.id == id }
+    private fun nextBlockZ(): Int = (blocks.map { it.zIndex }.maxOrNull() ?: 0) + 1
 
     private fun updatePenColor() {
         penPaint.color = when (penType) {
@@ -562,10 +934,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun applyEraserType(type: HandwritingEraserType) {
-        val cap = if (type == HandwritingEraserType.BLOCK) Paint.Cap.SQUARE else Paint.Cap.ROUND
-        val join = if (type == HandwritingEraserType.BLOCK) Paint.Join.BEVEL else Paint.Join.ROUND
-        eraserPaint.strokeCap = cap; eraserPaint.strokeJoin = join; eraserPaint.pathEffect = null
-        eraserPreviewPaint.strokeCap = cap; eraserPreviewPaint.strokeJoin = join; eraserPreviewPaint.pathEffect = null
+        eraserType = type
     }
 
     private fun updateGuidePaintColor() {
