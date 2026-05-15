@@ -11,6 +11,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PathDashPathEffect
+import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
@@ -570,6 +571,10 @@ class HandwritingView @JvmOverloads constructor(
     private fun updateGuidePaintColor() {
         guidePaint.color = ColorUtils.setAlphaComponent(Color.parseColor("#9EB2C0"), 78)
         marginPaint.color = ColorUtils.setAlphaComponent(Color.parseColor("#E79AA5"), 120)
+    }
+
+    private fun notifyContentChanged() {
+        contentChangedListener?.invoke()
     }
 
     private fun disallowParentIntercept(disallow: Boolean) {
