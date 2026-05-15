@@ -18,6 +18,7 @@ import android.graphics.Matrix
 import android.graphics.PathDashPathEffect
 import android.util.AttributeSet
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewParent
 import androidx.annotation.ColorInt
@@ -27,6 +28,7 @@ import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HandwritingView @JvmOverloads constructor(
@@ -35,7 +37,16 @@ class HandwritingView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
+    private data class StateSnapshot(
+        val bitmap: Bitmap,
+        val hasDrawing: Boolean,
+        val hasBase: Boolean,
+        val viewportScale: Float,
+        val viewportOffsetX: Float,
+        val viewportOffsetY: Float
+    )
+
+    private data class PointFCompat(val x: Float, val y: Float)
 
     private val density = resources.displayMetrics.density
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -97,13 +108,48 @@ class HandwritingView @JvmOverloads constructor(
     private var targetAspectRatio: Float? = null
     private var exportWidth = 0
     private var exportHeight = 0
+    private var viewportScale = 1f
+    private var viewportOffsetX = 0f
+    private var viewportOffsetY = 0f
+    private var activePointerId = MotionEvent.INVALID_POINTER_ID
+    private var isScaling = false
+    private var isMultiTouchGesture = false
+    private var lastGestureFocusX = 0f
+    private var lastGestureFocusY = 0f
 
     private var contentChangedListener: (() -> Unit)? = null
+    private var canvasSizeChangedListener: ((Int, Int) -> Unit)? = null
 
     private val maxHistory = 25
+    private val minViewportScale = 0.35f
+    private val maxViewportScale = 4f
+    private val edgeExpansionThreshold = 32f * density
+    private val canvasExpansionPadding = 256f * density
+    private val maxBitmapDimension = 8192
+    private val historyBitmapPixelBudget = 48_000_000L
+
+    private val scaleGestureDetector = ScaleGestureDetector(
+        context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                isScaling = true
+                commitCurrentPath()
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                zoomBy(detector.scaleFactor, detector.focusX, detector.focusY)
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                isScaling = false
+            }
+        }
+    )
 
     init {
-        setLayerType(LAYER_TYPE_HARDWARE, null)
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
         applyPenType(penType)
         updatePenColor()
         applyEraserType(eraserType)
@@ -135,30 +181,29 @@ class HandwritingView @JvmOverloads constructor(
             extraCanvas = null
             return
         }
-        val newBitmap = Bitmap.createBitmap(w, h, Config.ARGB_8888)
-        val newCanvas = Canvas(newBitmap)
-        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraBitmap?.recycle()
-        extraBitmap = newBitmap
-        extraCanvas = newCanvas
-
-        recycleHistory()
-        history.clear()
-        if (pendingBitmap != null) {
-            pendingBitmap?.let { bitmap ->
-                drawBitmapOntoCanvas(bitmap, recycleAfter = true)
+        if (extraBitmap == null) {
+            val initialWidth = exportWidth.takeIf { it > 0 } ?: w
+            val initialHeight = exportHeight.takeIf { it > 0 } ?: h
+            createBlankBitmap(initialWidth, initialHeight)
+            recycleHistory()
+            history.clear()
+            if (pendingBitmap != null) {
+                pendingBitmap?.let { bitmap ->
+                    drawBitmapOntoCanvas(bitmap, recycleAfter = true)
+                }
+                hasBaseImage = pendingHasBase
+                hasContent = pendingHasContent || pendingHasBase
+                pushCurrentState(hasContent, hasBaseImage)
+                pendingBitmap = null
+            } else {
+                hasBaseImage = false
+                hasContent = false
+                pushCurrentState(false, false)
             }
-            hasBaseImage = pendingHasBase
-            hasContent = pendingHasContent || pendingHasBase
-            pushCurrentState(hasContent, hasBaseImage)
-            pendingBitmap = null
-        } else {
-            hasBaseImage = false
-            hasContent = false
-            pushCurrentState(false, false)
+            pendingHasContent = false
+            pendingHasBase = false
         }
-        pendingHasContent = false
-        pendingHasBase = false
+        fitViewportIfNeeded()
         invalidate()
         notifyContentChanged()
     }
@@ -166,27 +211,69 @@ class HandwritingView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(backgroundColorInt)
-        drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
-        extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        canvas.drawPath(path, currentPreviewPaint())
+        val bitmap = extraBitmap
+        if (bitmap != null) {
+            canvas.save()
+            canvas.translate(viewportOffsetX, viewportOffsetY)
+            canvas.scale(viewportScale, viewportScale)
+            drawPaperGuides(canvas, bitmap.width.toFloat(), bitmap.height.toFloat(), 1f)
+            canvas.drawBitmap(bitmap, 0f, 0f, bitmapPaint)
+            canvas.drawPath(path, currentPreviewPaint())
+            canvas.restore()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val x = event.x.coerceIn(0f, width.toFloat())
-        val y = event.y.coerceIn(0f, height.toFloat())
+        disallowParentIntercept(true)
+        if (event.pointerCount > 1) {
+            isMultiTouchGesture = true
+        }
+        if (event.pointerCount > 1 || isScaling || isMultiTouchGesture) {
+            scaleGestureDetector.onTouchEvent(event)
+            handleTwoFingerPan(event)
+            if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN || event.actionMasked == MotionEvent.ACTION_DOWN) {
+                commitCurrentPath()
+            }
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                activePointerId = MotionEvent.INVALID_POINTER_ID
+                isScaling = false
+                isMultiTouchGesture = false
+                disallowParentIntercept(false)
+            }
+            invalidate()
+            return true
+        }
+
+        val contentPoint = screenToContent(event.x, event.y)
+        val x = contentPoint.x
+        val y = contentPoint.y
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                disallowParentIntercept(true)
+                activePointerId = event.getPointerId(0)
                 touchStart(x, y)
             }
-            MotionEvent.ACTION_MOVE -> touchMove(x, y)
+            MotionEvent.ACTION_MOVE -> {
+                val pointerIndex = event.findPointerIndex(activePointerId)
+                if (pointerIndex >= 0) {
+                    val point = screenToContent(event.getX(pointerIndex), event.getY(pointerIndex))
+                    touchMove(point.x, point.y)
+                }
+            }
             MotionEvent.ACTION_UP -> {
+                val point = screenToContent(event.x, event.y)
+                touchMove(point.x, point.y)
                 touchUp()
+                performClick()
+                activePointerId = MotionEvent.INVALID_POINTER_ID
                 disallowParentIntercept(false)
             }
             MotionEvent.ACTION_CANCEL -> {
                 touchCancel()
+                activePointerId = MotionEvent.INVALID_POINTER_ID
                 disallowParentIntercept(false)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                commitCurrentPath()
             }
         }
         invalidate()
@@ -231,8 +318,7 @@ class HandwritingView @JvmOverloads constructor(
         val current = history.removeLast()
         if (!current.bitmap.isRecycled) current.bitmap.recycle()
         val previous = history.last()
-        extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraCanvas?.drawBitmap(previous.bitmap, 0f, 0f, null)
+        restoreSnapshot(previous)
         hasBaseImage = previous.hasBase
         hasContent = previous.hasDrawing
         invalidate()
@@ -274,13 +360,12 @@ class HandwritingView @JvmOverloads constructor(
     fun exportBitmap(): Bitmap? {
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
-        val targetW = exportWidth.takeIf { it > 0 } ?: source.width
-        val targetH = exportHeight.takeIf { it > 0 } ?: source.height
+        val targetW = source.width
+        val targetH = source.height
         val result = Bitmap.createBitmap(targetW, targetH, Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
-        val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
-        drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
+        drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), 1f)
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
         return result
@@ -358,21 +443,29 @@ class HandwritingView @JvmOverloads constructor(
 
     fun setCanvasSize(widthPx: Int, heightPx: Int) {
         if (widthPx <= 0 || heightPx <= 0) return
-        if (widthPx == exportWidth && heightPx == exportHeight) return
+        val newWidth = widthPx.coerceAtMost(maxBitmapDimension)
+        val newHeight = heightPx.coerceAtMost(maxBitmapDimension)
+        if (newWidth == exportWidth && newHeight == exportHeight && extraBitmap?.width == newWidth && extraBitmap?.height == newHeight) return
         commitCurrentPath()
-        val snapshot = extraBitmap?.copy(Config.ARGB_8888, false)
-        pendingBitmap?.recycle()
-        pendingBitmap = snapshot
-        pendingHasContent = hasContent
-        pendingHasBase = hasBaseImage
-        exportWidth = widthPx
-        exportHeight = heightPx
-        targetAspectRatio = heightPx.toFloat() / widthPx.toFloat()
+        resizeBitmapToFit(newWidth, newHeight)
+        if (history.isEmpty()) {
+            pushCurrentState(hasContent, hasBaseImage)
+        }
+        targetAspectRatio = newHeight.toFloat() / newWidth.toFloat()
         requestLayout()
+    }
+
+    fun getCanvasContentSize(): Pair<Int, Int> {
+        val bitmap = extraBitmap
+        return if (bitmap != null) bitmap.width to bitmap.height else exportWidth to exportHeight
     }
 
     fun setOnContentChangedListener(listener: (() -> Unit)?) {
         contentChangedListener = listener
+    }
+
+    fun setOnCanvasSizeChangedListener(listener: ((Int, Int) -> Unit)?) {
+        canvasSizeChangedListener = listener
     }
 
     override fun onDetachedFromWindow() {
@@ -388,22 +481,25 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchStart(x: Float, y: Float) {
         path.reset()
-        path.moveTo(x, y)
-        currentX = x
-        currentY = y
+        val adjusted = ensurePointInsideExpandableCanvas(x, y)
+        path.moveTo(adjusted.x, adjusted.y)
+        currentX = adjusted.x
+        currentY = adjusted.y
     }
 
     private fun touchMove(x: Float, y: Float) {
-        val dx = abs(x - currentX)
-        val dy = abs(y - currentY)
+        val adjusted = ensurePointInsideExpandableCanvas(x, y)
+        val dx = abs(adjusted.x - currentX)
+        val dy = abs(adjusted.y - currentY)
         if (dx >= touchTolerance || dy >= touchTolerance) {
-            path.quadTo(currentX, currentY, (x + currentX) / 2, (y + currentY) / 2)
-            currentX = x
-            currentY = y
+            path.quadTo(currentX, currentY, (adjusted.x + currentX) / 2, (adjusted.y + currentY) / 2)
+            currentX = adjusted.x
+            currentY = adjusted.y
         }
     }
 
     private fun touchUp() {
+        ensurePointInsideExpandableCanvas(currentX, currentY)
         path.lineTo(currentX, currentY)
         commitCurrentPath()
     }
@@ -418,16 +514,223 @@ class HandwritingView @JvmOverloads constructor(
         canvas.drawPath(path, currentCommitPaint())
         path.reset()
         hasContent = true
+        extraBitmap?.let { bitmap ->
+            exportWidth = bitmap.width
+            exportHeight = bitmap.height
+        }
         if (addToHistory) {
             pushCurrentState(true, hasBaseImage)
         }
         notifyContentChanged()
     }
 
+    private fun createBlankBitmap(widthPx: Int, heightPx: Int) {
+        val safeWidth = widthPx.coerceIn(1, maxBitmapDimension)
+        val safeHeight = heightPx.coerceIn(1, maxBitmapDimension)
+        val newBitmap = Bitmap.createBitmap(safeWidth, safeHeight, Config.ARGB_8888)
+        val newCanvas = Canvas(newBitmap)
+        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        extraBitmap?.recycle()
+        extraBitmap = newBitmap
+        extraCanvas = newCanvas
+        exportWidth = safeWidth
+        exportHeight = safeHeight
+        targetAspectRatio = safeHeight.toFloat() / safeWidth.toFloat()
+        notifyCanvasSizeChanged()
+    }
+
+    private fun resizeBitmap(
+        widthPx: Int,
+        heightPx: Int,
+        offsetX: Int,
+        offsetY: Int,
+        addToHistory: Boolean
+    ): Boolean {
+        val oldBitmap = extraBitmap
+        val safeWidth = widthPx.coerceIn(1, maxBitmapDimension)
+        val safeHeight = heightPx.coerceIn(1, maxBitmapDimension)
+        if (oldBitmap != null && oldBitmap.width == safeWidth && oldBitmap.height == safeHeight && offsetX == 0 && offsetY == 0) {
+            return false
+        }
+        val newBitmap = Bitmap.createBitmap(safeWidth, safeHeight, Config.ARGB_8888)
+        val newCanvas = Canvas(newBitmap)
+        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        oldBitmap?.let { newCanvas.drawBitmap(it, offsetX.toFloat(), offsetY.toFloat(), null) }
+        if (offsetX != 0 || offsetY != 0) {
+            path.offset(offsetX.toFloat(), offsetY.toFloat())
+            currentX += offsetX
+            currentY += offsetY
+            viewportOffsetX -= offsetX * viewportScale
+            viewportOffsetY -= offsetY * viewportScale
+        }
+        if (oldBitmap != null && !oldBitmap.isRecycled) oldBitmap.recycle()
+        extraBitmap = newBitmap
+        extraCanvas = newCanvas
+        exportWidth = safeWidth
+        exportHeight = safeHeight
+        targetAspectRatio = safeHeight.toFloat() / safeWidth.toFloat()
+        clampViewport()
+        if (addToHistory) pushCurrentState(hasContent, hasBaseImage)
+        notifyCanvasSizeChanged()
+        return true
+    }
+
+    private fun resizeBitmapToFit(widthPx: Int, heightPx: Int) {
+        val oldBitmap = extraBitmap
+        val safeWidth = widthPx.coerceIn(1, maxBitmapDimension)
+        val safeHeight = heightPx.coerceIn(1, maxBitmapDimension)
+        val newBitmap = Bitmap.createBitmap(safeWidth, safeHeight, Config.ARGB_8888)
+        val newCanvas = Canvas(newBitmap)
+        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        oldBitmap?.let { source ->
+            val destRect = RectF(0f, 0f, safeWidth.toFloat(), safeHeight.toFloat())
+            val srcRect = Rect(0, 0, source.width, source.height)
+            val srcRatio = source.width.toFloat() / source.height.toFloat()
+            val destRatio = destRect.width() / destRect.height()
+            val drawRect = RectF()
+            if (srcRatio > destRatio) {
+                val scaledHeight = destRect.width() / srcRatio
+                val top = destRect.centerY() - scaledHeight / 2f
+                drawRect.set(destRect.left, top, destRect.right, top + scaledHeight)
+            } else {
+                val scaledWidth = destRect.height() * srcRatio
+                val left = destRect.centerX() - scaledWidth / 2f
+                drawRect.set(left, destRect.top, left + scaledWidth, destRect.bottom)
+            }
+            newCanvas.drawBitmap(source, srcRect, drawRect, null)
+        }
+        if (oldBitmap != null && !oldBitmap.isRecycled) oldBitmap.recycle()
+        extraBitmap = newBitmap
+        extraCanvas = newCanvas
+        exportWidth = safeWidth
+        exportHeight = safeHeight
+        targetAspectRatio = safeHeight.toFloat() / safeWidth.toFloat()
+        viewportScale = 1f
+        viewportOffsetX = 0f
+        viewportOffsetY = 0f
+        fitViewportIfNeeded()
+        notifyCanvasSizeChanged()
+    }
+
+    private fun restoreSnapshot(snapshot: StateSnapshot) {
+        val restored = snapshot.bitmap.copy(Config.ARGB_8888, false)
+        extraBitmap?.recycle()
+        extraBitmap = restored
+        extraCanvas = Canvas(restored)
+        exportWidth = restored.width
+        exportHeight = restored.height
+        targetAspectRatio = restored.height.toFloat() / restored.width.toFloat()
+        viewportScale = snapshot.viewportScale
+        viewportOffsetX = snapshot.viewportOffsetX
+        viewportOffsetY = snapshot.viewportOffsetY
+        clampViewport()
+        notifyCanvasSizeChanged()
+    }
+
+    private fun ensurePointInsideExpandableCanvas(x: Float, y: Float): PointFCompat {
+        val bitmap = extraBitmap ?: return PointFCompat(x, y)
+        var addLeft = 0
+        var addTop = 0
+        var addRight = 0
+        var addBottom = 0
+        if (x < edgeExpansionThreshold && bitmap.width < maxBitmapDimension) {
+            addLeft = min(canvasExpansionPadding.roundToInt(), maxBitmapDimension - bitmap.width)
+        }
+        if (y < edgeExpansionThreshold && bitmap.height < maxBitmapDimension) {
+            addTop = min(canvasExpansionPadding.roundToInt(), maxBitmapDimension - bitmap.height)
+        }
+        if (x > bitmap.width - edgeExpansionThreshold && bitmap.width < maxBitmapDimension) {
+            addRight = min(canvasExpansionPadding.roundToInt(), maxBitmapDimension - bitmap.width)
+        }
+        if (y > bitmap.height - edgeExpansionThreshold && bitmap.height < maxBitmapDimension) {
+            addBottom = min(canvasExpansionPadding.roundToInt(), maxBitmapDimension - bitmap.height)
+        }
+        if (addLeft != 0 || addTop != 0 || addRight != 0 || addBottom != 0) {
+            resizeBitmap(
+                widthPx = bitmap.width + addLeft + addRight,
+                heightPx = bitmap.height + addTop + addBottom,
+                offsetX = addLeft,
+                offsetY = addTop,
+                addToHistory = false
+            )
+            requestLayout()
+            return PointFCompat(x + addLeft, y + addTop)
+        }
+        return PointFCompat(x.coerceIn(0f, bitmap.width.toFloat()), y.coerceIn(0f, bitmap.height.toFloat()))
+    }
+
+    private fun screenToContent(x: Float, y: Float): PointFCompat = PointFCompat(
+        ((x - viewportOffsetX) / viewportScale),
+        ((y - viewportOffsetY) / viewportScale)
+    )
+
+    private fun zoomBy(scaleFactor: Float, focusX: Float, focusY: Float) {
+        val oldScale = viewportScale
+        val newScale = (viewportScale * scaleFactor).coerceIn(minViewportScale, maxViewportScale)
+        if (newScale == oldScale) return
+        val contentFocusX = (focusX - viewportOffsetX) / oldScale
+        val contentFocusY = (focusY - viewportOffsetY) / oldScale
+        viewportScale = newScale
+        viewportOffsetX = focusX - contentFocusX * newScale
+        viewportOffsetY = focusY - contentFocusY * newScale
+        clampViewport()
+    }
+
+    private fun handleTwoFingerPan(event: MotionEvent) {
+        if (event.pointerCount < 2) return
+        val focusX = (event.getX(0) + event.getX(1)) / 2f
+        val focusY = (event.getY(0) + event.getY(1)) / 2f
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_DOWN -> {
+                lastGestureFocusX = focusX
+                lastGestureFocusY = focusY
+            }
+            MotionEvent.ACTION_MOVE -> {
+                viewportOffsetX += focusX - lastGestureFocusX
+                viewportOffsetY += focusY - lastGestureFocusY
+                lastGestureFocusX = focusX
+                lastGestureFocusY = focusY
+                clampViewport()
+            }
+        }
+    }
+
+    private fun fitViewportIfNeeded() {
+        val bitmap = extraBitmap ?: return
+        if (width <= 0 || height <= 0) return
+        val fitScale = min(width.toFloat() / bitmap.width.toFloat(), height.toFloat() / bitmap.height.toFloat())
+            .takeIf { it.isFinite() && it > 0f }
+            ?: 1f
+        if (viewportScale == 1f && viewportOffsetX == 0f && viewportOffsetY == 0f) {
+            viewportScale = fitScale.coerceIn(minViewportScale, maxViewportScale)
+            viewportOffsetX = (width - bitmap.width * viewportScale) / 2f
+            viewportOffsetY = (height - bitmap.height * viewportScale) / 2f
+        }
+        clampViewport()
+    }
+
+    private fun clampViewport() {
+        val bitmap = extraBitmap ?: return
+        if (width <= 0 || height <= 0) return
+        val scaledWidth = bitmap.width * viewportScale
+        val scaledHeight = bitmap.height * viewportScale
+        viewportOffsetX = if (scaledWidth <= width) {
+            (width - scaledWidth) / 2f
+        } else {
+            viewportOffsetX.coerceIn(width - scaledWidth, 0f)
+        }
+        viewportOffsetY = if (scaledHeight <= height) {
+            (height - scaledHeight) / 2f
+        } else {
+            viewportOffsetY.coerceIn(height - scaledHeight, 0f)
+        }
+    }
+
     private fun drawBitmapOntoCanvas(bitmap: Bitmap, recycleAfter: Boolean = false) {
         val canvas = extraCanvas ?: return
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+        val destRect = extraBitmap?.let { RectF(0f, 0f, it.width.toFloat(), it.height.toFloat()) }
+            ?: RectF(0f, 0f, width.toFloat(), height.toFloat())
         val srcRect = Rect(0, 0, bitmap.width, bitmap.height)
         val srcRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
         val destRatio = if (destRect.height() == 0f) 1f else destRect.width() / destRect.height()
@@ -591,7 +894,7 @@ class HandwritingView @JvmOverloads constructor(
     private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {
         val source = extraBitmap ?: return
         val snapshot = source.copy(Config.ARGB_8888, false)
-        history.addLast(StateSnapshot(snapshot, hasDrawing, hasBase))
+        history.addLast(StateSnapshot(snapshot, hasDrawing, hasBase, viewportScale, viewportOffsetX, viewportOffsetY))
         trimHistory()
     }
 
@@ -602,16 +905,25 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun trimHistory() {
-        while (history.size > maxHistory) {
+        while (history.size > maxHistory || historyPixelCount() > historyBitmapPixelBudget) {
+            if (history.size <= 1) return
             val removed = history.removeFirst()
             if (!removed.bitmap.isRecycled) removed.bitmap.recycle()
         }
+    }
+
+    private fun historyPixelCount(): Long = history.sumOf { snapshot ->
+        snapshot.bitmap.width.toLong() * snapshot.bitmap.height.toLong()
     }
 
     private fun recycleHistory() {
         history.forEach { snapshot ->
             if (!snapshot.bitmap.isRecycled) snapshot.bitmap.recycle()
         }
+    }
+
+    private fun notifyCanvasSizeChanged() {
+        canvasSizeChangedListener?.invoke(exportWidth, exportHeight)
     }
 
     private fun notifyContentChanged() {
