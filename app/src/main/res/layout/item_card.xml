@@ -14,6 +14,7 @@
 
     <!-- ConstraintLayout so bg layer doesn't affect measured height -->
     <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/cardSceneSnapshotRoot"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
@@ -264,6 +265,16 @@
                 android:scaleType="fitCenter"/>
         </FrameLayout>
 
+        <com.example.timescapedemo.FilamentFlippableCardView
+            android:id="@+id/filamentFlipCard"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent" />
+
         <ImageButton
             android:id="@+id/buttonStickyNotes"
             android:layout_width="40dp"
@@ -275,6 +286,20 @@
             android:scaleType="centerInside"
             android:src="@drawable/ic_sticky_note_colored"
             android:tint="@color/sticky_note_icon_empty_tint"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <ImageView
+            android:id="@+id/indicatorHandwriting"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginBottom="18dp"
+            android:layout_marginEnd="56dp"
+            android:alpha="0.95"
+            android:contentDescription="@string/handwriting_card_content_desc"
+            android:src="@drawable/ic_handwriting_color"
+            android:tint="@android:color/white"
+            android:visibility="gone"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>

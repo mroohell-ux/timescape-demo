@@ -56,4 +56,5 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.0")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+    implementation("com.google.android.filament:filament-android:1.57.1")
 }

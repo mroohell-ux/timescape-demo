@@ -7,6 +7,7 @@ import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.BlendMode
 import android.graphics.BlendModeColorFilter
 import android.graphics.Color
@@ -39,6 +40,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
+import android.util.Log
 import androidx.core.view.isVisible
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -135,9 +137,12 @@ class CardsAdapter(
         val imageCardContainer: View = v.findViewById(R.id.imageCardContainer)
         val imageCard: ImageView = v.findViewById(R.id.imageCard)
         val cardContent: View = v.findViewById(R.id.card_content)
+        val cardSceneSnapshotRoot: View = v.findViewById(R.id.cardSceneSnapshotRoot)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
+        val filamentFlipCard: FilamentFlippableCardView = v.findViewById(R.id.filamentFlipCard)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
+        val handwritingIndicator: ImageView = v.findViewById(R.id.indicatorHandwriting)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -147,6 +152,8 @@ class CardsAdapter(
         val videoSeekBar: SeekBar = v.findViewById(R.id.videoSeekBar)
         val videoTimeLabel: TextView = v.findViewById(R.id.videoTimeLabel)
         val videoTitleLabel: TextView = v.findViewById(R.id.videoTitleLabel)
+        var lastTapNormX: Float = 0.5f
+        var lastTapNormY: Float = 0.5f
         lateinit var gestureDetector: GestureDetectorCompat
     }
 
@@ -190,6 +197,7 @@ class CardsAdapter(
     private val handwritingFaces = mutableMapOf<Long, HandwritingFace>()
     private val videoProgressOverridesMs = mutableMapOf<Long, Long>()
     private enum class CardMode { TEXT, IMAGE, HANDWRITING }
+    private var isSnapshotBinding = false
     private val blurEffect: RenderEffect? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             RenderEffect.createBlurEffect(BG_BLUR_RADIUS, BG_BLUR_RADIUS, Shader.TileMode.CLAMP)
@@ -234,7 +242,7 @@ class CardsAdapter(
         }.toSet()
         blockedUris.retainAll(activeUris)
         val flippableIds = copies.filter {
-            it.handwriting != null || it.imageHandwriting != null || !it.backSnippet.isNullOrBlank()
+            !it.backSnippet.isNullOrBlank()
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
         val currentCardIds = copies.map { it.id }.toSet()
@@ -291,6 +299,7 @@ class CardsAdapter(
         val vh = VH(v)
         vh.gestureDetector = GestureDetectorCompat(v.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                updateTapAnchor(vh, e)
                 val idx = vh.bindingAdapterPosition
                 if (idx != RecyclerView.NO_POSITION) onItemClick(idx)
                 return true
@@ -340,14 +349,8 @@ class CardsAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
 
-        val stickyIconTint = if (item.stickyNotes.isEmpty()) {
-            ColorStateList.valueOf(
-                ContextCompat.getColor(holder.itemView.context, R.color.sticky_note_icon_empty_tint)
-            )
-        } else {
-            null
-        }
-        holder.stickyNotesButton.imageTintList = stickyIconTint
+        holder.stickyNotesButton.isVisible = item.stickyNotes.isNotEmpty()
+        holder.handwritingIndicator.isVisible = item.handwriting != null || item.imageHandwriting != null
 
         // ---- Bind text ----
         holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(
@@ -378,6 +381,14 @@ class CardsAdapter(
         holder.handwritingContainer.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
+        val isFlippable = isCardFlippable(item)
+        holder.cardContent.isVisible = true
+        holder.textScrim.isVisible = true
+        holder.filamentFlipCard.isVisible = false
+        holder.cardContent.alpha = 1f
+        holder.imageCardContainer.alpha = 1f
+        holder.handwritingContainer.alpha = 1f
+        holder.textScrim.alpha = 1f
         if (handwritingContent != null) {
             holder.card.clearRatio()
             holder.card.scaleX = 1f
@@ -401,6 +412,23 @@ class CardsAdapter(
             BackgroundImageLoader.clear(holder.imageCard)
             holder.imageCard.setImageDrawable(null)
             bindTextCard(holder, item, face)
+        }
+        if (isFlippable && !isSnapshotBinding) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(
+                    TAG_3D,
+                    "onBind: flippable cardId=${item.id} face=$face position=$position hasHandwriting=${item.handwriting != null} hasImageBack=${item.imageHandwriting != null && item.image != null} hasTextBack=${!item.backSnippet.isNullOrBlank()}"
+                )
+            }
+            bindFilamentCard(holder, item, face, position)
+        } else {
+            if (ENABLE_3D_LOGS) {
+                Log.i(
+                    TAG_3D,
+                    "onBind: normal path cardId=${item.id} isFlippable=$isFlippable isSnapshotBinding=$isSnapshotBinding"
+                )
+            }
+            holder.filamentFlipCard.isVisible = false
         }
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
         val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
@@ -895,6 +923,12 @@ class CardsAdapter(
         if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack) return null
         val current = currentCardFace(item.id)
         val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
+        if (ENABLE_3D_LOGS) {
+            Log.i(
+                TAG_3D,
+                "toggleCardFace: cardId=${item.id} current=$current next=$next filamentVisible=${holder.filamentFlipCard.isVisible} filamentReady=${holder.filamentFlipCard.isReady()}"
+            )
+        }
         handwritingFaces[item.id] = next
         val fallbackText = when {
             handwritingContent != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.handwriting_card_missing)
@@ -902,6 +936,12 @@ class CardsAdapter(
             else -> item.snippet
         }
         when {
+            holder.filamentFlipCard.isVisible -> {
+                if (ENABLE_3D_LOGS) {
+                    Log.i(TAG_3D, "toggleCardFace: filament flip cardId=${item.id} $current->$next")
+                }
+                animateFilamentShellFlip(holder, next)
+            }
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
             hasTextBack -> bindTextCard(holder, item, next)
@@ -918,12 +958,253 @@ class CardsAdapter(
 
     fun canFlipCardAt(index: Int): Boolean {
         val item = getItemAt(index) ?: return false
-        if (item.handwriting != null) return true
-        if (item.imageHandwriting != null && item.image != null) return true
+        return isCardFlippable(item)
+    }
+
+    private fun isCardFlippable(item: CardItem): Boolean {
+        if (item.handwriting != null) return false
+        if (item.imageHandwriting != null) return false
         return !item.backSnippet.isNullOrBlank()
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
+
+    private fun bindFilamentCard(holder: VH, item: CardItem, face: HandwritingFace, position: Int) {
+        if (!holder.filamentFlipCard.isReady()) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(TAG_3D, "bindFilamentCard: not ready cardId=${item.id}")
+            }
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
+        if (holder.cardSceneSnapshotRoot.width <= 0 || holder.cardSceneSnapshotRoot.height <= 0) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(
+                    TAG_3D,
+                    "bindFilamentCard: root not laid out yet cardId=${item.id} root=${holder.cardSceneSnapshotRoot.width}x${holder.cardSceneSnapshotRoot.height}; scheduling retry"
+                )
+            }
+            holder.cardSceneSnapshotRoot.post {
+                val sameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
+                if (!sameCard) return@post
+                val adapterPos = holder.bindingAdapterPosition
+                if (adapterPos == RecyclerView.NO_POSITION) return@post
+                bindFilamentCard(holder, item, currentCardFace(item.id), adapterPos)
+            }
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
+        val front = snapshotCardFace(holder, item, HandwritingFace.FRONT, position)
+        val back = snapshotCardFace(holder, item, HandwritingFace.BACK, position)
+        if (front == null || back == null) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(
+                    TAG_3D,
+                    "bindFilamentCard: snapshot missing cardId=${item.id} frontNull=${front == null} backNull=${back == null} root=${holder.cardSceneSnapshotRoot.width}x${holder.cardSceneSnapshotRoot.height}"
+                )
+            }
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
+        if (isLikelyInvalidSnapshot(front) || isLikelyInvalidSnapshot(back)) {
+            if (ENABLE_3D_LOGS) {
+                Log.i(TAG_3D, "bindFilamentCard: rejected dark/empty snapshot for cardId=${item.id}")
+            }
+            holder.filamentFlipCard.isVisible = false
+            return
+        }
+        if (ENABLE_3D_LOGS) {
+            Log.i(
+                TAG_3D,
+                "bindFilamentCard: cardId=${item.id} face=$face front=${front.width}x${front.height} back=${back.width}x${back.height}"
+            )
+        }
+        holder.filamentFlipCard.bind(front, back, face)
+        holder.filamentFlipCard.isVisible = true
+        holder.cardContent.alpha = 0f
+        holder.imageCardContainer.alpha = 0f
+        holder.handwritingContainer.alpha = 0f
+        holder.textScrim.alpha = 0f
+    }
+
+    private fun snapshotCardFace(
+        holder: VH,
+        item: CardItem,
+        face: HandwritingFace,
+        position: Int
+    ): Bitmap? {
+        val width = holder.cardSceneSnapshotRoot.width
+        val height = holder.cardSceneSnapshotRoot.height
+        if (width <= 0 || height <= 0) return null
+        val fallbackText = when {
+            item.handwriting != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.handwriting_card_missing)
+            item.image != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.image_card_missing)
+            else -> item.snippet
+        }
+        isSnapshotBinding = true
+        try {
+            when {
+                item.handwriting != null -> bindHandwriting(holder, item, item.handwriting!!, face, fallbackText, position)
+                item.image != null -> bindImageCard(holder, item, face, fallbackText, position)
+                else -> bindTextCard(holder, item, face)
+            }
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val snapshotBackgroundColor = when {
+                item.handwriting != null -> {
+                    if (face == HandwritingFace.BACK) {
+                        item.handwriting?.back?.options?.backgroundColor ?: item.handwriting!!.options.backgroundColor
+                    } else {
+                        item.handwriting!!.options.backgroundColor
+                    }
+                }
+                item.imageHandwriting != null && face == HandwritingFace.BACK -> {
+                    item.imageHandwriting?.options?.backgroundColor ?: Color.TRANSPARENT
+                }
+                else -> Color.TRANSPARENT
+            }
+            canvas.drawColor(snapshotBackgroundColor)
+            holder.cardSceneSnapshotRoot.draw(canvas)
+            return bitmap
+        } finally {
+            isSnapshotBinding = false
+        }
+    }
+
+    private fun isLikelyInvalidSnapshot(bitmap: Bitmap): Boolean {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return true
+        val sampleGrid = 6
+        var total = 0
+        var darkCount = 0
+        var transparentCount = 0
+        for (iy in 0 until sampleGrid) {
+            val y = ((iy + 0.5f) / sampleGrid.toFloat() * (h - 1)).toInt().coerceIn(0, h - 1)
+            for (ix in 0 until sampleGrid) {
+                val x = ((ix + 0.5f) / sampleGrid.toFloat() * (w - 1)).toInt().coerceIn(0, w - 1)
+                val p = bitmap.getPixel(x, y)
+                val a = Color.alpha(p)
+                val luma = (Color.red(p) * 0.2126f) + (Color.green(p) * 0.7152f) + (Color.blue(p) * 0.0722f)
+                if (a < 24) transparentCount++
+                if (luma < 12f) darkCount++
+                total++
+            }
+        }
+        if (total == 0) return true
+        val darkRatio = darkCount.toFloat() / total.toFloat()
+        val transparentRatio = transparentCount.toFloat() / total.toFloat()
+        return transparentRatio > 0.25f || darkRatio > 0.92f
+    }
+
+    private fun animateFilamentShellFlip(holder: VH, targetFace: HandwritingFace) {
+        val shell = holder.card
+        val density = holder.itemView.resources.displayMetrics.density
+        shell.cameraDistance = density * FILAMENT_SHELL_CAMERA_DISTANCE
+        val tapX = holder.lastTapNormX.coerceIn(0f, 1f) // touched/free side
+        val tapY = holder.lastTapNormY.coerceIn(0f, 1f)
+        val anchoredX = 1f - tapX // opposite side feels more anchored
+        val hingeSign = if (anchoredX >= 0.5f) -1f else 1f
+        val hingeRotation = FILAMENT_SHELL_HALF_ROTATION * hingeSign
+        val verticalTilt = ((tapY - 0.5f) * 2f * FILAMENT_SHELL_MAX_TILT_X_DEG).coerceIn(
+            -FILAMENT_SHELL_MAX_TILT_X_DEG,
+            FILAMENT_SHELL_MAX_TILT_X_DEG
+        )
+        val cornerRoll = ((tapX - 0.5f) * (tapY - 0.5f) * 4f * FILAMENT_SHELL_MAX_ROLL_DEG).coerceIn(
+            -FILAMENT_SHELL_MAX_ROLL_DEG,
+            FILAMENT_SHELL_MAX_ROLL_DEG
+        )
+        val leadShiftX = (tapX - 0.5f) * density * FILAMENT_SHELL_MAX_LEAD_SHIFT_DP
+        shell.pivotX = shell.width * (0.5f + (anchoredX - 0.5f) * 0.58f)
+        shell.pivotY = shell.height * (0.52f + (tapY - 0.5f) * 0.16f)
+        shell.animate().cancel()
+        val fold = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, 0f, hingeRotation).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION_X, 0f, verticalTilt).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION, 0f, cornerRoll).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.TRANSLATION_X, 0f, leadShiftX).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_X, 1f, 0.985f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_Y, 1f, 0.992f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = AccelerateInterpolator()
+                }
+            )
+        }
+        val unfold = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(shell, View.ROTATION_Y, -hingeRotation, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION_X, verticalTilt, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.ROTATION, cornerRoll, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.TRANSLATION_X, leadShiftX, 0f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_X, 0.985f, 1.01f, 1f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                },
+                ObjectAnimator.ofFloat(shell, View.SCALE_Y, 0.992f, 1f).apply {
+                    duration = FILAMENT_SHELL_HALF_DURATION_MS
+                    interpolator = DecelerateInterpolator()
+                }
+            )
+        }
+        fold.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                holder.filamentFlipCard.setFace(targetFace)
+                shell.rotationY = -hingeRotation
+                unfold.start()
+            }
+        })
+        unfold.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                shell.rotationY = 0f
+                shell.rotationX = 0f
+                shell.rotation = 0f
+                shell.translationX = 0f
+                shell.scaleX = 1f
+                shell.scaleY = 1f
+            }
+        })
+        fold.start()
+    }
+
+    private fun updateTapAnchor(holder: VH, event: MotionEvent) {
+        val w = holder.card.width.takeIf { it > 0 } ?: return
+        val h = holder.card.height.takeIf { it > 0 } ?: return
+        val localX = event.x - holder.card.left
+        val localY = event.y - holder.card.top
+        holder.lastTapNormX = (localX / w.toFloat()).coerceIn(0f, 1f)
+        holder.lastTapNormY = (localY / h.toFloat()).coerceIn(0f, 1f)
+        if (ENABLE_3D_LOGS) {
+            Log.i(TAG_3D, "tapAnchor: x=${holder.lastTapNormX}, y=${holder.lastTapNormY}")
+        }
+    }
 
     private fun animateHandwritingFlip(
         holder: VH,
@@ -1379,6 +1660,8 @@ class CardsAdapter(
     }
     @Suppress("ConstPropertyName")
     private companion object {
+        private const val TAG_3D = "CardsAdapter3D"
+        private const val ENABLE_3D_LOGS = true
         private const val DEFAULT_BODY_TEXT_SIZE_SP = 18f
         private const val MIN_BODY_TEXT_SIZE_SP = 12f
         private const val MAX_BODY_TEXT_SIZE_SP = 32f
@@ -1388,6 +1671,12 @@ class CardsAdapter(
         private const val BG_BLUR_RADIUS = 12f
         private const val HANDWRITING_FLIP_HALF_DURATION = 140L
         private const val HANDWRITING_CAMERA_DISTANCE = 8000f
+        private const val FILAMENT_SHELL_HALF_DURATION_MS = 165L
+        private const val FILAMENT_SHELL_HALF_ROTATION = 86f
+        private const val FILAMENT_SHELL_CAMERA_DISTANCE = 9_500f
+        private const val FILAMENT_SHELL_MAX_TILT_X_DEG = 5.8f
+        private const val FILAMENT_SHELL_MAX_ROLL_DEG = 1.6f
+        private const val FILAMENT_SHELL_MAX_LEAD_SHIFT_DP = 7.2f
 
         private const val DUOTONE_SHADER = """
             uniform shader content;
