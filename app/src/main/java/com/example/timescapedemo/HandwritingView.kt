@@ -2,194 +2,165 @@ package com.example.timescapedemo
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Bitmap.Config
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
-import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.CornerPathEffect
-import android.graphics.ComposePathEffect
-import android.graphics.DiscretePathEffect
-import android.graphics.Matrix
-import android.graphics.PathDashPathEffect
 import android.util.AttributeSet
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
-import android.view.ViewParent
 import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
-import com.example.timescapedemo.HandwritingDrawingTool.ERASER
-import com.example.timescapedemo.HandwritingDrawingTool.PEN
-import kotlin.collections.ArrayDeque
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
+/**
+ * Full-screen infinite notebook viewport for Timescape handwriting notes.
+ *
+ * This view intentionally does not maintain a giant backing bitmap.  The screen
+ * is a viewport into [document]'s virtual canvas, handwriting is stored as
+ * vector [StrokeElement]s, and paper lines are generated from the current
+ * viewport offset/zoom every frame.
+ */
 class HandwritingView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
-
     private val density = resources.displayMetrics.density
-    private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
-        style = Paint.Style.STROKE
-        strokeJoin = Paint.Join.ROUND
-        strokeCap = Paint.Cap.ROUND
-        strokeWidth = 6f * density
-    }
-    private val eraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeJoin = Paint.Join.ROUND
-        strokeCap = Paint.Cap.ROUND
-        strokeWidth = 16f * density
-        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-    }
-    private val eraserPreviewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeJoin = Paint.Join.ROUND
-        strokeCap = Paint.Cap.ROUND
-        strokeWidth = 16f * density
-        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.28f * 255).roundToInt())
-    }
-    private val bitmapPaint = Paint(Paint.DITHER_FLAG)
+    private val editor = NoteEditorViewModel()
+    private val document: NoteDocument get() = editor.document
+    private val viewport: ViewportState get() = document.viewportState
+
+    private val paperPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.SQUARE
-        strokeJoin = Paint.Join.MITER
+        strokeWidth = max(1f, density)
+        color = ColorUtils.setAlphaComponent(Color.rgb(152, 132, 176), 60)
     }
     private val marginPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.SQUARE
-        strokeJoin = Paint.Join.MITER
+        strokeWidth = max(1.2f, density * 1.2f)
+        color = ColorUtils.setAlphaComponent(Color.rgb(154, 92, 132), 105)
     }
-    private val path = Path()
-    private val history = ArrayDeque<StateSnapshot>()
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val minimapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * density
+        color = ColorUtils.setAlphaComponent(Color.rgb(117, 91, 208), 190)
+    }
 
-    private var extraBitmap: Bitmap? = null
-    private var extraCanvas: Canvas? = null
-    private var pendingBitmap: Bitmap? = null
-    private var pendingHasContent = false
-    private var pendingHasBase = false
-
-    private var currentX = 0f
-    private var currentY = 0f
-    private val touchTolerance = 4f
-
-    private var hasContent = false
-    private var hasBaseImage = false
-
-    @ColorInt
-    private var backgroundColorInt: Int = Color.WHITE
-    @ColorInt
-    private var brushColorInt: Int = Color.BLACK
-    private var paperStyle: HandwritingPaperStyle = HandwritingPaperStyle.PLAIN
+    private var currentStroke: StrokeElement? = null
+    private var activeTool: NoteTool = NoteTool.PEN
+    private var drawingTool: HandwritingDrawingTool = HandwritingDrawingTool.PEN
+    private var brushColorInt: Int = Color.rgb(42, 36, 56)
+    private var backgroundColorInt: Int = Color.rgb(255, 249, 235)
+    private var brushSizeDp: Float = 4.5f
+    private var eraserSizeDp: Float = 18f
+    private var paperStyle: HandwritingPaperStyle = HandwritingPaperStyle.RULED
     private var penType: HandwritingPenType = HandwritingPenType.ROUND
     private var eraserType: HandwritingEraserType = HandwritingEraserType.ROUND
-    private var drawingTool: HandwritingDrawingTool = PEN
-    private var targetAspectRatio: Float? = null
     private var exportWidth = 0
     private var exportHeight = 0
-
+    private var targetAspectRatio: Float? = null
     private var contentChangedListener: (() -> Unit)? = null
 
-    private val maxHistory = 25
+    private var lastPanX = 0f
+    private var lastPanY = 0f
+    private var isPanning = false
+    private var didMove = false
+
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            zoomAround(detector.focusX, detector.focusY, detector.scaleFactor)
+            return true
+        }
+    })
 
     init {
         setLayerType(LAYER_TYPE_HARDWARE, null)
-        applyPenType(penType)
-        updatePenColor()
-        applyEraserType(eraserType)
-        updateGuidePaintColor()
+        isFocusable = true
+        isClickable = true
+        paperPaint.color = backgroundColorInt
+        editor.toolState.color = brushColorInt
+        editor.toolState.strokeWidth = brushSizeDp * density
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         val ratio = targetAspectRatio
         if (ratio != null && ratio > 0f) {
-            val width = measuredWidth
-            if (width > 0) {
-                val desiredHeight = (width * ratio).roundToInt()
-                val resolvedHeight = resolveSize(desiredHeight, heightMeasureSpec)
-                if (resolvedHeight != measuredHeight) {
-                    setMeasuredDimension(width, resolvedHeight)
-                }
-            }
-        }
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        if (w <= 0 || h <= 0) {
-            recycleHistory()
-            history.clear()
-            extraBitmap?.recycle()
-            extraBitmap = null
-            extraCanvas = null
-            return
-        }
-        val newBitmap = Bitmap.createBitmap(w, h, Config.ARGB_8888)
-        val newCanvas = Canvas(newBitmap)
-        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraBitmap?.recycle()
-        extraBitmap = newBitmap
-        extraCanvas = newCanvas
-
-        recycleHistory()
-        history.clear()
-        if (pendingBitmap != null) {
-            pendingBitmap?.let { bitmap ->
-                drawBitmapOntoCanvas(bitmap, recycleAfter = true)
-            }
-            hasBaseImage = pendingHasBase
-            hasContent = pendingHasContent || pendingHasBase
-            pushCurrentState(hasContent, hasBaseImage)
-            pendingBitmap = null
+            val width = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(1)
+            val desiredHeight = (width * ratio).roundToInt().coerceAtLeast(suggestedMinimumHeight)
+            setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
         } else {
-            hasBaseImage = false
-            hasContent = false
-            pushCurrentState(false, false)
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         }
-        pendingHasContent = false
-        pendingHasBase = false
-        invalidate()
-        notifyContentChanged()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(backgroundColorInt)
-        drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
-        extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        canvas.drawPath(path, currentPreviewPaint())
+        drawPaper(canvas)
+        drawVisibleElements(canvas)
+        drawMinimap(canvas)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val x = event.x.coerceIn(0f, width.toFloat())
-        val y = event.y.coerceIn(0f, height.toFloat())
+        scaleDetector.onTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                disallowParentIntercept(true)
-                touchStart(x, y)
+                parent?.requestDisallowInterceptTouchEvent(true)
+                lastPanX = event.x
+                lastPanY = event.y
+                didMove = false
+                isPanning = shouldPan(event)
+                if (!isPanning && !scaleDetector.isInProgress) handleCanvasDown(event)
             }
-            MotionEvent.ACTION_MOVE -> touchMove(x, y)
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                isPanning = true
+                currentStroke = null
+                lastPanX = event.x
+                lastPanY = event.y
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (scaleDetector.isInProgress || event.pointerCount > 1 || isPanning) {
+                    val dx = event.x - lastPanX
+                    val dy = event.y - lastPanY
+                    viewport.offsetX -= dx / viewport.zoom
+                    viewport.offsetY -= dy / viewport.zoom
+                    lastPanX = event.x
+                    lastPanY = event.y
+                    didMove = true
+                    invalidate()
+                } else {
+                    handleCanvasMove(event)
+                }
+            }
             MotionEvent.ACTION_UP -> {
-                touchUp()
-                disallowParentIntercept(false)
+                if (!isPanning) handleCanvasUp(event)
+                isPanning = false
+                currentStroke = null
+                parent?.requestDisallowInterceptTouchEvent(false)
+                performClick()
             }
             MotionEvent.ACTION_CANCEL -> {
-                touchCancel()
-                disallowParentIntercept(false)
+                currentStroke = null
+                isPanning = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+                invalidate()
             }
         }
-        invalidate()
         return true
     }
 
@@ -199,102 +170,82 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun clear() {
-        val hadAnyContent = hasDrawing()
-        commitCurrentPath()
-        extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        hasContent = false
-        hasBaseImage = false
-        if (hadAnyContent) {
-            pushCurrentState(false, false)
-        } else {
-            if (history.isEmpty()) {
-                pushCurrentState(false, false)
-            } else {
-                replaceHistoryWithCurrent(false, false)
-            }
-        }
-        pendingBitmap?.recycle()
-        pendingBitmap = null
-        pendingHasContent = false
-        pendingHasBase = false
+        if (document.elements.isEmpty()) return
+        document.elements.toList().forEach { editor.removeElement(it) }
+        editor.undoRedoManager.clear()
         invalidate()
         notifyContentChanged()
     }
 
     fun undo(): Boolean {
-        if (!path.isEmpty) {
-            path.reset()
-            invalidate()
-            return true
-        }
-        if (history.size <= 1) return false
-        val current = history.removeLast()
-        if (!current.bitmap.isRecycled) current.bitmap.recycle()
-        val previous = history.last()
-        extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraCanvas?.drawBitmap(previous.bitmap, 0f, 0f, null)
-        hasBaseImage = previous.hasBase
-        hasContent = previous.hasDrawing
-        invalidate()
-        notifyContentChanged()
-        return true
-    }
-
-    fun canUndo(): Boolean = !path.isEmpty || history.size > 1
-
-    fun hasDrawing(): Boolean = hasContent || !path.isEmpty
-
-    fun setBitmap(bitmap: Bitmap?) {
-        pendingBitmap?.recycle()
-        pendingBitmap = null
-        pendingHasContent = false
-        pendingHasBase = false
-        if (bitmap == null) {
-            clear()
-            return
-        }
-        val copy = bitmap.copy(Config.ARGB_8888, false)
-        if (!bitmap.isRecycled) {
-            bitmap.recycle()
-        }
-        if (width > 0 && height > 0 && extraCanvas != null) {
-            drawBitmapOntoCanvas(copy, recycleAfter = true)
-            hasBaseImage = true
-            hasContent = true
-            replaceHistoryWithCurrent(true, true)
+        val undone = editor.undoRedoManager.undo(document)
+        if (undone) {
             invalidate()
             notifyContentChanged()
-        } else {
-            pendingBitmap = copy
-            pendingHasContent = true
-            pendingHasBase = true
         }
+        return undone
+    }
+
+    fun redo(): Boolean {
+        val redone = editor.undoRedoManager.redo(document)
+        if (redone) {
+            invalidate()
+            notifyContentChanged()
+        }
+        return redone
+    }
+
+    fun canUndo(): Boolean = editor.undoRedoManager.canUndo()
+    fun canRedo(): Boolean = editor.undoRedoManager.canRedo()
+    fun hasDrawing(): Boolean = document.elements.isNotEmpty() || currentStroke != null
+
+    fun setBitmap(bitmap: Bitmap?) {
+        clear()
+        if (bitmap == null) return
+        val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        if (!bitmap.isRecycled) bitmap.recycle()
+        val maxWidth = min(1400f, copy.width.toFloat())
+        val scale = maxWidth / copy.width.toFloat()
+        val image = RuntimeBitmapElement(
+            bitmap = copy,
+            x = 96f,
+            y = 96f,
+            width = copy.width * scale,
+            height = copy.height * scale
+        )
+        document.elements.add(image)
+        notifyContentChanged()
+        invalidate()
     }
 
     fun exportBitmap(): Bitmap? {
-        commitCurrentPath(addToHistory = false)
-        val source = extraBitmap ?: return null
-        val targetW = exportWidth.takeIf { it > 0 } ?: source.width
-        val targetH = exportHeight.takeIf { it > 0 } ?: source.height
-        val result = Bitmap.createBitmap(targetW, targetH, Config.ARGB_8888)
-        val canvas = Canvas(result)
-        canvas.drawColor(backgroundColorInt)
-        val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
-        drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
-        val destRect = Rect(0, 0, targetW, targetH)
-        canvas.drawBitmap(source, null, destRect, null)
-        return result
+        val targetW = (exportWidth.takeIf { it > 0 } ?: width.takeIf { it > 0 } ?: 1080).coerceAtMost(1600)
+        val targetH = (exportHeight.takeIf { it > 0 } ?: height.takeIf { it > 0 } ?: 1440).coerceAtMost(2200)
+        val bitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+        val exportCanvas = Canvas(bitmap)
+        val savedViewport = viewport.copy()
+        val contentBounds = contentBounds().takeIf { !it.isEmpty }
+        viewport.offsetX = contentBounds?.left?.minus(48f) ?: savedViewport.offsetX
+        viewport.offsetY = contentBounds?.top?.minus(48f) ?: savedViewport.offsetY
+        viewport.zoom = min(targetW / ((contentBounds?.width() ?: targetW.toFloat()) + 96f), targetH / ((contentBounds?.height() ?: targetH.toFloat()) + 96f))
+            .coerceIn(0.25f, 1.25f)
+        drawPaper(exportCanvas, targetW, targetH)
+        drawVisibleElements(exportCanvas, targetW, targetH, includeMinimap = false)
+        viewport.offsetX = savedViewport.offsetX
+        viewport.offsetY = savedViewport.offsetY
+        viewport.zoom = savedViewport.zoom
+        return bitmap
     }
 
+    fun exportDocumentJson(): String = document.toJson().toString()
+
     fun setCanvasBackgroundColor(@ColorInt color: Int) {
-        if (backgroundColorInt == color) return
         backgroundColorInt = color
-        updateGuidePaintColor()
+        paperPaint.color = color
         invalidate()
     }
 
     fun setPaperStyle(style: HandwritingPaperStyle) {
-        if (paperStyle == style) return
         paperStyle = style
         invalidate()
     }
@@ -303,71 +254,51 @@ class HandwritingView @JvmOverloads constructor(
 
     fun setBrushColor(@ColorInt color: Int) {
         brushColorInt = color
-        updatePenColor()
+        editor.toolState.color = color
+        invalidate()
     }
 
     fun setBrushSizeDp(sizeDp: Float) {
-        val px = sizeDp * density
-        setBrushSizePx(px)
+        brushSizeDp = sizeDp.coerceIn(1f, 48f)
+        editor.toolState.strokeWidth = brushSizeDp * density
     }
 
-    fun setBrushSizePx(sizePx: Float) {
-        penPaint.strokeWidth = sizePx
-        applyPenType(penType)
-        updatePenColor()
-        if (drawingTool == PEN) {
-            invalidate()
-        }
-    }
-
-    fun getBrushSizeDp(): Float = penPaint.strokeWidth / density
+    fun getBrushSizeDp(): Float = brushSizeDp
 
     fun setPenType(type: HandwritingPenType) {
-        if (penType == type) return
         penType = type
-        applyPenType(type)
-        updatePenColor()
+        activeTool = if (type == HandwritingPenType.HIGHLIGHTER) NoteTool.HIGHLIGHTER else NoteTool.PEN
+        editor.toolState.activeTool = activeTool
     }
 
     fun getPenType(): HandwritingPenType = penType
 
     fun setEraserSizeDp(sizeDp: Float) {
-        val px = sizeDp * density
-        eraserPaint.strokeWidth = px
-        eraserPreviewPaint.strokeWidth = px
-        if (drawingTool == ERASER) invalidate()
+        eraserSizeDp = sizeDp.coerceIn(4f, 96f)
     }
 
-    fun getEraserSizeDp(): Float = eraserPaint.strokeWidth / density
+    fun getEraserSizeDp(): Float = eraserSizeDp
 
     fun setEraserType(type: HandwritingEraserType) {
-        if (eraserType == type) return
         eraserType = type
-        applyEraserType(type)
-        if (drawingTool == ERASER) invalidate()
     }
 
     fun getEraserType(): HandwritingEraserType = eraserType
 
     fun setDrawingTool(tool: HandwritingDrawingTool) {
-        if (drawingTool == tool) return
-        commitCurrentPath()
         drawingTool = tool
+        activeTool = if (tool == HandwritingDrawingTool.ERASER) NoteTool.ERASER else if (penType == HandwritingPenType.HIGHLIGHTER) NoteTool.HIGHLIGHTER else NoteTool.PEN
+        editor.toolState.activeTool = activeTool
         invalidate()
     }
 
     fun setCanvasSize(widthPx: Int, heightPx: Int) {
         if (widthPx <= 0 || heightPx <= 0) return
-        if (widthPx == exportWidth && heightPx == exportHeight) return
-        commitCurrentPath()
-        val snapshot = extraBitmap?.copy(Config.ARGB_8888, false)
-        pendingBitmap?.recycle()
-        pendingBitmap = snapshot
-        pendingHasContent = hasContent
-        pendingHasBase = hasBaseImage
         exportWidth = widthPx
         exportHeight = heightPx
-        targetAspectRatio = heightPx.toFloat() / widthPx.toFloat()
+        document.canvasWidth = max(document.canvasWidth, widthPx.toFloat())
+        document.canvasHeight = max(document.canvasHeight, heightPx.toFloat() * 4f)
+        targetAspectRatio = null
         requestLayout()
     }
 
@@ -375,264 +306,205 @@ class HandwritingView @JvmOverloads constructor(
         contentChangedListener = listener
     }
 
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
-        recycleHistory()
-        history.clear()
-        extraBitmap?.recycle()
-        extraBitmap = null
-        extraCanvas = null
-        pendingBitmap?.recycle()
-        pendingBitmap = null
-    }
-
-    private fun touchStart(x: Float, y: Float) {
-        path.reset()
-        path.moveTo(x, y)
-        currentX = x
-        currentY = y
-    }
-
-    private fun touchMove(x: Float, y: Float) {
-        val dx = abs(x - currentX)
-        val dy = abs(y - currentY)
-        if (dx >= touchTolerance || dy >= touchTolerance) {
-            path.quadTo(currentX, currentY, (x + currentX) / 2, (y + currentY) / 2)
-            currentX = x
-            currentY = y
-        }
-    }
-
-    private fun touchUp() {
-        path.lineTo(currentX, currentY)
-        commitCurrentPath()
-    }
-
-    private fun touchCancel() {
-        path.reset()
-    }
-
-    private fun commitCurrentPath(addToHistory: Boolean = true) {
-        if (path.isEmpty) return
-        val canvas = extraCanvas ?: return
-        canvas.drawPath(path, currentCommitPaint())
-        path.reset()
-        hasContent = true
-        if (addToHistory) {
-            pushCurrentState(true, hasBaseImage)
-        }
-        notifyContentChanged()
-    }
-
-    private fun drawBitmapOntoCanvas(bitmap: Bitmap, recycleAfter: Boolean = false) {
-        val canvas = extraCanvas ?: return
-        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
-        val srcRect = Rect(0, 0, bitmap.width, bitmap.height)
-        val srcRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-        val destRatio = if (destRect.height() == 0f) 1f else destRect.width() / destRect.height()
-        val drawRect = RectF()
-        if (srcRatio > destRatio) {
-            val scaledHeight = destRect.width() / srcRatio
-            val top = destRect.centerY() - scaledHeight / 2f
-            drawRect.set(destRect.left, top, destRect.right, top + scaledHeight)
+    private fun handleCanvasDown(event: MotionEvent) {
+        val point = viewport.screenToCanvas(event.x, event.y).withPressure(event)
+        if (activeTool == NoteTool.ERASER) {
+            eraseAt(point.x, point.y)
         } else {
-            val scaledWidth = destRect.height() * srcRatio
-            val left = destRect.centerX() - scaledWidth / 2f
-            drawRect.set(left, destRect.top, left + scaledWidth, destRect.bottom)
+            currentStroke = StrokeElement(
+                color = if (activeTool == NoteTool.HIGHLIGHTER) ColorUtils.setAlphaComponent(brushColorInt, 90) else brushColorInt,
+                strokeWidth = brushSizeDp * density / viewport.zoom,
+                tool = activeTool,
+                zIndex = document.elements.size
+            ).also { it.points.add(point) }
         }
-        canvas.drawBitmap(bitmap, srcRect, drawRect, null)
-        if (recycleAfter && !bitmap.isRecycled) {
-            bitmap.recycle()
+        invalidate()
+    }
+
+    private fun handleCanvasMove(event: MotionEvent) {
+        didMove = true
+        val point = viewport.screenToCanvas(event.x, event.y).withPressure(event)
+        if (activeTool == NoteTool.ERASER) {
+            eraseAt(point.x, point.y)
+        } else {
+            currentStroke?.points?.add(point)
+        }
+        invalidate()
+    }
+
+    private fun handleCanvasUp(event: MotionEvent) {
+        if (activeTool == NoteTool.ERASER) return
+        currentStroke?.let { stroke ->
+            if (stroke.points.size == 1) {
+                stroke.points.add(viewport.screenToCanvas(event.x + 0.1f, event.y + 0.1f).withPressure(event))
+            }
+            stroke.recomputeBounds()
+            editor.addElement(stroke)
+            document.canvasWidth = max(document.canvasWidth, stroke.x + stroke.width + 512f)
+            document.canvasHeight = max(document.canvasHeight, stroke.y + stroke.height + 1024f)
+            notifyContentChanged()
+        }
+        currentStroke = null
+        invalidate()
+    }
+
+    private fun eraseAt(canvasX: Float, canvasY: Float) {
+        val radius = eraserSizeDp * density / viewport.zoom
+        val hit = document.elements
+            .filterIsInstance<StrokeElement>()
+            .lastOrNull { stroke ->
+                RectF(stroke.x - radius, stroke.y - radius, stroke.x + stroke.width + radius, stroke.y + stroke.height + radius).contains(canvasX, canvasY) &&
+                    stroke.points.any { point -> hypot(point.x - canvasX, point.y - canvasY) <= radius }
+            }
+        if (hit != null) {
+            editor.removeElement(hit)
+            notifyContentChanged()
+            invalidate()
         }
     }
 
-    private fun drawPaperGuides(canvas: Canvas, width: Float, height: Float, scale: Float) {
+    private fun shouldPan(event: MotionEvent): Boolean {
+        val stylusDrawing = event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS && activeTool != NoteTool.ERASER
+        return event.pointerCount > 1 || activeTool == NoteTool.PAN || (!stylusDrawing && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER && event.buttonState == MotionEvent.BUTTON_SECONDARY)
+    }
+
+    private fun zoomAround(screenX: Float, screenY: Float, scaleFactor: Float) {
+        val before = viewport.screenToCanvas(screenX, screenY)
+        viewport.zoom = (viewport.zoom * scaleFactor).coerceIn(0.35f, 3f)
+        viewport.offsetX = before.x - screenX / viewport.zoom
+        viewport.offsetY = before.y - screenY / viewport.zoom
+        invalidate()
+    }
+
+    private fun drawPaper(canvas: Canvas, targetWidth: Int = width, targetHeight: Int = height) {
+        canvas.drawColor(backgroundColorInt)
         if (paperStyle == HandwritingPaperStyle.PLAIN) return
-        val spacing = 28f * density * scale
-        val stroke = max(1f, 1.2f * density * scale)
-        guidePaint.strokeWidth = stroke
-        marginPaint.strokeWidth = stroke * 1.2f
-        when (paperStyle) {
-            HandwritingPaperStyle.RULED -> {
-                var y = spacing
-                while (y < height) {
-                    canvas.drawLine(0f, y, width, y, guidePaint)
-                    y += spacing
-                }
-                val marginX = 36f * density * scale
-                canvas.drawLine(marginX, 0f, marginX, height, marginPaint)
+        val spacing = 32f * density * viewport.zoom
+        val offsetY = -((viewport.offsetY * viewport.zoom) % spacing)
+        val offsetX = -((viewport.offsetX * viewport.zoom) % spacing)
+        if (paperStyle == HandwritingPaperStyle.RULED) {
+            var y = offsetY
+            while (y < targetHeight + spacing) {
+                canvas.drawLine(0f, y, targetWidth.toFloat(), y, guidePaint)
+                y += spacing
             }
-            HandwritingPaperStyle.GRID -> {
-                var y = spacing
-                while (y < height) {
-                    canvas.drawLine(0f, y, width, y, guidePaint)
-                    y += spacing
-                }
-                var x = spacing
-                while (x < width) {
-                    canvas.drawLine(x, 0f, x, height, guidePaint)
-                    x += spacing
-                }
+            val marginX = (72f * density - viewport.offsetX) * viewport.zoom
+            if (marginX in -16f..(targetWidth + 16f).toFloat()) canvas.drawLine(marginX, 0f, marginX, targetHeight.toFloat(), marginPaint)
+        } else {
+            var y = offsetY
+            while (y < targetHeight + spacing) {
+                canvas.drawLine(0f, y, targetWidth.toFloat(), y, guidePaint)
+                y += spacing
             }
-            HandwritingPaperStyle.PLAIN -> Unit
-        }
-    }
-
-    private fun applyPenType(type: HandwritingPenType) {
-        penPaint.maskFilter = null
-        penPaint.pathEffect = null
-        penPaint.strokeMiter = 4f
-        penPaint.style = Paint.Style.STROKE
-        when (type) {
-            HandwritingPenType.ROUND -> {
-                penPaint.strokeCap = Paint.Cap.ROUND
-                penPaint.strokeJoin = Paint.Join.ROUND
-                penPaint.pathEffect = null
-            }
-            HandwritingPenType.MARKER -> {
-                penPaint.strokeCap = Paint.Cap.BUTT
-                penPaint.strokeJoin = Paint.Join.BEVEL
-                penPaint.pathEffect = createMarkerPathEffect()
-            }
-            HandwritingPenType.CALLIGRAPHY -> {
-                penPaint.strokeCap = Paint.Cap.BUTT
-                penPaint.strokeJoin = Paint.Join.MITER
-                penPaint.strokeMiter = 12f
-                penPaint.pathEffect = createCalligraphyPathEffect()
-            }
-            HandwritingPenType.HIGHLIGHTER -> {
-                penPaint.strokeCap = Paint.Cap.SQUARE
-                penPaint.strokeJoin = Paint.Join.BEVEL
-                penPaint.pathEffect = createHighlighterPathEffect()
+            var x = offsetX
+            while (x < targetWidth + spacing) {
+                canvas.drawLine(x, 0f, x, targetHeight.toFloat(), guidePaint)
+                x += spacing
             }
         }
     }
 
-    private fun createMarkerPathEffect(): android.graphics.PathEffect {
-        val jitter = max(1f, penPaint.strokeWidth * 0.45f)
-        val segment = max(1f, penPaint.strokeWidth * 0.9f)
-        val texture = DiscretePathEffect(segment, jitter)
-        val soften = CornerPathEffect(penPaint.strokeWidth * 0.4f)
-        return ComposePathEffect(soften, texture)
-    }
-
-    private fun createCalligraphyPathEffect(): android.graphics.PathEffect {
-        val nib = buildCalligraphyNibPath(penPaint.strokeWidth)
-        val advance = max(1f, penPaint.strokeWidth * 0.28f)
-        val dash = PathDashPathEffect(nib, advance, 0f, PathDashPathEffect.Style.ROTATE)
-        val smooth = CornerPathEffect(penPaint.strokeWidth * 0.2f)
-        return ComposePathEffect(smooth, dash)
-    }
-
-    private fun createHighlighterPathEffect(): android.graphics.PathEffect {
-        val softenRadius = max(1f, penPaint.strokeWidth * 0.75f)
-        return CornerPathEffect(softenRadius)
-    }
-
-    private fun updatePenColor() {
-        val baseColor = brushColorInt
-        val updatedColor = when (penType) {
-            HandwritingPenType.HIGHLIGHTER -> {
-                val targetAlpha = (Color.alpha(baseColor) * 0.55f).roundToInt().coerceIn(16, 255)
-                val brightened = ColorUtils.blendARGB(baseColor, Color.WHITE, 0.2f)
-                ColorUtils.setAlphaComponent(brightened, targetAlpha)
+    private fun drawVisibleElements(canvas: Canvas, targetWidth: Int = width, targetHeight: Int = height, includeMinimap: Boolean = true) {
+        val visible = RectF(viewport.offsetX, viewport.offsetY, viewport.offsetX + targetWidth / viewport.zoom, viewport.offsetY + targetHeight / viewport.zoom)
+        val sorted = document.elements.sortedBy { it.zIndex }
+        sorted.forEach { element ->
+            if (!RectF(element.x, element.y, element.x + element.width, element.y + element.height).intersect(visible)) return@forEach
+            when (element) {
+                is StrokeElement -> drawStroke(canvas, element)
+                is RuntimeBitmapElement -> drawRuntimeBitmap(canvas, element)
+                is TextElement -> Unit
+                is ImageElement -> Unit
+                is ShapeElement -> Unit
             }
-            else -> baseColor
+            if (includeMinimap && element.selected) drawSelection(canvas, element)
         }
-        penPaint.color = updatedColor
+        currentStroke?.let { drawStroke(canvas, it) }
     }
 
-    private fun buildCalligraphyNibPath(strokeWidth: Float): Path {
-        val nibLength = max(2f, strokeWidth * 1.35f)
-        val nibThickness = max(1f, strokeWidth * 0.45f)
-        val nibPath = Path().apply {
-            moveTo(-nibLength / 2f, 0f)
-            lineTo(0f, nibThickness / 2f)
-            lineTo(nibLength / 2f, 0f)
-            lineTo(0f, -nibThickness / 2f)
-            close()
+    private fun drawStroke(canvas: Canvas, stroke: StrokeElement) {
+        if (stroke.points.isEmpty()) return
+        strokePaint.color = stroke.color
+        strokePaint.strokeWidth = max(1f, stroke.strokeWidth * viewport.zoom)
+        strokePaint.alpha = if (stroke.tool == NoteTool.HIGHLIGHTER) 110 else Color.alpha(stroke.color)
+        val path = Path()
+        stroke.points.forEachIndexed { index, point ->
+            val screen = viewport.canvasToScreen(point.x, point.y)
+            if (index == 0) path.moveTo(screen.x, screen.y) else path.lineTo(screen.x, screen.y)
         }
-        val matrix = Matrix().apply { setRotate(-45f) }
-        nibPath.transform(matrix)
-        return nibPath
+        canvas.drawPath(path, strokePaint)
+        strokePaint.alpha = 255
     }
 
-    private fun applyEraserType(type: HandwritingEraserType) {
-        when (type) {
-            HandwritingEraserType.ROUND -> {
-                eraserPaint.strokeCap = Paint.Cap.ROUND
-                eraserPaint.strokeJoin = Paint.Join.ROUND
-                eraserPaint.pathEffect = null
-                eraserPreviewPaint.strokeCap = Paint.Cap.ROUND
-                eraserPreviewPaint.strokeJoin = Paint.Join.ROUND
-                eraserPreviewPaint.pathEffect = null
-            }
-            HandwritingEraserType.BLOCK -> {
-                eraserPaint.strokeCap = Paint.Cap.SQUARE
-                eraserPaint.strokeJoin = Paint.Join.BEVEL
-                eraserPaint.pathEffect = null
-                eraserPreviewPaint.strokeCap = Paint.Cap.SQUARE
-                eraserPreviewPaint.strokeJoin = Paint.Join.BEVEL
-                eraserPreviewPaint.pathEffect = null
-            }
+    private fun drawRuntimeBitmap(canvas: Canvas, element: RuntimeBitmapElement) {
+        val leftTop = viewport.canvasToScreen(element.x, element.y)
+        val rightBottom = viewport.canvasToScreen(element.x + element.width, element.y + element.height)
+        canvas.drawBitmap(element.bitmap, null, RectF(leftTop.x, leftTop.y, rightBottom.x, rightBottom.y), bitmapPaint)
+    }
+
+    private fun drawSelection(canvas: Canvas, element: NoteElement) {
+        val leftTop = viewport.canvasToScreen(element.x, element.y)
+        val rightBottom = viewport.canvasToScreen(element.x + element.width, element.y + element.height)
+        canvas.drawRoundRect(RectF(leftTop.x, leftTop.y, rightBottom.x, rightBottom.y), 12f * density, 12f * density, selectionPaint)
+    }
+
+    private fun drawMinimap(canvas: Canvas) {
+        val mapWidth = 54f * density
+        val mapHeight = 92f * density
+        val left = width - mapWidth - 18f * density
+        val top = 88f * density
+        minimapPaint.color = ColorUtils.setAlphaComponent(Color.WHITE, 150)
+        canvas.drawRoundRect(RectF(left, top, left + mapWidth, top + mapHeight), 18f * density, 18f * density, minimapPaint)
+        minimapPaint.color = ColorUtils.setAlphaComponent(Color.rgb(114, 91, 170), 80)
+        val content = contentBounds().takeIf { !it.isEmpty } ?: RectF(0f, 0f, document.canvasWidth, document.canvasHeight)
+        val visibleTop = ((viewport.offsetY - content.top) / max(1f, content.height())).coerceIn(0f, 1f)
+        val visibleHeight = (height / viewport.zoom / max(1f, content.height())).coerceIn(0.08f, 1f)
+        canvas.drawRoundRect(
+            RectF(left + 8f * density, top + 8f * density + visibleTop * (mapHeight - 16f * density), left + mapWidth - 8f * density, top + 8f * density + (visibleTop + visibleHeight) * (mapHeight - 16f * density)),
+            10f * density,
+            10f * density,
+            minimapPaint
+        )
+    }
+
+    private fun contentBounds(): RectF {
+        val bounds = RectF()
+        document.elements.forEachIndexed { index, element ->
+            val rect = RectF(element.x, element.y, element.x + element.width, element.y + element.height)
+            if (index == 0) bounds.set(rect) else bounds.union(rect)
         }
+        return bounds
     }
 
-    private fun updateGuidePaintColor() {
-        val luminance = ColorUtils.calculateLuminance(backgroundColorInt)
-        val baseColor = if (luminance < 0.5) Color.WHITE else Color.BLACK
-        val lineColor = ColorUtils.setAlphaComponent(baseColor, (0.28f * 255).roundToInt())
-        guidePaint.color = lineColor
-        val accent = ColorUtils.blendARGB(backgroundColorInt, Color.parseColor("#2962FF"), 0.55f)
-        marginPaint.color = ColorUtils.setAlphaComponent(accent, (0.65f * 255).roundToInt())
-    }
-
-    private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {
-        val source = extraBitmap ?: return
-        val snapshot = source.copy(Config.ARGB_8888, false)
-        history.addLast(StateSnapshot(snapshot, hasDrawing, hasBase))
-        trimHistory()
-    }
-
-    private fun replaceHistoryWithCurrent(hasDrawing: Boolean, hasBase: Boolean) {
-        recycleHistory()
-        history.clear()
-        pushCurrentState(hasDrawing, hasBase)
-    }
-
-    private fun trimHistory() {
-        while (history.size > maxHistory) {
-            val removed = history.removeFirst()
-            if (!removed.bitmap.isRecycled) removed.bitmap.recycle()
-        }
-    }
-
-    private fun recycleHistory() {
-        history.forEach { snapshot ->
-            if (!snapshot.bitmap.isRecycled) snapshot.bitmap.recycle()
-        }
-    }
+    private fun CanvasPoint.withPressure(event: MotionEvent): CanvasPoint = copy(pressure = event.pressure.coerceAtLeast(0.1f))
 
     private fun notifyContentChanged() {
+        document.updatedAt = System.currentTimeMillis()
         contentChangedListener?.invoke()
     }
 
-    private fun disallowParentIntercept(disallow: Boolean) {
-        var viewParent: ViewParent? = parent
-        while (viewParent != null) {
-            viewParent.requestDisallowInterceptTouchEvent(disallow)
-            viewParent = viewParent.parent
+    private data class RuntimeBitmapElement(
+        val bitmap: Bitmap,
+        override val id: String = java.util.UUID.randomUUID().toString(),
+        override var x: Float,
+        override var y: Float,
+        override var width: Float,
+        override var height: Float,
+        override var rotation: Float = 0f,
+        override var scale: Float = 1f,
+        override var zIndex: Int = 0,
+        override var selected: Boolean = false
+    ) : NoteElement(id, NoteElementType.IMAGE_BLOCK, x, y, width, height, rotation, scale, zIndex, selected) {
+        override fun toJson(): org.json.JSONObject = org.json.JSONObject().apply {
+            put("id", id)
+            put("type", type.name)
+            put("imageUri", "runtime-imported-bitmap")
+            put("x", x.toDouble())
+            put("y", y.toDouble())
+            put("width", width.toDouble())
+            put("height", height.toDouble())
+            put("rotation", rotation.toDouble())
+            put("scale", scale.toDouble())
+            put("zIndex", zIndex)
         }
-    }
-
-    private fun currentCommitPaint(): Paint = when (drawingTool) {
-        PEN -> penPaint
-        ERASER -> eraserPaint
-    }
-
-    private fun currentPreviewPaint(): Paint = when (drawingTool) {
-        PEN -> penPaint
-        ERASER -> eraserPreviewPaint
     }
 }
