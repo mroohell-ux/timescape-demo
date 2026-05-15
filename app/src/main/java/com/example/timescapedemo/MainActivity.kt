@@ -3843,6 +3843,17 @@ class MainActivity : AppCompatActivity() {
             clearButton.isEnabled = handwritingView.hasDrawing()
         }
 
+        fun updateSelectedCanvasSize(width: Int, height: Int) {
+            if (width <= 0 || height <= 0) return
+            val matchingOption = sizeOptions.firstOrNull { it.width == width && it.height == height }
+            selectedSize = matchingOption ?: CanvasSizeOption(
+                key = "expanded",
+                label = getString(R.string.handwriting_size_custom, width, height),
+                width = width,
+                height = height
+            )
+        }
+
         applyCanvasCardDisplaySize(selectedSize.width, selectedSize.height)
         handwritingView.setCanvasSize(selectedSize.width, selectedSize.height)
         handwritingView.setCanvasBackgroundColor(selectedPaperColor.color)
@@ -3853,6 +3864,10 @@ class MainActivity : AppCompatActivity() {
         handwritingView.setEraserType(selectedEraserType)
         handwritingView.setEraserSizeDp(selectedEraserSize)
         handwritingView.setOnContentChangedListener { updateHistoryButtons() }
+        handwritingView.setOnCanvasSizeChangedListener { width, height ->
+            updateSelectedCanvasSize(width, height)
+            applyCanvasCardDisplaySize(width, height)
+        }
         val baseBitmap = extras.baseBitmap
         if (baseBitmap != null) {
             handwritingView.setBitmap(baseBitmap)
@@ -4131,12 +4146,13 @@ class MainActivity : AppCompatActivity() {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
                 }
+                val (canvasWidth, canvasHeight) = handwritingView.getCanvasContentSize()
                 val options = HandwritingOptions(
                     backgroundColor = selectedPaperColor.color,
                     brushColor = selectedBrushColor.color,
                     brushSizeDp = selectedBrushSize,
-                    canvasWidth = selectedSize.width,
-                    canvasHeight = selectedSize.height,
+                    canvasWidth = canvasWidth,
+                    canvasHeight = canvasHeight,
                     format = selectedFormat,
                     paperStyle = selectedPaperStyle,
                     penType = selectedPenType,
