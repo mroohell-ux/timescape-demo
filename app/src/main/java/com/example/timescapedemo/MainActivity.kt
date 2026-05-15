@@ -3679,20 +3679,11 @@ class MainActivity : AppCompatActivity() {
 
         fun applyCanvasCardDisplaySize(contentWidthPx: Int, contentHeightPx: Int) {
             if (contentWidthPx <= 0 || contentHeightPx <= 0) return
-            val widthScale = maxCanvasWidth.toFloat() / contentWidthPx.toFloat()
-            val heightScale = maxCanvasHeight.toFloat() / contentHeightPx.toFloat()
-            val scale = listOf(widthScale, heightScale)
-                .filter { it.isFinite() && it > 0f }
-                .minOrNull()
-                ?: 1f
-            val targetWidth = (contentWidthPx * scale).roundToInt().coerceAtLeast(1)
-            val targetHeight = (contentHeightPx * scale).roundToInt().coerceAtLeast(1)
             handwritingCard.updateLayoutParams<ViewGroup.LayoutParams> {
-                if (width != targetWidth) {
-                    width = targetWidth
-                }
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = ViewGroup.LayoutParams.MATCH_PARENT
             }
-            handwritingView.minimumHeight = targetHeight
+            handwritingView.minimumHeight = resources.displayMetrics.heightPixels
         }
 
         fun createChoiceChip(
@@ -4123,7 +4114,7 @@ class MainActivity : AppCompatActivity() {
         dialog.setOnShowListener {
             dialog.window?.setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                 val exportBitmap = handwritingView.exportBitmap()
