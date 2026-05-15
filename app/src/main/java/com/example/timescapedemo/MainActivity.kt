@@ -260,6 +260,7 @@ class MainActivity : AppCompatActivity() {
     private var isGlobalVideoMuted: Boolean = false
     private var lanServer: TimescapeLanServer? = null
     private var isWatchSyncEnabled: Boolean = false
+    private val bubbleModeScores: MutableMap<Long, Int> = mutableMapOf()
 
     private data class StickyNoteFaces(val front: String, val back: String)
 
@@ -836,6 +837,7 @@ class MainActivity : AppCompatActivity() {
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
+                R.id.action_bubble_mode -> { showBubbleMode(); true }
                 R.id.action_export_flow -> { launchExportCurrentFlow(); true }
                 R.id.action_add_card -> {
                     if (currentFlow()?.id == VIDEO_FLOW_ID) {
@@ -2739,6 +2741,161 @@ class MainActivity : AppCompatActivity() {
         applyCardBackgrounds(flow)
         refreshFlow(flow, scrollToTop = false)
         saveState()
+    }
+
+    private data class BubbleModeNoteTarget(
+        val flow: CardFlow,
+        val card: CardItem,
+        val note: StickyNote
+    )
+
+    private fun showBubbleMode() {
+        val flow = currentFlow() ?: return
+        ensureBubbleModeTestNotes(flow)
+        val allTargets = flow.cards.flatMap { card ->
+            card.stickyNotes.map { note -> BubbleModeNoteTarget(flow, card, note) }
+        }
+        Log.d("BubbleMode", "showBubbleMode flow=${flow.name} stickyTargets=${allTargets.size}")
+        if (allTargets.isEmpty()) {
+            snackbar(getString(R.string.snackbar_bubble_mode_empty))
+            return
+        }
+        allTargets.forEach { target ->
+            bubbleModeScores.putIfAbsent(target.note.id, 0)
+        }
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val flowBackground = rootLayout.background?.constantState?.newDrawable()?.mutate()
+            ?: ColorDrawable(Color.parseColor("#E7F3FF"))
+        dialog.window?.setBackgroundDrawable(flowBackground)
+        val content = layoutInflater.inflate(R.layout.dialog_bubble_mode, null)
+        dialog.setContentView(content)
+        val bubbleField = content.findViewById<BubbleModeView>(R.id.bubbleField)
+        val decisionBar = content.findViewById<View>(R.id.bubbleDecisionBar)
+        val rememberButton = content.findViewById<MaterialButton>(R.id.buttonBubbleRemember)
+        val dontRememberButton = content.findViewById<MaterialButton>(R.id.buttonBubbleDontRemember)
+        var focusedTarget: BubbleModeNoteTarget? = null
+        bubbleField.submitBubbles(allTargets.map { target -> bubbleItemFromTarget(target) })
+        Log.d("BubbleMode", "submitted bubbles count=${allTargets.size}")
+        bubbleField.onBubbleFocusChanged = { item ->
+            focusedTarget = item?.payload as? BubbleModeNoteTarget
+            decisionBar.isVisible = focusedTarget != null
+        }
+        bubbleField.onBubbleClick = { item ->
+            val target = item.payload as? BubbleModeNoteTarget
+            if (target != null) {
+                Log.d("BubbleMode", "bubble tapped noteId=${target.note.id} cardId=${target.card.id} score=${bubbleModeScores[target.note.id] ?: 0}")
+            }
+        }
+        rememberButton.setOnClickListener {
+            val target = focusedTarget ?: return@setOnClickListener
+            val current = bubbleModeScores[target.note.id] ?: 0
+            bubbleModeScores[target.note.id] = current - 1
+            focusedTarget = null
+            decisionBar.isVisible = false
+            bubbleField.clearFocusedBubble()
+        }
+        dontRememberButton.setOnClickListener {
+            val target = focusedTarget ?: return@setOnClickListener
+            val current = bubbleModeScores[target.note.id] ?: 0
+            bubbleModeScores[target.note.id] = current + 1
+            focusedTarget = null
+            decisionBar.isVisible = false
+            bubbleField.clearFocusedBubble()
+        }
+        dialog.show()
+        Log.d("BubbleMode", "dialog shown")
+    }
+
+    private fun bubbleItemFromTarget(target: BubbleModeNoteTarget): BubbleModeView.BubbleItem {
+        val score = bubbleModeScores[target.note.id] ?: 0
+        val label = target.note.frontText.ifBlank {
+            target.note.backText.ifBlank { target.card.title.ifBlank { target.card.snippet } }
+        }
+        return BubbleModeView.BubbleItem(
+            id = target.note.id,
+            title = "$label (${score})",
+            frontText = target.note.frontText,
+            backText = target.note.backText,
+            color = target.note.color,
+            payload = target
+        )
+    }
+
+    private fun selectBubblesForPage(
+        allTargets: List<BubbleModeNoteTarget>,
+        maxCount: Int
+    ): List<BubbleModeNoteTarget> {
+        if (allTargets.size <= maxCount) return allTargets
+        val selected = mutableListOf<BubbleModeNoteTarget>()
+        val remaining = allTargets.toMutableList()
+        val random = Random(System.currentTimeMillis())
+        repeat(maxCount) {
+            val totalWeight = remaining.sumOf { target ->
+                val score = bubbleModeScores[target.note.id] ?: 0
+                kotlin.math.exp((score / 3.0)).coerceAtLeast(0.05)
+            }
+            var cursor = random.nextDouble() * totalWeight
+            var picked: BubbleModeNoteTarget = remaining.first()
+            for (candidate in remaining) {
+                val score = bubbleModeScores[candidate.note.id] ?: 0
+                val weight = kotlin.math.exp((score / 3.0)).coerceAtLeast(0.05)
+                cursor -= weight
+                if (cursor <= 0.0) {
+                    picked = candidate
+                    break
+                }
+            }
+            selected.add(picked)
+            remaining.remove(picked)
+            if (remaining.isEmpty()) return@repeat
+        }
+        return selected
+    }
+
+    private fun ensureBubbleModeTestNotes(flow: CardFlow) {
+        val existingNotes = flow.cards.sumOf { it.stickyNotes.size }
+        val targetCount = 100
+        if (existingNotes >= targetCount) return
+
+        val targetCard = flow.cards.firstOrNull() ?: CardItem(
+            id = nextCardId++,
+            title = "Bubble Test Card",
+            snippet = "Auto-generated sticky notes for Bubble Mode testing.",
+            textColor = Color.WHITE,
+            updatedAt = System.currentTimeMillis()
+        ).also { card ->
+            flow.cards.add(0, card)
+            flowShuffleStates[flow.id]?.originalOrder?.add(0, card.id)
+        }
+
+        val missingCount = targetCount - existingNotes
+        repeat(missingCount) { idx ->
+            val noteIndex = existingNotes + idx + 1
+            val detailCount = 1 + (noteIndex % 6)
+            val frontExtra = buildString {
+                repeat(detailCount) { part ->
+                    append(" focus-$part")
+                }
+            }
+            val backExtra = buildString {
+                repeat(detailCount + 2) { part ->
+                    append(" recall-$part")
+                }
+            }
+            val note = StickyNote(
+                id = System.currentTimeMillis() + Random.nextLong(1_000_000L) + noteIndex,
+                frontText = "Front side note $noteIndex: Bubble mode testing content with readable context and plenty of detail for layout checks.$frontExtra",
+                backText = "Back side note $noteIndex: Secondary testing text to validate flips, rendering depth, and interaction reliability in bubble mode.$backExtra",
+                color = stickyNotePalette[noteIndex % stickyNotePalette.size],
+                rotation = Random.nextDouble(-12.0, 12.0).toFloat()
+            )
+            targetCard.stickyNotes.add(0, note)
+        }
+        targetCard.updatedAt = System.currentTimeMillis()
+        applyCardBackgrounds(flow)
+        refreshFlow(flow, scrollToTop = false)
+        saveState()
+        Log.d("BubbleMode", "Auto-generated $missingCount sticky notes for testing; total now=${targetCount.coerceAtMost(existingNotes + missingCount)}")
     }
 
     private fun showStickyNotesDialog(

@@ -16,6 +16,7 @@
     <string name="menu_export_flow">Export flow</string>
     <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
+    <string name="menu_bubble_mode">Bubble Mode</string>
     <string name="menu_unshuffle_cards">Restore order</string>
     <string name="menu_reorder_flows_on">Reorder flows: On</string>
     <string name="menu_reorder_flows_off">Reorder flows: Off</string>
@@ -233,6 +234,12 @@
     <string name="image_card_annotation_failed">Couldnt save that edit.</string>
     <string name="image_card_annotation_load_failed">Couldnt open that photo.</string>
     <string name="card_title_speak_content_desc">Speak "%1$s"</string>
+    <string name="bubble_mode_title">Bubble Mode</string>
+    <string name="bubble_mode_subtitle">Glide through your sticky notes and tap a bubble to open it.</string>
+    <string name="snackbar_bubble_mode_empty">No sticky notes in this flow yet.</string>
+    <string name="bubble_review_title">Bubble Review</string>
+    <string name="bubble_review_remember">Remember</string>
+    <string name="bubble_review_dont_remember">Don’t remember</string>
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
     <string name="handwriting_tool_canvas">Canvas options</string>
