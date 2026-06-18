@@ -73,9 +73,11 @@ class HandwritingView @JvmOverloads constructor(
     private val path = Path()
     private val history = ArrayDeque<StateSnapshot>()
 
-    private var extraBitmap: Bitmap? = null
-    private var extraCanvas: Canvas? = null
-    private var pendingBitmap: Bitmap? = null
+    private var strokeBitmap: Bitmap? = null
+    private var strokeCanvas: Canvas? = null
+    private var baseBitmap: Bitmap? = null
+    private var baseSourceBitmap: Bitmap? = null
+    private var pendingStrokeBitmap: Bitmap? = null
     private var pendingHasContent = false
     private var pendingHasBase = false
 
@@ -130,32 +132,38 @@ class HandwritingView @JvmOverloads constructor(
         if (w <= 0 || h <= 0) {
             recycleHistory()
             history.clear()
-            extraBitmap?.recycle()
-            extraBitmap = null
-            extraCanvas = null
+            strokeBitmap?.recycle()
+            strokeBitmap = null
+            strokeCanvas = null
+            baseBitmap?.recycle()
+            baseBitmap = null
             return
         }
+
         val newBitmap = Bitmap.createBitmap(w, h, Config.ARGB_8888)
         val newCanvas = Canvas(newBitmap)
         newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraBitmap?.recycle()
-        extraBitmap = newBitmap
-        extraCanvas = newCanvas
+        strokeBitmap?.recycle()
+        strokeBitmap = newBitmap
+        strokeCanvas = newCanvas
+
+        baseBitmap?.recycle()
+        baseBitmap = baseSourceBitmap?.let { createBaseBitmapForSize(it, w, h) }
 
         recycleHistory()
         history.clear()
-        if (pendingBitmap != null) {
-            pendingBitmap?.let { bitmap ->
-                drawBitmapOntoCanvas(bitmap, recycleAfter = true)
+        if (pendingStrokeBitmap != null) {
+            pendingStrokeBitmap?.let { bitmap ->
+                drawBitmapOntoCanvas(bitmap, strokeCanvas, w.toFloat(), h.toFloat(), recycleAfter = true)
             }
-            hasBaseImage = pendingHasBase
-            hasContent = pendingHasContent || pendingHasBase
+            hasBaseImage = pendingHasBase || baseBitmap != null
+            hasContent = pendingHasContent || hasBaseImage
             pushCurrentState(hasContent, hasBaseImage)
-            pendingBitmap = null
+            pendingStrokeBitmap = null
         } else {
-            hasBaseImage = false
-            hasContent = false
-            pushCurrentState(false, false)
+            hasBaseImage = baseBitmap != null
+            hasContent = hasBaseImage
+            pushCurrentState(hasContent, hasBaseImage)
         }
         pendingHasContent = false
         pendingHasBase = false
@@ -167,7 +175,8 @@ class HandwritingView @JvmOverloads constructor(
         super.onDraw(canvas)
         canvas.drawColor(backgroundColorInt)
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
-        extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+        baseBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+        strokeBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, currentPreviewPaint())
     }
 
@@ -201,7 +210,11 @@ class HandwritingView @JvmOverloads constructor(
     fun clear() {
         val hadAnyContent = hasDrawing()
         commitCurrentPath()
-        extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        strokeCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        baseBitmap?.recycle()
+        baseBitmap = null
+        baseSourceBitmap?.recycle()
+        baseSourceBitmap = null
         hasContent = false
         hasBaseImage = false
         if (hadAnyContent) {
@@ -213,8 +226,8 @@ class HandwritingView @JvmOverloads constructor(
                 replaceHistoryWithCurrent(false, false)
             }
         }
-        pendingBitmap?.recycle()
-        pendingBitmap = null
+        pendingStrokeBitmap?.recycle()
+        pendingStrokeBitmap = null
         pendingHasContent = false
         pendingHasBase = false
         invalidate()
@@ -231,8 +244,8 @@ class HandwritingView @JvmOverloads constructor(
         val current = history.removeLast()
         if (!current.bitmap.isRecycled) current.bitmap.recycle()
         val previous = history.last()
-        extraCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraCanvas?.drawBitmap(previous.bitmap, 0f, 0f, null)
+        strokeCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        strokeCanvas?.drawBitmap(previous.bitmap, 0f, 0f, null)
         hasBaseImage = previous.hasBase
         hasContent = previous.hasDrawing
         invalidate()
@@ -245,27 +258,39 @@ class HandwritingView @JvmOverloads constructor(
     fun hasDrawing(): Boolean = hasContent || !path.isEmpty
 
     fun setBitmap(bitmap: Bitmap?) {
-        pendingBitmap?.recycle()
-        pendingBitmap = null
+        pendingStrokeBitmap?.recycle()
+        pendingStrokeBitmap = null
         pendingHasContent = false
         pendingHasBase = false
+        baseSourceBitmap?.recycle()
+        baseSourceBitmap = null
+        baseBitmap?.recycle()
+        baseBitmap = null
+        strokeCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+
         if (bitmap == null) {
-            clear()
+            hasBaseImage = false
+            hasContent = false
+            replaceHistoryWithCurrent(false, false)
+            invalidate()
+            notifyContentChanged()
             return
         }
+
         val copy = bitmap.copy(Config.ARGB_8888, false)
         if (!bitmap.isRecycled) {
             bitmap.recycle()
         }
-        if (width > 0 && height > 0 && extraCanvas != null) {
-            drawBitmapOntoCanvas(copy, recycleAfter = true)
+        baseSourceBitmap = copy
+
+        if (width > 0 && height > 0 && strokeCanvas != null) {
+            baseBitmap = createBaseBitmapForSize(copy, width, height)
             hasBaseImage = true
             hasContent = true
             replaceHistoryWithCurrent(true, true)
             invalidate()
             notifyContentChanged()
         } else {
-            pendingBitmap = copy
             pendingHasContent = true
             pendingHasBase = true
         }
@@ -273,16 +298,16 @@ class HandwritingView @JvmOverloads constructor(
 
     fun exportBitmap(): Bitmap? {
         commitCurrentPath(addToHistory = false)
-        val source = extraBitmap ?: return null
-        val targetW = exportWidth.takeIf { it > 0 } ?: source.width
-        val targetH = exportHeight.takeIf { it > 0 } ?: source.height
+        val targetW = exportWidth.takeIf { it > 0 } ?: width.takeIf { it > 0 }
+        val targetH = exportHeight.takeIf { it > 0 } ?: height.takeIf { it > 0 }
+        if (targetW == null || targetH == null) return null
         val result = Bitmap.createBitmap(targetW, targetH, Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
         val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
         drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
-        val destRect = Rect(0, 0, targetW, targetH)
-        canvas.drawBitmap(source, null, destRect, null)
+        baseSourceBitmap?.let { drawBitmapFitted(canvas, it, targetW.toFloat(), targetH.toFloat()) }
+        strokeBitmap?.let { drawBitmapFitted(canvas, it, targetW.toFloat(), targetH.toFloat()) }
         return result
     }
 
@@ -360,9 +385,9 @@ class HandwritingView @JvmOverloads constructor(
         if (widthPx <= 0 || heightPx <= 0) return
         if (widthPx == exportWidth && heightPx == exportHeight) return
         commitCurrentPath()
-        val snapshot = extraBitmap?.copy(Config.ARGB_8888, false)
-        pendingBitmap?.recycle()
-        pendingBitmap = snapshot
+        val snapshot = strokeBitmap?.copy(Config.ARGB_8888, false)
+        pendingStrokeBitmap?.recycle()
+        pendingStrokeBitmap = snapshot
         pendingHasContent = hasContent
         pendingHasBase = hasBaseImage
         exportWidth = widthPx
@@ -379,11 +404,15 @@ class HandwritingView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         recycleHistory()
         history.clear()
-        extraBitmap?.recycle()
-        extraBitmap = null
-        extraCanvas = null
-        pendingBitmap?.recycle()
-        pendingBitmap = null
+        strokeBitmap?.recycle()
+        strokeBitmap = null
+        strokeCanvas = null
+        baseBitmap?.recycle()
+        baseBitmap = null
+        baseSourceBitmap?.recycle()
+        baseSourceBitmap = null
+        pendingStrokeBitmap?.recycle()
+        pendingStrokeBitmap = null
     }
 
     private fun touchStart(x: Float, y: Float) {
@@ -414,20 +443,36 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
-        val canvas = extraCanvas ?: return
+        val canvas = strokeCanvas ?: return
         canvas.drawPath(path, currentCommitPaint())
         path.reset()
-        hasContent = true
+        hasContent = when (drawingTool) {
+            PEN -> true
+            ERASER -> hasBaseImage || strokeHasContent()
+        }
         if (addToHistory) {
-            pushCurrentState(true, hasBaseImage)
+            pushCurrentState(hasContent, hasBaseImage)
         }
         notifyContentChanged()
     }
 
-    private fun drawBitmapOntoCanvas(bitmap: Bitmap, recycleAfter: Boolean = false) {
-        val canvas = extraCanvas ?: return
+    private fun drawBitmapOntoCanvas(
+        bitmap: Bitmap,
+        canvas: Canvas?,
+        destWidth: Float,
+        destHeight: Float,
+        recycleAfter: Boolean = false
+    ) {
+        if (canvas == null) return
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        val destRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+        drawBitmapFitted(canvas, bitmap, destWidth, destHeight)
+        if (recycleAfter && !bitmap.isRecycled) {
+            bitmap.recycle()
+        }
+    }
+
+    private fun drawBitmapFitted(canvas: Canvas, bitmap: Bitmap, destWidth: Float, destHeight: Float) {
+        val destRect = RectF(0f, 0f, destWidth, destHeight)
         val srcRect = Rect(0, 0, bitmap.width, bitmap.height)
         val srcRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
         val destRatio = if (destRect.height() == 0f) 1f else destRect.width() / destRect.height()
@@ -442,9 +487,21 @@ class HandwritingView @JvmOverloads constructor(
             drawRect.set(left, destRect.top, left + scaledWidth, destRect.bottom)
         }
         canvas.drawBitmap(bitmap, srcRect, drawRect, null)
-        if (recycleAfter && !bitmap.isRecycled) {
-            bitmap.recycle()
-        }
+    }
+
+    private fun strokeHasContent(): Boolean {
+        val bitmap = strokeBitmap ?: return false
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        return pixels.any { Color.alpha(it) != 0 }
+    }
+
+    private fun createBaseBitmapForSize(source: Bitmap, width: Int, height: Int): Bitmap {
+        val result = Bitmap.createBitmap(width, height, Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        drawBitmapFitted(canvas, source, width.toFloat(), height.toFloat())
+        return result
     }
 
     private fun drawPaperGuides(canvas: Canvas, width: Float, height: Float, scale: Float) {
@@ -589,7 +646,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {
-        val source = extraBitmap ?: return
+        val source = strokeBitmap ?: return
         val snapshot = source.copy(Config.ARGB_8888, false)
         history.addLast(StateSnapshot(snapshot, hasDrawing, hasBase))
         trimHistory()
