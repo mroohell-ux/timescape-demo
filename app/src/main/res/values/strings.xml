@@ -242,7 +242,7 @@
     <string name="handwriting_text_placeholder">Write here</string>
     <string name="handwriting_text_keyboard_hint">Write a word or short phrase. After you stop for 2 seconds, it will move into the text buffer automatically so you can keep writing.</string>
     <string name="handwriting_text_insertion_point">Insertion point: %1$.0f, %2$.0f</string>
-    <string name="handwriting_text_flow_hint">Words start at the tapped point, flow to the right, and wrap onto the next line before reaching the notebook edge.</string>
+    <string name="handwriting_text_flow_hint">Words start at the tapped point and keep flowing to the right. Use New line when you want to continue below.</string>
     <string name="handwriting_text_insertion_preview">Notebook insertion preview</string>
     <string name="handwriting_text_auto_commit_waiting">Waiting for more writing…</string>
     <string name="handwriting_text_auto_commit_pending">Auto-committing in 2 seconds</string>

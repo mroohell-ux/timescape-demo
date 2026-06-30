@@ -4085,8 +4085,6 @@ class MainActivity : AppCompatActivity() {
             val keyboardCanvasHeight = (132 * density).roundToInt()
             val bufferWidth = (1400 * density).roundToInt()
             val bufferHeight = (900 * density).roundToInt()
-            val sourceCanvasWidth = handwritingView.width.coerceAtLeast(1)
-            val sourceCanvasHeight = handwritingView.height.coerceAtLeast(1)
             val bufferBitmap = Bitmap.createBitmap(bufferWidth, bufferHeight, Bitmap.Config.ARGB_8888)
             val bufferCanvas = Canvas(bufferBitmap)
             bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
@@ -4120,7 +4118,7 @@ class MainActivity : AppCompatActivity() {
                     contentDescription = getString(R.string.handwriting_text_insertion_preview)
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
-                        (72 * density).roundToInt()
+                        (64 * density).roundToInt()
                     )
                 }
 
@@ -4129,34 +4127,24 @@ class MainActivity : AppCompatActivity() {
                     val padding = 8f * density
                     val availableWidth = (width - padding * 2).coerceAtLeast(1f)
                     val availableHeight = (height - padding * 2).coerceAtLeast(1f)
-                    val sourceRatio = sourceCanvasWidth.toFloat() / sourceCanvasHeight.toFloat()
-                    val previewRatio = availableWidth / availableHeight
-                    val previewRect = RectF()
-                    if (sourceRatio > previewRatio) {
-                        val previewHeight = availableWidth / sourceRatio
-                        val top = padding + (availableHeight - previewHeight) / 2f
-                        previewRect.set(padding, top, padding + availableWidth, top + previewHeight)
-                    } else {
-                        val previewWidth = availableHeight * sourceRatio
-                        val left = padding + (availableWidth - previewWidth) / 2f
-                        previewRect.set(left, padding, left + previewWidth, padding + availableHeight)
-                    }
+                    val previewRect = RectF(padding, padding, padding + availableWidth, padding + availableHeight)
                     val radius = 10f * density
                     canvas.drawRoundRect(previewRect, radius, radius, previewBackgroundPaint)
                     canvas.drawRoundRect(previewRect, radius, radius, previewBorderPaint)
-                    val markerX = previewRect.left + (targetX / sourceCanvasWidth.toFloat()).coerceIn(0f, 1f) * previewRect.width()
-                    val markerY = previewRect.top + (targetY / sourceCanvasHeight.toFloat()).coerceIn(0f, 1f) * previewRect.height()
+                    val markerX = previewRect.left + 20f * density
+                    val markerY = previewRect.centerY()
                     val markerRadius = 7f * density
-                    val lineHeight = 14f * density
-                    val lineGap = 5f * density
+                    val lineHeight = 10f * density
+                    val lineGap = 4f * density
                     val flowRight = previewRect.right - 8f * density
                     val flowBottom = previewRect.bottom - 8f * density
-                    var flowTop = markerY + markerRadius * 1.8f
-                    repeat(2) { index ->
+                    var flowTop = previewRect.top + 10f * density
+                    val flowLeft = markerX + markerRadius * 2.2f
+                    repeat(3) { index ->
                         if (flowTop + lineHeight <= flowBottom && markerX < flowRight) {
-                            val lineRight = if (index == 0) flowRight else markerX + (flowRight - markerX) * 0.65f
+                            val lineRight = if (index < 2) flowRight else flowLeft + (flowRight - flowLeft) * 0.62f
                             canvas.drawRoundRect(
-                                RectF(markerX, flowTop, lineRight, flowTop + lineHeight),
+                                RectF(flowLeft, flowTop, lineRight, flowTop + lineHeight),
                                 lineHeight / 2f,
                                 lineHeight / 2f,
                                 previewFlowPaint
@@ -4310,18 +4298,11 @@ class MainActivity : AppCompatActivity() {
                             cursorX = 0f
                             cursorY += bufferLineHeight
                         }
-                        fun maxBufferLineWidth(): Float {
-                            val insertSizePx = insertSizeSlider.value.coerceAtLeast(1f)
-                            val scale = insertSizePx / guideLineHeightPx.toFloat()
-                            val availableCanvasWidth = (sourceCanvasWidth.toFloat() - targetX).coerceAtLeast(insertSizePx)
-                            return (availableCanvasWidth / scale).coerceIn(guideLineHeightPx.toFloat(), bufferWidth.toFloat())
-                        }
                         fun commitKeyboardStrokes(addTrailingSpace: Boolean): Boolean {
                             val contentBounds = editor.contentBounds() ?: return false
                             val normalizeScale = guideLineHeightPx.toFloat() / contentBounds.height().coerceAtLeast(1).toFloat()
                             val groupBitmap = editor.exportContentBitmapScaled(normalizeScale, 0) ?: return false
-                            val lineWidth = maxBufferLineWidth()
-                            if (cursorX > 0f && cursorX + groupBitmap.width > lineWidth) {
+                            if (cursorX > 0f && cursorX + groupBitmap.width > bufferWidth) {
                                 moveToNextLine()
                             }
                             if (cursorY + groupBitmap.height > bufferHeight) {
