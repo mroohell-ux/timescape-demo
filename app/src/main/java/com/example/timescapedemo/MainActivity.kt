@@ -4440,9 +4440,8 @@ class MainActivity : AppCompatActivity() {
                             cursorY += bufferLineHeight
                         }
                         fun commitKeyboardStrokes(addTrailingSpace: Boolean): Boolean {
-                            val contentBounds = editor.contentBounds() ?: return false
-                            val normalizeScale = guideLineHeightPx.toFloat() / contentBounds.height().coerceAtLeast(1).toFloat()
-                            val groupBitmap = editor.exportContentBitmapScaled(normalizeScale, 0) ?: return false
+                            if (editor.contentBounds() == null) return false
+                            val groupBitmap = editor.exportContentBitmapScaled(1f, 0) ?: return false
                             if (cursorX > 0f && cursorX + groupBitmap.width > bufferWidth) {
                                 moveToNextLine()
                             }
