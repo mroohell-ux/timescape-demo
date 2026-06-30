@@ -57,7 +57,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
@@ -4082,10 +4081,30 @@ class MainActivity : AppCompatActivity() {
 
         fun showHandwritingTextInput(targetX: Float, targetY: Float) {
             val guideLineHeightPx = (28 * density).roundToInt().coerceAtLeast(1)
-            val editorCanvasWidth = (720 * density).roundToInt()
-            val editorCanvasHeight = (1200 * density).roundToInt()
+            val keyboardCanvasWidth = (360 * density).roundToInt()
+            val keyboardCanvasHeight = (132 * density).roundToInt()
+            val bufferWidth = (1400 * density).roundToInt()
+            val bufferHeight = (900 * density).roundToInt()
+            val bufferBitmap = Bitmap.createBitmap(bufferWidth, bufferHeight, Bitmap.Config.ARGB_8888)
+            val bufferCanvas = Canvas(bufferBitmap)
+            bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            val bufferPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+            val bufferPreview = ImageView(this).apply {
+                adjustViewBounds = true
+                setBackgroundColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x08))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    (96 * density).roundToInt()
+                )
+            }
+            var cursorX = 0f
+            var cursorY = 0f
+            val spaceWidth = guideLineHeightPx * 0.75f
+            val bufferLineHeight = guideLineHeightPx * 1.4f
+            var bufferBounds: RectF? = null
+            var hasBufferedText = false
             val editor = HandwritingView(this).apply {
-                setCanvasSize(editorCanvasWidth, editorCanvasHeight)
+                setCanvasSize(keyboardCanvasWidth, keyboardCanvasHeight)
                 setCanvasBackgroundColor(Color.WHITE)
                 setPaperStyle(HandwritingPaperStyle.RULED)
                 setBrushColor(selectedBrushColor.color)
@@ -4093,22 +4112,8 @@ class MainActivity : AppCompatActivity() {
                 setPenType(selectedPenType)
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    editorCanvasHeight
+                    keyboardCanvasHeight
                 )
-            }
-            val editorScroll = ScrollView(this).apply {
-                isFillViewport = false
-                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    (420 * density).roundToInt()
-                )
-                background = GradientDrawable().apply {
-                    setColor(Color.WHITE)
-                    setStroke((1.5f * density).roundToInt().coerceAtLeast(1), Color.parseColor("#8090A4"))
-                    cornerRadius = 14 * density
-                }
-                addView(editor)
             }
             val placeholder = TextView(this).apply {
                 text = getString(R.string.handwriting_text_placeholder)
@@ -4117,7 +4122,16 @@ class MainActivity : AppCompatActivity() {
                 setPadding((18 * density).roundToInt(), (14 * density).roundToInt(), 0, 0)
             }
             val editorFrame = FrameLayout(this).apply {
-                addView(editorScroll)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    keyboardCanvasHeight
+                )
+                background = GradientDrawable().apply {
+                    setColor(Color.WHITE)
+                    setStroke((1.5f * density).roundToInt().coerceAtLeast(1), Color.parseColor("#8090A4"))
+                    cornerRadius = 14 * density
+                }
+                addView(editor)
                 addView(placeholder)
             }
             val insertSizeValue = TextView(this)
@@ -4136,6 +4150,11 @@ class MainActivity : AppCompatActivity() {
             val clearTextButton = MaterialButton(this).apply { text = getString(R.string.handwriting_action_clear) }
             val spaceButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_space) }
             val newLineButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_new_line) }
+            val keyboardHint = TextView(this).apply {
+                text = getString(R.string.handwriting_text_keyboard_hint)
+                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
+                setPadding(0, 0, 0, (8 * density).roundToInt())
+            }
             val editorActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(undoTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -4151,8 +4170,10 @@ class MainActivity : AppCompatActivity() {
                     (20 * density).roundToInt(),
                     (8 * density).roundToInt()
                 )
+                addView(keyboardHint)
                 addView(editorFrame)
                 addView(editorActions)
+                addView(bufferPreview)
                 addView(TextView(this@MainActivity).apply {
                     text = getString(R.string.handwriting_text_insert_size_label)
                     setPadding(0, (12 * density).roundToInt(), 0, 0)
@@ -4173,44 +4194,111 @@ class MainActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         )
                         val saveButton = getButton(AlertDialog.BUTTON_POSITIVE)
+                        var commitRunnable: Runnable? = null
+                        fun updateBufferPreview() {
+                            bufferPreview.setImageBitmap(bufferBitmap)
+                            bufferPreview.invalidate()
+                        }
                         fun updateEditorActions() {
                             val hasInput = editor.hasDrawing()
                             placeholder.isGone = hasInput
-                            saveButton.isEnabled = hasInput
+                            saveButton.isEnabled = hasInput || hasBufferedText
                             undoTextButton.isEnabled = editor.canUndo()
-                            clearTextButton.isEnabled = hasInput
+                            clearTextButton.isEnabled = hasInput || hasBufferedText
                         }
-                        editor.setOnContentChangedListener { updateEditorActions() }
+                        fun moveToNextLine() {
+                            cursorX = 0f
+                            cursorY += bufferLineHeight
+                        }
+                        fun commitKeyboardStrokes(addTrailingSpace: Boolean): Boolean {
+                            val contentBounds = editor.contentBounds() ?: return false
+                            val normalizeScale = guideLineHeightPx.toFloat() / contentBounds.height().coerceAtLeast(1).toFloat()
+                            val groupBitmap = editor.exportContentBitmapScaled(normalizeScale, 0) ?: return false
+                            if (cursorX > 0f && cursorX + groupBitmap.width > bufferWidth) {
+                                moveToNextLine()
+                            }
+                            if (cursorY + groupBitmap.height > bufferHeight) {
+                                groupBitmap.recycle()
+                                return false
+                            }
+                            bufferCanvas.drawBitmap(groupBitmap, cursorX, cursorY, bufferPaint)
+                            val groupBounds = RectF(cursorX, cursorY, cursorX + groupBitmap.width, cursorY + groupBitmap.height)
+                            bufferBounds = bufferBounds?.apply { union(groupBounds) } ?: groupBounds
+                            cursorX = groupBounds.right + if (addTrailingSpace) spaceWidth else 0f
+                            hasBufferedText = true
+                            groupBitmap.recycle()
+                            editor.clear()
+                            updateBufferPreview()
+                            updateEditorActions()
+                            return true
+                        }
+                        fun scheduleAutoCommit() {
+                            commitRunnable?.let(editor::removeCallbacks)
+                            commitRunnable = Runnable {
+                                commitKeyboardStrokes(addTrailingSpace = true)
+                            }.also { editor.postDelayed(it, 1100L) }
+                        }
+                        editor.setOnContentChangedListener {
+                            updateEditorActions()
+                            if (editor.hasDrawing()) scheduleAutoCommit()
+                        }
                         updateEditorActions()
+                        updateBufferPreview()
                         undoTextButton.setOnClickListener {
                             editor.undo()
                             updateEditorActions()
                         }
                         clearTextButton.setOnClickListener {
                             editor.clear()
+                            bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+                            cursorX = 0f
+                            cursorY = 0f
+                            bufferBounds = null
+                            hasBufferedText = false
+                            updateBufferPreview()
                             updateEditorActions()
                         }
                         spaceButton.setOnClickListener {
-                            editorScroll.smoothScrollBy((guideLineHeightPx * 2.2f).roundToInt(), 0)
+                            commitRunnable?.let(editor::removeCallbacks)
+                            if (!commitKeyboardStrokes(addTrailingSpace = true)) {
+                                cursorX += spaceWidth
+                            }
+                            updateEditorActions()
                         }
                         newLineButton.setOnClickListener {
-                            editorScroll.smoothScrollBy(0, (guideLineHeightPx * 1.4f).roundToInt())
+                            commitRunnable?.let(editor::removeCallbacks)
+                            commitKeyboardStrokes(addTrailingSpace = false)
+                            moveToNextLine()
+                            updateEditorActions()
                         }
                         saveButton.setOnClickListener {
-                            val insertSizePx = insertSizeSlider.value.coerceAtLeast(1f)
-                            val scale = insertSizePx / guideLineHeightPx.toFloat()
-                            val paddingPx = (guideLineHeightPx * 0.2f).roundToInt().coerceAtLeast(2)
-                            val contentBounds = editor.contentBounds()
-                            val bitmap = editor.exportContentBitmapScaled(scale, paddingPx)
-                            if (contentBounds == null || bitmap == null) {
+                            commitRunnable?.let(editor::removeCallbacks)
+                            commitKeyboardStrokes(addTrailingSpace = false)
+                            val bounds = bufferBounds
+                            if (bounds == null || !hasBufferedText) {
                                 updateEditorActions()
                                 return@setOnClickListener
                             }
+                            val insertSizePx = insertSizeSlider.value.coerceAtLeast(1f)
+                            val scale = insertSizePx / guideLineHeightPx.toFloat()
+                            val paddingPx = (guideLineHeightPx * 0.2f).roundToInt().coerceAtLeast(2)
+                            val src = Rect(
+                                (bounds.left - paddingPx).roundToInt().coerceAtLeast(0),
+                                (bounds.top - paddingPx).roundToInt().coerceAtLeast(0),
+                                (bounds.right + paddingPx).roundToInt().coerceAtMost(bufferWidth),
+                                (bounds.bottom + paddingPx).roundToInt().coerceAtMost(bufferHeight)
+                            )
+                            val bitmap = Bitmap.createBitmap(
+                                max(1, (src.width() * scale).roundToInt()),
+                                max(1, (src.height() * scale).roundToInt()),
+                                Bitmap.Config.ARGB_8888
+                            )
+                            Canvas(bitmap).drawBitmap(bufferBitmap, src, Rect(0, 0, bitmap.width, bitmap.height), bufferPaint)
                             val scaledBounds = RectF(
                                 0f,
                                 0f,
-                                contentBounds.width() * scale,
-                                contentBounds.height() * scale
+                                src.width() * scale,
+                                src.height() * scale
                             )
                             handwritingView.insertBitmapAt(
                                 bitmap = bitmap,
