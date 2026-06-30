@@ -404,6 +404,56 @@ class HandwritingView @JvmOverloads constructor(
         return result
     }
 
+    fun exportInsertionViewportBitmap(
+        markerX: Float,
+        markerY: Float,
+        outputWidth: Int,
+        outputHeight: Int
+    ): Bitmap? {
+        val source = extraBitmap ?: return null
+        if (width <= 0 || height <= 0 || outputWidth <= 0 || outputHeight <= 0) return null
+        val result = Bitmap.createBitmap(outputWidth, outputHeight, Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(backgroundColorInt)
+        val scale = outputWidth.toFloat() / width.toFloat()
+        val viewportHeight = outputHeight / scale
+        val top = (markerY - viewportHeight / 2f).coerceIn(0f, (height - viewportHeight).coerceAtLeast(0f))
+
+        canvas.save()
+        canvas.scale(scale, scale)
+        canvas.translate(0f, -top)
+        drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
+        canvas.drawBitmap(source, 0f, 0f, bitmapPaint)
+        canvas.restore()
+
+        val boundaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6D4BD8"), 0xCC)
+            strokeWidth = (2f * density).coerceAtLeast(1f)
+            style = Paint.Style.STROKE
+        }
+        canvas.drawLine(0f, 0f, 0f, outputHeight.toFloat(), boundaryPaint)
+        canvas.drawLine(outputWidth.toFloat(), 0f, outputWidth.toFloat(), outputHeight.toFloat(), boundaryPaint)
+
+        val previewMarkerX = markerX.coerceIn(0f, width.toFloat()) * scale
+        val previewMarkerY = (markerY.coerceIn(0f, height.toFloat()) - top) * scale
+        val markerRadius = 7f * density
+        val markerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#6D4BD8")
+            strokeWidth = 2f * density
+            strokeCap = Paint.Cap.ROUND
+            style = Paint.Style.STROKE
+        }
+        val markerFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6D4BD8"), 0x22)
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(previewMarkerX, previewMarkerY, markerRadius * 1.8f, markerFillPaint)
+        canvas.drawCircle(previewMarkerX, previewMarkerY, markerRadius, markerPaint)
+        canvas.drawLine(previewMarkerX - markerRadius * 1.7f, previewMarkerY, previewMarkerX + markerRadius * 1.7f, previewMarkerY, markerPaint)
+        canvas.drawLine(previewMarkerX, previewMarkerY - markerRadius * 1.7f, previewMarkerX, previewMarkerY + markerRadius * 1.7f, markerPaint)
+        return result
+    }
+
     fun contentBounds(): Rect? {
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null

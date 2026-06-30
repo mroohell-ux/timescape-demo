@@ -4172,8 +4172,20 @@ class MainActivity : AppCompatActivity() {
                     val availableHeight = (height - padding * 2).coerceAtLeast(1f)
                     val previewRect = RectF(padding, padding, padding + availableWidth, padding + availableHeight)
                     val radius = 10f * density
-                    canvas.drawRoundRect(previewRect, radius, radius, previewBackgroundPaint)
+                    val viewportBitmap = handwritingView.exportInsertionViewportBitmap(
+                        markerX = targetX,
+                        markerY = targetY,
+                        outputWidth = previewRect.width().roundToInt().coerceAtLeast(1),
+                        outputHeight = previewRect.height().roundToInt().coerceAtLeast(1)
+                    )
+                    if (viewportBitmap != null) {
+                        canvas.drawBitmap(viewportBitmap, null, previewRect, null)
+                        viewportBitmap.recycle()
+                    } else {
+                        canvas.drawRoundRect(previewRect, radius, radius, previewBackgroundPaint)
+                    }
                     canvas.drawRoundRect(previewRect, radius, radius, previewBorderPaint)
+                    if (viewportBitmap != null) return
                     val markerX = previewRect.left + 20f * density
                     val markerY = previewRect.centerY()
                     val markerRadius = 7f * density
