@@ -4089,28 +4089,70 @@ class MainActivity : AppCompatActivity() {
             val bufferCanvas = Canvas(bufferBitmap)
             bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
             val bufferPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+            val accentColor = Color.parseColor("#6D4BD8")
+            val softAccentColor = Color.parseColor("#F3EEFF")
+            val borderColor = Color.parseColor("#E4E1EC")
+            val textPrimaryColor = Color.parseColor("#171A2A")
+            val textSecondaryColor = ColorUtils.setAlphaComponent(textPrimaryColor, 0xAA)
+            val surfaceColor = Color.WHITE
+            val controlHeight = (56 * density).roundToInt()
+
+            fun roundedDrawable(
+                @ColorInt fillColor: Int,
+                @ColorInt strokeColor: Int = Color.TRANSPARENT,
+                strokeDp: Float = 0f,
+                radiusDp: Float = 18f
+            ): GradientDrawable = GradientDrawable().apply {
+                setColor(fillColor)
+                cornerRadius = radiusDp * density
+                if (strokeDp > 0f) {
+                    setStroke((strokeDp * density).roundToInt().coerceAtLeast(1), strokeColor)
+                }
+            }
+
+            fun sectionLabel(text: CharSequence): TextView = TextView(this).apply {
+                this.text = text
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(textPrimaryColor)
+            }
+
+            fun styleActionButton(button: MaterialButton, iconText: String) {
+                button.isAllCaps = false
+                button.text = "$iconText\n${button.text}"
+                button.textSize = 13f
+                button.setTextColor(textPrimaryColor)
+                button.backgroundTintList = ColorStateList.valueOf(surfaceColor)
+                button.strokeColor = ColorStateList.valueOf(borderColor)
+                button.strokeWidth = (1 * density).roundToInt().coerceAtLeast(1)
+                button.cornerRadius = (14 * density).roundToInt()
+                button.minHeight = controlHeight
+                button.insetTop = 0
+                button.insetBottom = 0
+            }
+
             val insertionPreview = object : View(this) {
                 private val previewBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = ColorUtils.setAlphaComponent(selectedPaperColor.color, 0xFF)
+                    color = Color.parseColor("#FBFAFF")
                     style = Paint.Style.FILL
                 }
                 private val previewBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#8090A4")
+                    color = borderColor
                     style = Paint.Style.STROKE
                     strokeWidth = 1.5f * density
                 }
                 private val previewMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#2962FF")
+                    color = accentColor
                     style = Paint.Style.STROKE
                     strokeWidth = 2f * density
                     strokeCap = Paint.Cap.ROUND
                 }
                 private val previewFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0x22)
+                    color = ColorUtils.setAlphaComponent(accentColor, 0x22)
                     style = Paint.Style.FILL
                 }
                 private val previewFlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0x30)
+                    color = ColorUtils.setAlphaComponent(accentColor, 0x30)
                     style = Paint.Style.FILL
                 }
 
@@ -4160,7 +4202,13 @@ class MainActivity : AppCompatActivity() {
             }
             val bufferPreview = ImageView(this).apply {
                 adjustViewBounds = true
-                setBackgroundColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x08))
+                background = roundedDrawable(Color.parseColor("#FBFAFF"), borderColor, 1f, 12f)
+                setPadding(
+                    (12 * density).roundToInt(),
+                    (8 * density).roundToInt(),
+                    (12 * density).roundToInt(),
+                    (8 * density).roundToInt()
+                )
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     (96 * density).roundToInt()
@@ -4195,11 +4243,8 @@ class MainActivity : AppCompatActivity() {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     keyboardCanvasHeight
                 )
-                background = GradientDrawable().apply {
-                    setColor(Color.WHITE)
-                    setStroke((1.5f * density).roundToInt().coerceAtLeast(1), Color.parseColor("#8090A4"))
-                    cornerRadius = 14 * density
-                }
+                background = roundedDrawable(surfaceColor, borderColor, 1f, 14f)
+                clipToOutline = true
                 addView(editor)
                 addView(placeholder)
             }
@@ -4211,7 +4256,7 @@ class MainActivity : AppCompatActivity() {
                 value = cardFontSizeSp.coerceIn(valueFrom, valueTo)
             }
             fun updateInsertSizeLabel() {
-                insertSizeValue.text = getString(R.string.handwriting_text_insert_size_value, insertSizeSlider.value)
+                insertSizeValue.text = getString(R.string.handwriting_text_insert_size_value_short, insertSizeSlider.value)
             }
             updateInsertSizeLabel()
             insertSizeSlider.addOnChangeListener { _, _, _ -> updateInsertSizeLabel() }
@@ -4219,70 +4264,164 @@ class MainActivity : AppCompatActivity() {
             val clearTextButton = MaterialButton(this).apply { text = getString(R.string.handwriting_action_clear) }
             val spaceButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_space) }
             val newLineButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_new_line) }
+            styleActionButton(undoTextButton, "↶")
+            styleActionButton(clearTextButton, "⌫")
+            styleActionButton(spaceButton, "—")
+            styleActionButton(newLineButton, "↵")
             val keyboardHint = TextView(this).apply {
                 text = getString(R.string.handwriting_text_keyboard_hint)
-                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
+                textSize = 13f
+                setTextColor(textSecondaryColor)
                 setPadding(0, 0, 0, (8 * density).roundToInt())
             }
             val flowHint = TextView(this).apply {
                 text = getString(R.string.handwriting_text_flow_hint)
-                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
+                textSize = 13f
+                setTextColor(textSecondaryColor)
                 setPadding(0, 0, 0, (8 * density).roundToInt())
             }
             val insertionPointLabel = TextView(this).apply {
                 text = getString(R.string.handwriting_text_insertion_point, targetX, targetY)
-                setTextColor(Color.parseColor("#2962FF"))
+                textSize = 12f
+                setTextColor(accentColor)
                 setPadding(0, 0, 0, (8 * density).roundToInt())
             }
             val autoCommitStatus = TextView(this).apply {
                 text = getString(R.string.handwriting_text_auto_commit_waiting)
-                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
-                setPadding(0, 0, 0, (8 * density).roundToInt())
+                textSize = 12f
+                setTextColor(textSecondaryColor)
+                setPadding(0, (8 * density).roundToInt(), 0, (8 * density).roundToInt())
             }
             val editorActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(undoTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                addView(clearTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                addView(spaceButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                addView(newLineButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                background = roundedDrawable(surfaceColor, borderColor, 1f, 16f)
+                setPadding((4 * density).roundToInt(), (4 * density).roundToInt(), (4 * density).roundToInt(), (4 * density).roundToInt())
+                val actionMargin = (4 * density).roundToInt()
+                listOf(undoTextButton, clearTextButton, spaceButton, newLineButton).forEach { button ->
+                    addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                        marginStart = actionMargin
+                        marginEnd = actionMargin
+                    })
+                }
+            }
+            val headerIcon = TextView(this).apply {
+                text = "⌖"
+                textSize = 26f
+                gravity = Gravity.CENTER
+                setTextColor(accentColor)
+                background = roundedDrawable(softAccentColor, radiusDp = 26f)
+            }
+            val closeButton = MaterialButton(this).apply {
+                text = "×"
+                textSize = 30f
+                isAllCaps = false
+                minWidth = (48 * density).roundToInt()
+                minHeight = (48 * density).roundToInt()
+                backgroundTintList = ColorStateList.valueOf(Color.TRANSPARENT)
+                setTextColor(textSecondaryColor)
+                insetTop = 0
+                insetBottom = 0
+            }
+            val headerText = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.handwriting_tool_text)
+                    textSize = 20f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(textPrimaryColor)
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.handwriting_text_insert_subtitle)
+                    textSize = 14f
+                    setTextColor(textSecondaryColor)
+                })
+            }
+            val header = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(headerIcon, LinearLayout.LayoutParams((48 * density).roundToInt(), (48 * density).roundToInt()))
+                addView(headerText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = (14 * density).roundToInt()
+                })
+                addView(closeButton, LinearLayout.LayoutParams((48 * density).roundToInt(), (48 * density).roundToInt()))
+            }
+            val previewLabel = sectionLabel(getString(R.string.handwriting_text_preview_label))
+            val writeHeader = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(sectionLabel(getString(R.string.handwriting_text_write_label)), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.handwriting_text_guide_label)
+                    textSize = 14f
+                    setTextColor(textSecondaryColor)
+                })
+            }
+            val sizeHeader = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(sectionLabel(getString(R.string.handwriting_text_insert_size_label)), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(insertSizeValue)
+            }
+            val cancelTextButton = MaterialButton(this).apply {
+                text = getString(android.R.string.cancel)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(textPrimaryColor)
+                backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F4F2F7"))
+                cornerRadius = (16 * density).roundToInt()
+            }
+            val saveTextButton = MaterialButton(this).apply {
+                text = getString(R.string.dialog_save)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                backgroundTintList = ColorStateList.valueOf(accentColor)
+                cornerRadius = (16 * density).roundToInt()
+            }
+            val footerActions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(cancelTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                    marginEnd = (8 * density).roundToInt()
+                })
+                addView(saveTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                    marginStart = (8 * density).roundToInt()
+                })
             }
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
+                background = roundedDrawable(surfaceColor, radiusDp = 24f)
                 setPadding(
+                    (24 * density).roundToInt(),
                     (20 * density).roundToInt(),
-                    (16 * density).roundToInt(),
-                    (20 * density).roundToInt(),
-                    (8 * density).roundToInt()
+                    (24 * density).roundToInt(),
+                    (20 * density).roundToInt()
                 )
+                addView(header)
                 addView(insertionPointLabel)
+                addView(previewLabel)
                 addView(insertionPreview)
                 addView(flowHint)
                 addView(keyboardHint)
+                addView(writeHeader)
                 addView(editorFrame)
                 addView(autoCommitStatus)
                 addView(editorActions)
                 addView(bufferPreview)
-                addView(TextView(this@MainActivity).apply {
-                    text = getString(R.string.handwriting_text_insert_size_label)
-                    setPadding(0, (12 * density).roundToInt(), 0, 0)
-                })
-                addView(insertSizeValue)
+                addView(sizeHeader)
                 addView(insertSizeSlider)
+                addView(footerActions)
             }
             var commitRunnable: Runnable? = null
             val inputDialog = AlertDialog.Builder(this)
-                .setTitle(R.string.handwriting_tool_text)
                 .setView(container)
-                .setPositiveButton(R.string.dialog_save, null)
-                .setNegativeButton(android.R.string.cancel, null)
                 .create()
                 .apply {
                     setOnShowListener {
+                        window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
                         window?.setLayout(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         )
-                        val saveButton = getButton(AlertDialog.BUTTON_POSITIVE)
                         fun updateBufferPreview() {
                             bufferPreview.setImageBitmap(bufferBitmap)
                             bufferPreview.invalidate()
@@ -4290,7 +4429,8 @@ class MainActivity : AppCompatActivity() {
                         fun updateEditorActions() {
                             val hasInput = editor.hasDrawing()
                             placeholder.isGone = hasInput
-                            saveButton.isEnabled = hasInput || hasBufferedText
+                            saveTextButton.isEnabled = hasInput || hasBufferedText
+                            saveTextButton.alpha = if (hasInput || hasBufferedText) 1f else 0.45f
                             undoTextButton.isEnabled = editor.canUndo()
                             clearTextButton.isEnabled = hasInput || hasBufferedText
                         }
@@ -4365,7 +4505,9 @@ class MainActivity : AppCompatActivity() {
                             moveToNextLine()
                             updateEditorActions()
                         }
-                        saveButton.setOnClickListener {
+                        closeButton.setOnClickListener { dismiss() }
+                        cancelTextButton.setOnClickListener { dismiss() }
+                        saveTextButton.setOnClickListener {
                             commitRunnable?.let(editor::removeCallbacks)
                             commitKeyboardStrokes(addTrailingSpace = false)
                             val bounds = bufferBounds
