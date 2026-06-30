@@ -36,7 +36,6 @@ import android.util.Base64
 import android.util.JsonReader
 import android.util.JsonToken
 import android.util.JsonWriter
-import android.util.TypedValue
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -312,7 +311,6 @@ class MainActivity : AppCompatActivity() {
         val lockedPaperColor: Int? = null,
         val lockedPaperStyle: HandwritingPaperStyle? = null,
         val lockedFormat: HandwritingFormat? = null,
-        val scaleContentToCardFont: Boolean = false,
         val onSaveBitmap: ((Bitmap, HandwritingOptions) -> Boolean)? = null
     )
 
@@ -2281,53 +2279,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showInlineHandwritingDialog(flow: CardFlow, targetIndex: Int) {
-        val defaults = defaultHandwritingOptions()
-        val inlineOptions = defaults.copy(
-            backgroundColor = Color.TRANSPARENT,
-            paperStyle = HandwritingPaperStyle.PLAIN,
-            format = HandwritingFormat.PNG
-        )
-        showHandwritingDialog(
-            titleRes = R.string.dialog_add_handwriting_title,
-            existing = null,
-            initialOptions = inlineOptions,
-            face = HandwritingFace.FRONT,
-            onSave = { savedContent ->
-                val content = savedContent ?: run {
-                    snackbar(getString(R.string.snackbar_handwriting_required))
-                    return@showHandwritingDialog
-                }
-                val card = CardItem(
-                    id = nextCardId++,
-                    title = "",
-                    snippet = "",
-                    handwriting = HandwritingContent(content.path, content.options),
-                    updatedAt = System.currentTimeMillis()
-                )
-                val insertionIndex = if (targetIndex == RecyclerView.NO_POSITION) {
-                    flow.cards.size
-                } else {
-                    targetIndex.coerceIn(0, flow.cards.size)
-                }
-                flow.cards.add(insertionIndex, card)
-                flowShuffleStates[flow.id]?.originalOrder?.add(insertionIndex, card.id)
-                flow.lastViewedCardIndex = insertionIndex
-                flow.lastViewedCardId = card.id
-                flow.lastViewedCardFocused = false
-                refreshFlow(flow, scrollToTop = false)
-                saveState()
-                snackbar(getString(R.string.snackbar_added_handwriting))
-            },
-            extras = HandwritingDialogExtras(
-                lockedPaperColor = Color.TRANSPARENT,
-                lockedPaperStyle = HandwritingPaperStyle.PLAIN,
-                lockedFormat = HandwritingFormat.PNG,
-                scaleContentToCardFont = true
-            )
-        )
-    }
-
     private fun editCard(
         flow: CardFlow,
         tappedCard: CardItem,
@@ -3543,6 +3494,7 @@ class MainActivity : AppCompatActivity() {
         val toolToggleGroup = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.groupPaletteToggles)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
+        val textButton = dialogView.findViewById<MaterialButton>(R.id.buttonTextInsert)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         canvasButton.isGone = extras.disableCanvasPalette
         val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
@@ -4000,11 +3952,12 @@ class MainActivity : AppCompatActivity() {
         fun updateToolButtons() {
             penButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.PEN) 1f else 0.65f
             eraserButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.ERASER) 1f else 0.65f
+            textButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.TEXT) 1f else 0.65f
             val checkedId = when (visiblePalette) {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
                 HandwritingPaletteSection.CANVAS -> if (extras.disableCanvasPalette) View.NO_ID else canvasButton.id
-                else -> View.NO_ID
+                else -> if (selectedDrawingTool == HandwritingDrawingTool.TEXT) textButton.id else View.NO_ID
             }
             if (checkedId == View.NO_ID) {
                 toolToggleGroup.clearChecked()
@@ -4125,6 +4078,86 @@ class MainActivity : AppCompatActivity() {
             updateToolButtons()
         }
 
+        fun showHandwritingTextInput(targetX: Float, targetY: Float) {
+            val editor = HandwritingView(this).apply {
+                setCanvasSize((320 * density).roundToInt(), (140 * density).roundToInt())
+                setCanvasBackgroundColor(Color.TRANSPARENT)
+                setPaperStyle(HandwritingPaperStyle.PLAIN)
+                setBrushColor(selectedBrushColor.color)
+                setBrushSizeDp(selectedBrushSize)
+                setPenType(selectedPenType)
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    (180 * density).roundToInt()
+                )
+            }
+            val fontSizeValue = TextView(this)
+            val fontSizeSlider = Slider(this).apply {
+                valueFrom = 8f
+                valueTo = 48f
+                stepSize = 1f
+                value = cardFontSizeSp.coerceIn(valueFrom, valueTo)
+            }
+            fun updateFontSizeLabel() {
+                fontSizeValue.text = getString(R.string.handwriting_text_font_size_value, fontSizeSlider.value)
+            }
+            updateFontSizeLabel()
+            fontSizeSlider.addOnChangeListener { _, _, _ -> updateFontSizeLabel() }
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(
+                    (20 * density).roundToInt(),
+                    (16 * density).roundToInt(),
+                    (20 * density).roundToInt(),
+                    (8 * density).roundToInt()
+                )
+                addView(editor)
+                addView(TextView(this@MainActivity).apply {
+                    text = getString(R.string.handwriting_text_font_size_label)
+                    setPadding(0, (12 * density).roundToInt(), 0, 0)
+                })
+                addView(fontSizeValue)
+                addView(fontSizeSlider)
+            }
+            AlertDialog.Builder(this)
+                .setTitle(R.string.handwriting_tool_text)
+                .setView(container)
+                .setPositiveButton(R.string.dialog_save, null)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create()
+                .apply {
+                    setOnShowListener {
+                        getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            val targetHeightPx = fontSizeSlider.value.roundToInt().coerceAtLeast(1)
+                            val paddingPx = (targetHeightPx * 0.15f).roundToInt().coerceAtLeast(2)
+                            val contentBounds = editor.contentBounds()
+                            val bitmap = editor.exportContentBitmap(targetHeightPx, paddingPx)
+                            if (contentBounds == null || bitmap == null) {
+                                dismiss()
+                                return@setOnClickListener
+                            }
+                            val originalHeight = contentBounds.height().coerceAtLeast(1)
+                            handwritingView.insertBitmapAt(
+                                bitmap = bitmap,
+                                x = targetX,
+                                y = targetY,
+                                fontSizePx = targetHeightPx.toFloat(),
+                                originalBounds = RectF(contentBounds),
+                                scale = targetHeightPx.toFloat() / originalHeight.toFloat()
+                            )
+                            bitmap.recycle()
+                            updateHistoryButtons()
+                            dismiss()
+                        }
+                    }
+                }
+                .show()
+        }
+
+        handwritingView.setOnTextInsertionTapListener { x, y ->
+            showHandwritingTextInput(x, y)
+        }
+
         setDrawingTool(selectedDrawingTool)
         hidePalette()
 
@@ -4144,6 +4177,11 @@ class MainActivity : AppCompatActivity() {
             } else {
                 showPalette(HandwritingPaletteSection.ERASER, view)
             }
+        }
+
+        textButton.setOnClickListener {
+            hidePalette()
+            setDrawingTool(HandwritingDrawingTool.TEXT)
         }
 
         if (!extras.disableCanvasPalette) {
@@ -4175,17 +4213,7 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
-                val fontScaledHeightPx = TypedValue.applyDimension(
-                    TypedValue.COMPLEX_UNIT_SP,
-                    cardFontSizeSp,
-                    resources.displayMetrics
-                ).roundToInt().coerceAtLeast(1)
-                val exportBitmap = if (extras.scaleContentToCardFont) {
-                    val paddingPx = (fontScaledHeightPx * 0.15f).roundToInt().coerceAtLeast(2)
-                    handwritingView.exportContentBitmap(fontScaledHeightPx, paddingPx)
-                } else {
-                    handwritingView.exportBitmap()
-                }
+                val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
@@ -4194,8 +4222,8 @@ class MainActivity : AppCompatActivity() {
                     backgroundColor = selectedPaperColor.color,
                     brushColor = selectedBrushColor.color,
                     brushSizeDp = selectedBrushSize,
-                    canvasWidth = exportBitmap.width,
-                    canvasHeight = exportBitmap.height,
+                    canvasWidth = selectedSize.width,
+                    canvasHeight = selectedSize.height,
                     format = selectedFormat,
                     paperStyle = selectedPaperStyle,
                     penType = selectedPenType,
@@ -7369,7 +7397,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onSingleTapUp(e: MotionEvent): Boolean {
                     val child = recycler.findChildViewUnder(e.x, e.y)
                     if (child != null) return false
-                    onEmptyAreaTapped(e.y)
+                    onEmptyAreaTapped()
                     return true
                 }
             }
@@ -7477,14 +7505,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        private fun onEmptyAreaTapped(tapY: Float) {
-            val flow = owningFlow()
-            if (flow == null || flow.id == VIDEO_FLOW_ID || activeQuery.isNotBlank()) {
-                showFlowLabelsWidgetTemporarily()
-                return
-            }
-            val targetIndex = layoutManager.indexForScreenY(tapY)
-            showInlineHandwritingDialog(flow, targetIndex)
+        private fun onEmptyAreaTapped() {
+            showFlowLabelsWidgetTemporarily()
         }
 
         private fun handleListCommitted(

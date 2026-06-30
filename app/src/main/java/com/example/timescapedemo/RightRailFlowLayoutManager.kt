@@ -105,13 +105,6 @@ class RightRailFlowLayoutManager(
         return idx.coerceIn(0, max(0, itemCount - 1))
     }
 
-    /** Nearest adapter index for a tap at the supplied RecyclerView-local Y coordinate. */
-    fun indexForScreenY(y: Float): Int {
-        if (itemCount == 0) return RecyclerView.NO_POSITION
-        val idx = ((scrollYPx + y - yTop()) / itemPitchPx).roundToInt()
-        return idx.coerceIn(0, max(0, itemCount - 1))
-    }
-
     /** Pixel delta required to move `index` to vertical screen center. */
     fun offsetTo(index: Int): Int {
         val desiredScroll = yTop() + index * itemPitchPx - screenCenter()

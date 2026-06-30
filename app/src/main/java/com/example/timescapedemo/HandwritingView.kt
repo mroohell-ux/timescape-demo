@@ -24,6 +24,8 @@ import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
 import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
+import com.example.timescapedemo.HandwritingDrawingTool.TEXT
+import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
@@ -37,6 +39,16 @@ class HandwritingView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
+    data class InsertedHandwritingObject(
+        val id: String,
+        val type: String = "handwritingText",
+        val x: Float,
+        val y: Float,
+        val fontSize: Float,
+        val originalBounds: RectF,
+        val scale: Float,
+        val createdAt: Long
+    )
 
     private val density = resources.displayMetrics.density
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -100,6 +112,8 @@ class HandwritingView @JvmOverloads constructor(
     private var exportHeight = 0
 
     private var contentChangedListener: (() -> Unit)? = null
+    private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
+    private val insertedHandwritingObjects = mutableListOf<InsertedHandwritingObject>()
 
     private val maxHistory = 25
 
@@ -175,6 +189,18 @@ class HandwritingView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
+        if (drawingTool == TEXT) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
+                MotionEvent.ACTION_UP -> {
+                    performClick()
+                    textInsertionTapListener?.invoke(x, y)
+                    disallowParentIntercept(false)
+                }
+                MotionEvent.ACTION_CANCEL -> disallowParentIntercept(false)
+            }
+            return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 disallowParentIntercept(true)
@@ -218,6 +244,7 @@ class HandwritingView @JvmOverloads constructor(
         pendingBitmap = null
         pendingHasContent = false
         pendingHasBase = false
+        insertedHandwritingObjects.clear()
         invalidate()
         notifyContentChanged()
     }
@@ -308,6 +335,12 @@ class HandwritingView @JvmOverloads constructor(
             drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, safeTargetHeight), bitmapPaint)
         }
         return result
+    }
+
+    fun contentBounds(): Rect? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        return findContentBounds(source)
     }
 
     private fun findContentBounds(bitmap: Bitmap): Rect? {
@@ -419,6 +452,36 @@ class HandwritingView @JvmOverloads constructor(
 
     fun setOnContentChangedListener(listener: (() -> Unit)?) {
         contentChangedListener = listener
+    }
+
+    fun setOnTextInsertionTapListener(listener: ((x: Float, y: Float) -> Unit)?) {
+        textInsertionTapListener = listener
+    }
+
+    fun insertBitmapAt(
+        bitmap: Bitmap,
+        x: Float,
+        y: Float,
+        fontSizePx: Float,
+        originalBounds: RectF,
+        scale: Float
+    ) {
+        commitCurrentPath()
+        val canvas = extraCanvas ?: return
+        canvas.drawBitmap(bitmap, x, y, bitmapPaint)
+        insertedHandwritingObjects += InsertedHandwritingObject(
+            id = UUID.randomUUID().toString(),
+            x = x,
+            y = y,
+            fontSize = fontSizePx,
+            originalBounds = originalBounds,
+            scale = scale,
+            createdAt = System.currentTimeMillis()
+        )
+        hasContent = true
+        pushCurrentState(true, hasBaseImage)
+        invalidate()
+        notifyContentChanged()
     }
 
     override fun onDetachedFromWindow() {
@@ -675,10 +738,12 @@ class HandwritingView @JvmOverloads constructor(
     private fun currentCommitPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPaint
+        TEXT -> penPaint
     }
 
     private fun currentPreviewPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPreviewPaint
+        TEXT -> penPaint
     }
 }
