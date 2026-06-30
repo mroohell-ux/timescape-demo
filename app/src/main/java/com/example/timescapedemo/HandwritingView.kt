@@ -44,8 +44,9 @@ class HandwritingView @JvmOverloads constructor(
         val type: String = "handwritingText",
         val x: Float,
         val y: Float,
-        val fontSize: Float,
-        val originalBounds: RectF,
+        val insertSize: Float,
+        val lineHeight: Float,
+        val bounds: RectF,
         val scale: Float,
         val createdAt: Long
     )
@@ -337,6 +338,27 @@ class HandwritingView @JvmOverloads constructor(
         return result
     }
 
+    fun exportContentBitmapScaled(scale: Float, paddingPx: Int): Bitmap? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        val contentBounds = findContentBounds(source) ?: return null
+        val paddedBounds = Rect(
+            (contentBounds.left - paddingPx).coerceAtLeast(0),
+            (contentBounds.top - paddingPx).coerceAtLeast(0),
+            (contentBounds.right + paddingPx).coerceAtMost(source.width),
+            (contentBounds.bottom + paddingPx).coerceAtMost(source.height)
+        )
+        val safeScale = scale.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val targetWidth = max(1, (paddedBounds.width() * safeScale).roundToInt())
+        val targetHeight = max(1, (paddedBounds.height() * safeScale).roundToInt())
+        val result = Bitmap.createBitmap(targetWidth, targetHeight, Config.ARGB_8888)
+        Canvas(result).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, targetHeight), bitmapPaint)
+        }
+        return result
+    }
+
     fun contentBounds(): Rect? {
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
@@ -462,8 +484,9 @@ class HandwritingView @JvmOverloads constructor(
         bitmap: Bitmap,
         x: Float,
         y: Float,
-        fontSizePx: Float,
-        originalBounds: RectF,
+        insertSizePx: Float,
+        lineHeightPx: Float,
+        bounds: RectF,
         scale: Float
     ) {
         commitCurrentPath()
@@ -473,8 +496,9 @@ class HandwritingView @JvmOverloads constructor(
             id = UUID.randomUUID().toString(),
             x = x,
             y = y,
-            fontSize = fontSizePx,
-            originalBounds = originalBounds,
+            insertSize = insertSizePx,
+            lineHeight = lineHeightPx,
+            bounds = bounds,
             scale = scale,
             createdAt = System.currentTimeMillis()
         )

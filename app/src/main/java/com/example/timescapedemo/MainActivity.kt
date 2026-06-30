@@ -24,6 +24,7 @@ import android.graphics.*
 import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -56,6 +57,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
@@ -4079,30 +4081,68 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun showHandwritingTextInput(targetX: Float, targetY: Float) {
+            val guideLineHeightPx = (28 * density).roundToInt().coerceAtLeast(1)
+            val editorCanvasWidth = (720 * density).roundToInt()
+            val editorCanvasHeight = (1200 * density).roundToInt()
             val editor = HandwritingView(this).apply {
-                setCanvasSize((320 * density).roundToInt(), (140 * density).roundToInt())
-                setCanvasBackgroundColor(Color.TRANSPARENT)
-                setPaperStyle(HandwritingPaperStyle.PLAIN)
+                setCanvasSize(editorCanvasWidth, editorCanvasHeight)
+                setCanvasBackgroundColor(Color.WHITE)
+                setPaperStyle(HandwritingPaperStyle.RULED)
                 setBrushColor(selectedBrushColor.color)
                 setBrushSizeDp(selectedBrushSize)
                 setPenType(selectedPenType)
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    (180 * density).roundToInt()
+                    editorCanvasHeight
                 )
             }
-            val fontSizeValue = TextView(this)
-            val fontSizeSlider = Slider(this).apply {
+            val editorScroll = ScrollView(this).apply {
+                isFillViewport = false
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    (420 * density).roundToInt()
+                )
+                background = GradientDrawable().apply {
+                    setColor(Color.WHITE)
+                    setStroke((1.5f * density).roundToInt().coerceAtLeast(1), Color.parseColor("#8090A4"))
+                    cornerRadius = 14 * density
+                }
+                addView(editor)
+            }
+            val placeholder = TextView(this).apply {
+                text = getString(R.string.handwriting_text_placeholder)
+                textSize = 18f
+                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x66))
+                setPadding((18 * density).roundToInt(), (14 * density).roundToInt(), 0, 0)
+            }
+            val editorFrame = FrameLayout(this).apply {
+                addView(editorScroll)
+                addView(placeholder)
+            }
+            val insertSizeValue = TextView(this)
+            val insertSizeSlider = Slider(this).apply {
                 valueFrom = 8f
                 valueTo = 48f
                 stepSize = 1f
                 value = cardFontSizeSp.coerceIn(valueFrom, valueTo)
             }
-            fun updateFontSizeLabel() {
-                fontSizeValue.text = getString(R.string.handwriting_text_font_size_value, fontSizeSlider.value)
+            fun updateInsertSizeLabel() {
+                insertSizeValue.text = getString(R.string.handwriting_text_insert_size_value, insertSizeSlider.value)
             }
-            updateFontSizeLabel()
-            fontSizeSlider.addOnChangeListener { _, _, _ -> updateFontSizeLabel() }
+            updateInsertSizeLabel()
+            insertSizeSlider.addOnChangeListener { _, _, _ -> updateInsertSizeLabel() }
+            val undoTextButton = MaterialButton(this).apply { text = getString(R.string.handwriting_action_undo) }
+            val clearTextButton = MaterialButton(this).apply { text = getString(R.string.handwriting_action_clear) }
+            val spaceButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_space) }
+            val newLineButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_new_line) }
+            val editorActions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(undoTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(clearTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(spaceButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(newLineButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(
@@ -4111,15 +4151,16 @@ class MainActivity : AppCompatActivity() {
                     (20 * density).roundToInt(),
                     (8 * density).roundToInt()
                 )
-                addView(editor)
+                addView(editorFrame)
+                addView(editorActions)
                 addView(TextView(this@MainActivity).apply {
-                    text = getString(R.string.handwriting_text_font_size_label)
+                    text = getString(R.string.handwriting_text_insert_size_label)
                     setPadding(0, (12 * density).roundToInt(), 0, 0)
                 })
-                addView(fontSizeValue)
-                addView(fontSizeSlider)
+                addView(insertSizeValue)
+                addView(insertSizeSlider)
             }
-            AlertDialog.Builder(this)
+            val inputDialog = AlertDialog.Builder(this)
                 .setTitle(R.string.handwriting_tool_text)
                 .setView(container)
                 .setPositiveButton(R.string.dialog_save, null)
@@ -4127,23 +4168,58 @@ class MainActivity : AppCompatActivity() {
                 .create()
                 .apply {
                     setOnShowListener {
-                        getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                            val targetHeightPx = fontSizeSlider.value.roundToInt().coerceAtLeast(1)
-                            val paddingPx = (targetHeightPx * 0.15f).roundToInt().coerceAtLeast(2)
+                        window?.setLayout(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                        val saveButton = getButton(AlertDialog.BUTTON_POSITIVE)
+                        fun updateEditorActions() {
+                            val hasInput = editor.hasDrawing()
+                            placeholder.isGone = hasInput
+                            saveButton.isEnabled = hasInput
+                            undoTextButton.isEnabled = editor.canUndo()
+                            clearTextButton.isEnabled = hasInput
+                        }
+                        editor.setOnContentChangedListener { updateEditorActions() }
+                        updateEditorActions()
+                        undoTextButton.setOnClickListener {
+                            editor.undo()
+                            updateEditorActions()
+                        }
+                        clearTextButton.setOnClickListener {
+                            editor.clear()
+                            updateEditorActions()
+                        }
+                        spaceButton.setOnClickListener {
+                            editorScroll.smoothScrollBy((guideLineHeightPx * 2.2f).roundToInt(), 0)
+                        }
+                        newLineButton.setOnClickListener {
+                            editorScroll.smoothScrollBy(0, (guideLineHeightPx * 1.4f).roundToInt())
+                        }
+                        saveButton.setOnClickListener {
+                            val insertSizePx = insertSizeSlider.value.coerceAtLeast(1f)
+                            val scale = insertSizePx / guideLineHeightPx.toFloat()
+                            val paddingPx = (guideLineHeightPx * 0.2f).roundToInt().coerceAtLeast(2)
                             val contentBounds = editor.contentBounds()
-                            val bitmap = editor.exportContentBitmap(targetHeightPx, paddingPx)
+                            val bitmap = editor.exportContentBitmapScaled(scale, paddingPx)
                             if (contentBounds == null || bitmap == null) {
-                                dismiss()
+                                updateEditorActions()
                                 return@setOnClickListener
                             }
-                            val originalHeight = contentBounds.height().coerceAtLeast(1)
+                            val scaledBounds = RectF(
+                                0f,
+                                0f,
+                                contentBounds.width() * scale,
+                                contentBounds.height() * scale
+                            )
                             handwritingView.insertBitmapAt(
                                 bitmap = bitmap,
                                 x = targetX,
                                 y = targetY,
-                                fontSizePx = targetHeightPx.toFloat(),
-                                originalBounds = RectF(contentBounds),
-                                scale = targetHeightPx.toFloat() / originalHeight.toFloat()
+                                insertSizePx = insertSizePx,
+                                lineHeightPx = insertSizePx * 1.4f,
+                                bounds = scaledBounds,
+                                scale = scale
                             )
                             bitmap.recycle()
                             updateHistoryButtons()
@@ -4151,7 +4227,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                .show()
+            inputDialog.show()
         }
 
         handwritingView.setOnTextInsertionTapListener { x, y ->
