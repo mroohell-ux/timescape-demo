@@ -241,6 +241,7 @@
     <string name="handwriting_text_insert_size_value">Insert size: %1$.0f px</string>
     <string name="handwriting_text_placeholder">Write here</string>
     <string name="handwriting_text_keyboard_hint">Write a word or short phrase. It will move into the text buffer automatically so you can keep writing.</string>
+    <string name="handwriting_text_insertion_point">Insertion point: %1$.0f, %2$.0f</string>
     <string name="handwriting_text_space">Space</string>
     <string name="handwriting_text_new_line">New line</string>
     <string name="handwriting_eraser_size_label">Eraser size</string>

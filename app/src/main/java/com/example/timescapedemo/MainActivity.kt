@@ -4155,6 +4155,11 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
                 setPadding(0, 0, 0, (8 * density).roundToInt())
             }
+            val insertionPointLabel = TextView(this).apply {
+                text = getString(R.string.handwriting_text_insertion_point, targetX, targetY)
+                setTextColor(Color.parseColor("#2962FF"))
+                setPadding(0, 0, 0, (8 * density).roundToInt())
+            }
             val editorActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(undoTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -4170,6 +4175,7 @@ class MainActivity : AppCompatActivity() {
                     (20 * density).roundToInt(),
                     (8 * density).roundToInt()
                 )
+                addView(insertionPointLabel)
                 addView(keyboardHint)
                 addView(editorFrame)
                 addView(editorActions)
@@ -4181,6 +4187,7 @@ class MainActivity : AppCompatActivity() {
                 addView(insertSizeValue)
                 addView(insertSizeSlider)
             }
+            var commitRunnable: Runnable? = null
             val inputDialog = AlertDialog.Builder(this)
                 .setTitle(R.string.handwriting_tool_text)
                 .setView(container)
@@ -4194,7 +4201,6 @@ class MainActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         )
                         val saveButton = getButton(AlertDialog.BUTTON_POSITIVE)
-                        var commitRunnable: Runnable? = null
                         fun updateBufferPreview() {
                             bufferPreview.setImageBitmap(bufferBitmap)
                             bufferPreview.invalidate()
@@ -4236,7 +4242,7 @@ class MainActivity : AppCompatActivity() {
                             commitRunnable?.let(editor::removeCallbacks)
                             commitRunnable = Runnable {
                                 commitKeyboardStrokes(addTrailingSpace = true)
-                            }.also { editor.postDelayed(it, 1100L) }
+                            }.also { editor.postDelayed(it, 2_000L) }
                         }
                         editor.setOnContentChangedListener {
                             updateEditorActions()
@@ -4313,6 +4319,10 @@ class MainActivity : AppCompatActivity() {
                             updateHistoryButtons()
                             dismiss()
                         }
+                    }
+                    setOnDismissListener {
+                        commitRunnable?.let(editor::removeCallbacks)
+                        handwritingView.clearTextInsertionPreview()
                     }
                 }
             inputDialog.show()

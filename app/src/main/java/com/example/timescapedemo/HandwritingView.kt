@@ -84,6 +84,11 @@ class HandwritingView @JvmOverloads constructor(
         strokeCap = Paint.Cap.SQUARE
         strokeJoin = Paint.Join.MITER
     }
+    private val insertionMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        color = Color.parseColor("#2962FF")
+    }
     private val path = Path()
     private val history = ArrayDeque<StateSnapshot>()
 
@@ -115,6 +120,7 @@ class HandwritingView @JvmOverloads constructor(
     private var contentChangedListener: (() -> Unit)? = null
     private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
     private val insertedHandwritingObjects = mutableListOf<InsertedHandwritingObject>()
+    private var insertionMarker: Pair<Float, Float>? = null
 
     private val maxHistory = 25
 
@@ -185,6 +191,7 @@ class HandwritingView @JvmOverloads constructor(
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, currentPreviewPaint())
+        insertionMarker?.let { (x, y) -> drawInsertionMarker(canvas, x, y) }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -195,6 +202,7 @@ class HandwritingView @JvmOverloads constructor(
                 MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
                 MotionEvent.ACTION_UP -> {
                     performClick()
+                    setTextInsertionPreview(x, y)
                     textInsertionTapListener?.invoke(x, y)
                     disallowParentIntercept(false)
                 }
@@ -480,6 +488,16 @@ class HandwritingView @JvmOverloads constructor(
         textInsertionTapListener = listener
     }
 
+    fun setTextInsertionPreview(x: Float, y: Float) {
+        insertionMarker = x to y
+        invalidate()
+    }
+
+    fun clearTextInsertionPreview() {
+        insertionMarker = null
+        invalidate()
+    }
+
     fun insertBitmapAt(
         bitmap: Bitmap,
         x: Float,
@@ -492,6 +510,7 @@ class HandwritingView @JvmOverloads constructor(
         commitCurrentPath()
         val canvas = extraCanvas ?: return
         canvas.drawBitmap(bitmap, x, y, bitmapPaint)
+        clearTextInsertionPreview()
         insertedHandwritingObjects += InsertedHandwritingObject(
             id = UUID.randomUUID().toString(),
             x = x,
@@ -506,6 +525,13 @@ class HandwritingView @JvmOverloads constructor(
         pushCurrentState(true, hasBaseImage)
         invalidate()
         notifyContentChanged()
+    }
+
+    private fun drawInsertionMarker(canvas: Canvas, x: Float, y: Float) {
+        val radius = 10f * density
+        canvas.drawCircle(x, y, radius, insertionMarkerPaint)
+        canvas.drawLine(x - radius * 1.5f, y, x + radius * 1.5f, y, insertionMarkerPaint)
+        canvas.drawLine(x, y - radius * 1.5f, x, y + radius * 1.5f, insertionMarkerPaint)
     }
 
     override fun onDetachedFromWindow() {
