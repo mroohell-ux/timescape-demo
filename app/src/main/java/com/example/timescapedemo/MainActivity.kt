@@ -4414,6 +4414,7 @@ class MainActivity : AppCompatActivity() {
             }
             var commitRunnable: Runnable? = null
             var editorStrokeActive = false
+            var liveBufferPreviewBitmap: Bitmap? = null
             val inputDialog = AlertDialog.Builder(this)
                 .setView(container)
                 .create()
@@ -4425,7 +4426,21 @@ class MainActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         )
                         fun updateBufferPreview() {
-                            bufferPreview.setImageBitmap(bufferBitmap)
+                            liveBufferPreviewBitmap?.recycle()
+                            liveBufferPreviewBitmap = bufferBitmap.copy(Bitmap.Config.ARGB_8888, true).also { previewBitmap ->
+                                val liveBitmap = editor.exportPreviewContentBitmapScaled(1f, 0)
+                                if (liveBitmap != null) {
+                                    var previewX = cursorX
+                                    var previewY = cursorY
+                                    if (previewX > 0f && previewX + liveBitmap.width > bufferWidth) {
+                                        previewX = 0f
+                                        previewY += bufferLineHeight
+                                    }
+                                    Canvas(previewBitmap).drawBitmap(liveBitmap, previewX, previewY, bufferPaint)
+                                    liveBitmap.recycle()
+                                }
+                            }
+                            bufferPreview.setImageBitmap(liveBufferPreviewBitmap)
                             bufferPreview.invalidate()
                         }
                         fun updateEditorActions() {
@@ -4484,12 +4499,18 @@ class MainActivity : AppCompatActivity() {
                             if (active) {
                                 cancelAutoCommit()
                                 autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_waiting)
+                                updateBufferPreview()
                             } else if (editor.hasDrawing()) {
+                                updateBufferPreview()
                                 scheduleAutoCommit()
                             }
                         }
+                        editor.setOnStrokePreviewChangedListener {
+                            updateBufferPreview()
+                        }
                         editor.setOnContentChangedListener {
                             updateEditorActions()
+                            updateBufferPreview()
                             if (editor.hasDrawing() && !editorStrokeActive) scheduleAutoCommit()
                         }
                         updateEditorActions()
@@ -4570,6 +4591,8 @@ class MainActivity : AppCompatActivity() {
                     }
                     setOnDismissListener {
                         commitRunnable?.let(editor::removeCallbacks)
+                        liveBufferPreviewBitmap?.recycle()
+                        liveBufferPreviewBitmap = null
                         handwritingView.clearTextInsertionPreview()
                     }
                 }

@@ -120,6 +120,7 @@ class HandwritingView @JvmOverloads constructor(
     private var contentChangedListener: (() -> Unit)? = null
     private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
     private var strokeActiveListener: ((active: Boolean) -> Unit)? = null
+    private var strokePreviewChangedListener: (() -> Unit)? = null
     private val insertedHandwritingObjects = mutableListOf<InsertedHandwritingObject>()
     private var insertionMarker: Pair<Float, Float>? = null
 
@@ -216,15 +217,21 @@ class HandwritingView @JvmOverloads constructor(
                 disallowParentIntercept(true)
                 strokeActiveListener?.invoke(true)
                 touchStart(x, y)
+                notifyStrokePreviewChanged()
             }
-            MotionEvent.ACTION_MOVE -> touchMove(x, y)
+            MotionEvent.ACTION_MOVE -> {
+                touchMove(x, y)
+                notifyStrokePreviewChanged()
+            }
             MotionEvent.ACTION_UP -> {
                 touchUp()
+                notifyStrokePreviewChanged()
                 strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
             }
             MotionEvent.ACTION_CANCEL -> {
                 touchCancel()
+                notifyStrokePreviewChanged()
                 strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
             }
@@ -371,6 +378,32 @@ class HandwritingView @JvmOverloads constructor(
         return result
     }
 
+    fun exportPreviewContentBitmapScaled(scale: Float, paddingPx: Int): Bitmap? {
+        val base = extraBitmap ?: return null
+        val source = base.copy(Config.ARGB_8888, true)
+        Canvas(source).drawPath(path, currentPreviewPaint())
+        val contentBounds = findContentBounds(source) ?: run {
+            source.recycle()
+            return null
+        }
+        val paddedBounds = Rect(
+            (contentBounds.left - paddingPx).coerceAtLeast(0),
+            (contentBounds.top - paddingPx).coerceAtLeast(0),
+            (contentBounds.right + paddingPx).coerceAtMost(source.width),
+            (contentBounds.bottom + paddingPx).coerceAtMost(source.height)
+        )
+        val safeScale = scale.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val targetWidth = max(1, (paddedBounds.width() * safeScale).roundToInt())
+        val targetHeight = max(1, (paddedBounds.height() * safeScale).roundToInt())
+        val result = Bitmap.createBitmap(targetWidth, targetHeight, Config.ARGB_8888)
+        Canvas(result).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, targetHeight), bitmapPaint)
+        }
+        source.recycle()
+        return result
+    }
+
     fun contentBounds(): Rect? {
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
@@ -496,6 +529,10 @@ class HandwritingView @JvmOverloads constructor(
         strokeActiveListener = listener
     }
 
+    fun setOnStrokePreviewChangedListener(listener: (() -> Unit)?) {
+        strokePreviewChangedListener = listener
+    }
+
     fun setTextInsertionPreview(x: Float, y: Float) {
         insertionMarker = x to y
         invalidate()
@@ -577,6 +614,10 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchCancel() {
         path.reset()
+    }
+
+    private fun notifyStrokePreviewChanged() {
+        strokePreviewChangedListener?.invoke()
     }
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
