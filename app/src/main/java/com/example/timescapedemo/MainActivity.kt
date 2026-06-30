@@ -4085,10 +4085,70 @@ class MainActivity : AppCompatActivity() {
             val keyboardCanvasHeight = (132 * density).roundToInt()
             val bufferWidth = (1400 * density).roundToInt()
             val bufferHeight = (900 * density).roundToInt()
+            val sourceCanvasWidth = handwritingView.width.coerceAtLeast(1)
+            val sourceCanvasHeight = handwritingView.height.coerceAtLeast(1)
             val bufferBitmap = Bitmap.createBitmap(bufferWidth, bufferHeight, Bitmap.Config.ARGB_8888)
             val bufferCanvas = Canvas(bufferBitmap)
             bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
             val bufferPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+            val insertionPreview = object : View(this) {
+                private val previewBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = ColorUtils.setAlphaComponent(selectedPaperColor.color, 0xFF)
+                    style = Paint.Style.FILL
+                }
+                private val previewBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.parseColor("#8090A4")
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1.5f * density
+                }
+                private val previewMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.parseColor("#2962FF")
+                    style = Paint.Style.STROKE
+                    strokeWidth = 2f * density
+                    strokeCap = Paint.Cap.ROUND
+                }
+                private val previewFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0x22)
+                    style = Paint.Style.FILL
+                }
+
+                init {
+                    contentDescription = getString(R.string.handwriting_text_insertion_preview)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        (72 * density).roundToInt()
+                    )
+                }
+
+                override fun onDraw(canvas: Canvas) {
+                    super.onDraw(canvas)
+                    val padding = 8f * density
+                    val availableWidth = (width - padding * 2).coerceAtLeast(1f)
+                    val availableHeight = (height - padding * 2).coerceAtLeast(1f)
+                    val sourceRatio = sourceCanvasWidth.toFloat() / sourceCanvasHeight.toFloat()
+                    val previewRatio = availableWidth / availableHeight
+                    val previewRect = RectF()
+                    if (sourceRatio > previewRatio) {
+                        val previewHeight = availableWidth / sourceRatio
+                        val top = padding + (availableHeight - previewHeight) / 2f
+                        previewRect.set(padding, top, padding + availableWidth, top + previewHeight)
+                    } else {
+                        val previewWidth = availableHeight * sourceRatio
+                        val left = padding + (availableWidth - previewWidth) / 2f
+                        previewRect.set(left, padding, left + previewWidth, padding + availableHeight)
+                    }
+                    val radius = 10f * density
+                    canvas.drawRoundRect(previewRect, radius, radius, previewBackgroundPaint)
+                    canvas.drawRoundRect(previewRect, radius, radius, previewBorderPaint)
+                    val markerX = previewRect.left + (targetX / sourceCanvasWidth.toFloat()).coerceIn(0f, 1f) * previewRect.width()
+                    val markerY = previewRect.top + (targetY / sourceCanvasHeight.toFloat()).coerceIn(0f, 1f) * previewRect.height()
+                    val markerRadius = 7f * density
+                    canvas.drawCircle(markerX, markerY, markerRadius * 1.8f, previewFillPaint)
+                    canvas.drawCircle(markerX, markerY, markerRadius, previewMarkerPaint)
+                    canvas.drawLine(markerX - markerRadius * 1.7f, markerY, markerX + markerRadius * 1.7f, markerY, previewMarkerPaint)
+                    canvas.drawLine(markerX, markerY - markerRadius * 1.7f, markerX, markerY + markerRadius * 1.7f, previewMarkerPaint)
+                }
+            }
             val bufferPreview = ImageView(this).apply {
                 adjustViewBounds = true
                 setBackgroundColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x08))
@@ -4160,6 +4220,11 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(Color.parseColor("#2962FF"))
                 setPadding(0, 0, 0, (8 * density).roundToInt())
             }
+            val autoCommitStatus = TextView(this).apply {
+                text = getString(R.string.handwriting_text_auto_commit_waiting)
+                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
+                setPadding(0, 0, 0, (8 * density).roundToInt())
+            }
             val editorActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(undoTextButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -4176,8 +4241,10 @@ class MainActivity : AppCompatActivity() {
                     (8 * density).roundToInt()
                 )
                 addView(insertionPointLabel)
+                addView(insertionPreview)
                 addView(keyboardHint)
                 addView(editorFrame)
+                addView(autoCommitStatus)
                 addView(editorActions)
                 addView(bufferPreview)
                 addView(TextView(this@MainActivity).apply {
@@ -4236,12 +4303,16 @@ class MainActivity : AppCompatActivity() {
                             editor.clear()
                             updateBufferPreview()
                             updateEditorActions()
+                            autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_buffered)
                             return true
                         }
                         fun scheduleAutoCommit() {
                             commitRunnable?.let(editor::removeCallbacks)
+                            autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_pending)
                             commitRunnable = Runnable {
-                                commitKeyboardStrokes(addTrailingSpace = true)
+                                if (!commitKeyboardStrokes(addTrailingSpace = true)) {
+                                    autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_waiting)
+                                }
                             }.also { editor.postDelayed(it, 2_000L) }
                         }
                         editor.setOnContentChangedListener {
@@ -4256,11 +4327,13 @@ class MainActivity : AppCompatActivity() {
                         }
                         clearTextButton.setOnClickListener {
                             editor.clear()
+                            commitRunnable?.let(editor::removeCallbacks)
                             bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
                             cursorX = 0f
                             cursorY = 0f
                             bufferBounds = null
                             hasBufferedText = false
+                            autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_waiting)
                             updateBufferPreview()
                             updateEditorActions()
                         }
