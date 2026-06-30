@@ -119,6 +119,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private var contentChangedListener: (() -> Unit)? = null
     private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
+    private var strokeActiveListener: ((active: Boolean) -> Unit)? = null
     private val insertedHandwritingObjects = mutableListOf<InsertedHandwritingObject>()
     private var insertionMarker: Pair<Float, Float>? = null
 
@@ -213,15 +214,18 @@ class HandwritingView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 disallowParentIntercept(true)
+                strokeActiveListener?.invoke(true)
                 touchStart(x, y)
             }
             MotionEvent.ACTION_MOVE -> touchMove(x, y)
             MotionEvent.ACTION_UP -> {
                 touchUp()
+                strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
             }
             MotionEvent.ACTION_CANCEL -> {
                 touchCancel()
+                strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
             }
         }
@@ -486,6 +490,10 @@ class HandwritingView @JvmOverloads constructor(
 
     fun setOnTextInsertionTapListener(listener: ((x: Float, y: Float) -> Unit)?) {
         textInsertionTapListener = listener
+    }
+
+    fun setOnStrokeActiveListener(listener: ((active: Boolean) -> Unit)?) {
+        strokeActiveListener = listener
     }
 
     fun setTextInsertionPreview(x: Float, y: Float) {

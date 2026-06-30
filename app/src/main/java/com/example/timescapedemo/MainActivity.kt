@@ -4413,6 +4413,7 @@ class MainActivity : AppCompatActivity() {
                 addView(footerActions)
             }
             var commitRunnable: Runnable? = null
+            var editorStrokeActive = false
             val inputDialog = AlertDialog.Builder(this)
                 .setView(container)
                 .create()
@@ -4439,7 +4440,12 @@ class MainActivity : AppCompatActivity() {
                             cursorX = 0f
                             cursorY += bufferLineHeight
                         }
+                        fun cancelAutoCommit() {
+                            commitRunnable?.let(editor::removeCallbacks)
+                            commitRunnable = null
+                        }
                         fun commitKeyboardStrokes(addTrailingSpace: Boolean): Boolean {
+                            if (editorStrokeActive) return false
                             if (editor.contentBounds() == null) return false
                             val groupBitmap = editor.exportContentBitmapScaled(1f, 0) ?: return false
                             if (cursorX > 0f && cursorX + groupBitmap.width > bufferWidth) {
@@ -4462,17 +4468,29 @@ class MainActivity : AppCompatActivity() {
                             return true
                         }
                         fun scheduleAutoCommit() {
-                            commitRunnable?.let(editor::removeCallbacks)
+                            if (editorStrokeActive) return
+                            cancelAutoCommit()
                             autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_pending)
                             commitRunnable = Runnable {
-                                if (!commitKeyboardStrokes(addTrailingSpace = true)) {
+                                if (editorStrokeActive) {
+                                    scheduleAutoCommit()
+                                } else if (!commitKeyboardStrokes(addTrailingSpace = true)) {
                                     autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_waiting)
                                 }
                             }.also { editor.postDelayed(it, 2_000L) }
                         }
+                        editor.setOnStrokeActiveListener { active ->
+                            editorStrokeActive = active
+                            if (active) {
+                                cancelAutoCommit()
+                                autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_waiting)
+                            } else if (editor.hasDrawing()) {
+                                scheduleAutoCommit()
+                            }
+                        }
                         editor.setOnContentChangedListener {
                             updateEditorActions()
-                            if (editor.hasDrawing()) scheduleAutoCommit()
+                            if (editor.hasDrawing() && !editorStrokeActive) scheduleAutoCommit()
                         }
                         updateEditorActions()
                         updateBufferPreview()
@@ -4482,7 +4500,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         clearTextButton.setOnClickListener {
                             editor.clear()
-                            commitRunnable?.let(editor::removeCallbacks)
+                            cancelAutoCommit()
                             bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
                             cursorX = 0f
                             cursorY = 0f
@@ -4493,14 +4511,14 @@ class MainActivity : AppCompatActivity() {
                             updateEditorActions()
                         }
                         spaceButton.setOnClickListener {
-                            commitRunnable?.let(editor::removeCallbacks)
+                            cancelAutoCommit()
                             if (!commitKeyboardStrokes(addTrailingSpace = true)) {
                                 cursorX += spaceWidth
                             }
                             updateEditorActions()
                         }
                         newLineButton.setOnClickListener {
-                            commitRunnable?.let(editor::removeCallbacks)
+                            cancelAutoCommit()
                             commitKeyboardStrokes(addTrailingSpace = false)
                             moveToNextLine()
                             updateEditorActions()
@@ -4508,7 +4526,7 @@ class MainActivity : AppCompatActivity() {
                         closeButton.setOnClickListener { dismiss() }
                         cancelTextButton.setOnClickListener { dismiss() }
                         saveTextButton.setOnClickListener {
-                            commitRunnable?.let(editor::removeCallbacks)
+                            cancelAutoCommit()
                             commitKeyboardStrokes(addTrailingSpace = false)
                             val bounds = bufferBounds
                             if (bounds == null || !hasBufferedText) {
