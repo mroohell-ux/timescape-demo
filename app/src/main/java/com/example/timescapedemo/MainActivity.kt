@@ -4111,6 +4111,10 @@ class MainActivity : AppCompatActivity() {
                     color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0x22)
                     style = Paint.Style.FILL
                 }
+                private val previewFlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0x30)
+                    style = Paint.Style.FILL
+                }
 
                 init {
                     contentDescription = getString(R.string.handwriting_text_insertion_preview)
@@ -4143,6 +4147,23 @@ class MainActivity : AppCompatActivity() {
                     val markerX = previewRect.left + (targetX / sourceCanvasWidth.toFloat()).coerceIn(0f, 1f) * previewRect.width()
                     val markerY = previewRect.top + (targetY / sourceCanvasHeight.toFloat()).coerceIn(0f, 1f) * previewRect.height()
                     val markerRadius = 7f * density
+                    val lineHeight = 14f * density
+                    val lineGap = 5f * density
+                    val flowRight = previewRect.right - 8f * density
+                    val flowBottom = previewRect.bottom - 8f * density
+                    var flowTop = markerY + markerRadius * 1.8f
+                    repeat(2) { index ->
+                        if (flowTop + lineHeight <= flowBottom && markerX < flowRight) {
+                            val lineRight = if (index == 0) flowRight else markerX + (flowRight - markerX) * 0.65f
+                            canvas.drawRoundRect(
+                                RectF(markerX, flowTop, lineRight, flowTop + lineHeight),
+                                lineHeight / 2f,
+                                lineHeight / 2f,
+                                previewFlowPaint
+                            )
+                            flowTop += lineHeight + lineGap
+                        }
+                    }
                     canvas.drawCircle(markerX, markerY, markerRadius * 1.8f, previewFillPaint)
                     canvas.drawCircle(markerX, markerY, markerRadius, previewMarkerPaint)
                     canvas.drawLine(markerX - markerRadius * 1.7f, markerY, markerX + markerRadius * 1.7f, markerY, previewMarkerPaint)
@@ -4215,6 +4236,11 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
                 setPadding(0, 0, 0, (8 * density).roundToInt())
             }
+            val flowHint = TextView(this).apply {
+                text = getString(R.string.handwriting_text_flow_hint)
+                setTextColor(ColorUtils.setAlphaComponent(Color.BLACK, 0x99))
+                setPadding(0, 0, 0, (8 * density).roundToInt())
+            }
             val insertionPointLabel = TextView(this).apply {
                 text = getString(R.string.handwriting_text_insertion_point, targetX, targetY)
                 setTextColor(Color.parseColor("#2962FF"))
@@ -4242,6 +4268,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 addView(insertionPointLabel)
                 addView(insertionPreview)
+                addView(flowHint)
                 addView(keyboardHint)
                 addView(editorFrame)
                 addView(autoCommitStatus)
@@ -4283,11 +4310,18 @@ class MainActivity : AppCompatActivity() {
                             cursorX = 0f
                             cursorY += bufferLineHeight
                         }
+                        fun maxBufferLineWidth(): Float {
+                            val insertSizePx = insertSizeSlider.value.coerceAtLeast(1f)
+                            val scale = insertSizePx / guideLineHeightPx.toFloat()
+                            val availableCanvasWidth = (sourceCanvasWidth.toFloat() - targetX).coerceAtLeast(insertSizePx)
+                            return (availableCanvasWidth / scale).coerceIn(guideLineHeightPx.toFloat(), bufferWidth.toFloat())
+                        }
                         fun commitKeyboardStrokes(addTrailingSpace: Boolean): Boolean {
                             val contentBounds = editor.contentBounds() ?: return false
                             val normalizeScale = guideLineHeightPx.toFloat() / contentBounds.height().coerceAtLeast(1).toFloat()
                             val groupBitmap = editor.exportContentBitmapScaled(normalizeScale, 0) ?: return false
-                            if (cursorX > 0f && cursorX + groupBitmap.width > bufferWidth) {
+                            val lineWidth = maxBufferLineWidth()
+                            if (cursorX > 0f && cursorX + groupBitmap.width > lineWidth) {
                                 moveToNextLine()
                             }
                             if (cursorY + groupBitmap.height > bufferHeight) {
