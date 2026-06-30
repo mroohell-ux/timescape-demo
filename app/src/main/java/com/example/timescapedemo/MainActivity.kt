@@ -4083,7 +4083,7 @@ class MainActivity : AppCompatActivity() {
         fun showHandwritingTextInput(targetX: Float, targetY: Float) {
             val guideLineHeightPx = (28 * density).roundToInt().coerceAtLeast(1)
             val keyboardCanvasWidth = (360 * density).roundToInt()
-            val keyboardCanvasHeight = (132 * density).roundToInt()
+            val keyboardCanvasHeight = (180 * density).roundToInt()
             val bufferWidth = (1400 * density).roundToInt()
             val bufferHeight = (900 * density).roundToInt()
             val bufferBitmap = Bitmap.createBitmap(bufferWidth, bufferHeight, Bitmap.Config.ARGB_8888)
@@ -4116,20 +4116,6 @@ class MainActivity : AppCompatActivity() {
                 textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(textPrimaryColor)
-            }
-
-            fun styleActionButton(button: MaterialButton, iconText: String) {
-                button.isAllCaps = false
-                button.text = "$iconText\n${button.text}"
-                button.textSize = 13f
-                button.setTextColor(textPrimaryColor)
-                button.backgroundTintList = ColorStateList.valueOf(surfaceColor)
-                button.strokeColor = ColorStateList.valueOf(borderColor)
-                button.strokeWidth = (1 * density).roundToInt().coerceAtLeast(1)
-                button.cornerRadius = (14 * density).roundToInt()
-                button.minHeight = controlHeight
-                button.insetTop = 0
-                button.insetBottom = 0
             }
 
             var cursorX = 0f
@@ -4169,7 +4155,7 @@ class MainActivity : AppCompatActivity() {
                     contentDescription = getString(R.string.handwriting_text_insertion_preview)
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
-                        (64 * density).roundToInt()
+                        (128 * density).roundToInt()
                     )
                 }
 
@@ -4292,14 +4278,6 @@ class MainActivity : AppCompatActivity() {
             }
             updateInsertSizeLabel()
             insertSizeSlider.addOnChangeListener { _, _, _ -> updateInsertSizeLabel() }
-            val undoTextButton = MaterialButton(this).apply { text = getString(R.string.handwriting_action_undo) }
-            val clearTextButton = MaterialButton(this).apply { text = getString(R.string.handwriting_action_clear) }
-            val spaceButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_space) }
-            val newLineButton = MaterialButton(this).apply { text = getString(R.string.handwriting_text_new_line) }
-            styleActionButton(undoTextButton, "↶")
-            styleActionButton(clearTextButton, "⌫")
-            styleActionButton(spaceButton, "—")
-            styleActionButton(newLineButton, "↵")
             val keyboardHint = TextView(this).apply {
                 text = getString(R.string.handwriting_text_keyboard_hint)
                 textSize = 13f
@@ -4323,18 +4301,6 @@ class MainActivity : AppCompatActivity() {
                 textSize = 12f
                 setTextColor(textSecondaryColor)
                 setPadding(0, (8 * density).roundToInt(), 0, (8 * density).roundToInt())
-            }
-            val editorActions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                background = roundedDrawable(surfaceColor, borderColor, 1f, 16f)
-                setPadding((4 * density).roundToInt(), (4 * density).roundToInt(), (4 * density).roundToInt(), (4 * density).roundToInt())
-                val actionMargin = (4 * density).roundToInt()
-                listOf(undoTextButton, clearTextButton, spaceButton, newLineButton).forEach { button ->
-                    addView(button, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                        marginStart = actionMargin
-                        marginEnd = actionMargin
-                    })
-                }
             }
             val headerIcon = TextView(this).apply {
                 text = "⌖"
@@ -4437,7 +4403,6 @@ class MainActivity : AppCompatActivity() {
                 addView(writeHeader)
                 addView(editorFrame)
                 addView(autoCommitStatus)
-                addView(editorActions)
                 addView(sizeHeader)
                 addView(insertSizeSlider)
                 addView(footerActions)
@@ -4462,8 +4427,6 @@ class MainActivity : AppCompatActivity() {
                             placeholder.isGone = hasInput
                             saveTextButton.isEnabled = hasInput || hasBufferedText
                             saveTextButton.alpha = if (hasInput || hasBufferedText) 1f else 0.45f
-                            undoTextButton.isEnabled = editor.canUndo()
-                            clearTextButton.isEnabled = hasInput || hasBufferedText
                         }
                         fun moveToNextLine() {
                             cursorX = 0f
@@ -4529,35 +4492,6 @@ class MainActivity : AppCompatActivity() {
                         }
                         updateEditorActions()
                         updateBufferPreview()
-                        undoTextButton.setOnClickListener {
-                            editor.undo()
-                            updateEditorActions()
-                        }
-                        clearTextButton.setOnClickListener {
-                            editor.clear()
-                            cancelAutoCommit()
-                            bufferCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-                            cursorX = 0f
-                            cursorY = 0f
-                            bufferBounds = null
-                            hasBufferedText = false
-                            autoCommitStatus.text = getString(R.string.handwriting_text_auto_commit_waiting)
-                            updateBufferPreview()
-                            updateEditorActions()
-                        }
-                        spaceButton.setOnClickListener {
-                            cancelAutoCommit()
-                            if (!commitKeyboardStrokes(addTrailingSpace = true)) {
-                                cursorX += spaceWidth
-                            }
-                            updateEditorActions()
-                        }
-                        newLineButton.setOnClickListener {
-                            cancelAutoCommit()
-                            commitKeyboardStrokes(addTrailingSpace = false)
-                            moveToNextLine()
-                            updateEditorActions()
-                        }
                         closeButton.setOnClickListener { dismiss() }
                         cancelTextButton.setOnClickListener { dismiss() }
                         saveTextButton.setOnClickListener {
