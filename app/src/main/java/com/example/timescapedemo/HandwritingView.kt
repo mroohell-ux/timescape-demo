@@ -27,6 +27,7 @@ import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HandwritingView @JvmOverloads constructor(
@@ -284,6 +285,51 @@ class HandwritingView @JvmOverloads constructor(
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
         return result
+    }
+
+    fun exportContentBitmap(targetHeightPx: Int, paddingPx: Int): Bitmap? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        val contentBounds = findContentBounds(source) ?: return null
+        val paddedBounds = Rect(
+            (contentBounds.left - paddingPx).coerceAtLeast(0),
+            (contentBounds.top - paddingPx).coerceAtLeast(0),
+            (contentBounds.right + paddingPx).coerceAtMost(source.width),
+            (contentBounds.bottom + paddingPx).coerceAtMost(source.height)
+        )
+        val sourceWidth = paddedBounds.width().coerceAtLeast(1)
+        val sourceHeight = paddedBounds.height().coerceAtLeast(1)
+        val safeTargetHeight = targetHeightPx.coerceAtLeast(1)
+        val scale = safeTargetHeight.toFloat() / sourceHeight.toFloat()
+        val targetWidth = max(1, (sourceWidth * scale).roundToInt())
+        val result = Bitmap.createBitmap(targetWidth, safeTargetHeight, Config.ARGB_8888)
+        Canvas(result).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, safeTargetHeight), bitmapPaint)
+        }
+        return result
+    }
+
+    private fun findContentBounds(bitmap: Bitmap): Rect? {
+        var left = bitmap.width
+        var top = bitmap.height
+        var right = -1
+        var bottom = -1
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                if (Color.alpha(bitmap.getPixel(x, y)) != 0) {
+                    left = min(left, x)
+                    top = min(top, y)
+                    right = max(right, x + 1)
+                    bottom = max(bottom, y + 1)
+                }
+                x++
+            }
+            y++
+        }
+        return if (right > left && bottom > top) Rect(left, top, right, bottom) else null
     }
 
     fun setCanvasBackgroundColor(@ColorInt color: Int) {

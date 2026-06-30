@@ -36,6 +36,7 @@ import android.util.Base64
 import android.util.JsonReader
 import android.util.JsonToken
 import android.util.JsonWriter
+import android.util.TypedValue
 import android.view.ContextThemeWrapper
 import android.view.DragEvent
 import android.view.Gravity
@@ -311,6 +312,7 @@ class MainActivity : AppCompatActivity() {
         val lockedPaperColor: Int? = null,
         val lockedPaperStyle: HandwritingPaperStyle? = null,
         val lockedFormat: HandwritingFormat? = null,
+        val scaleContentToCardFont: Boolean = false,
         val onSaveBitmap: ((Bitmap, HandwritingOptions) -> Boolean)? = null
     )
 
@@ -2279,6 +2281,53 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun showInlineHandwritingDialog(flow: CardFlow, targetIndex: Int) {
+        val defaults = defaultHandwritingOptions()
+        val inlineOptions = defaults.copy(
+            backgroundColor = Color.TRANSPARENT,
+            paperStyle = HandwritingPaperStyle.PLAIN,
+            format = HandwritingFormat.PNG
+        )
+        showHandwritingDialog(
+            titleRes = R.string.dialog_add_handwriting_title,
+            existing = null,
+            initialOptions = inlineOptions,
+            face = HandwritingFace.FRONT,
+            onSave = { savedContent ->
+                val content = savedContent ?: run {
+                    snackbar(getString(R.string.snackbar_handwriting_required))
+                    return@showHandwritingDialog
+                }
+                val card = CardItem(
+                    id = nextCardId++,
+                    title = "",
+                    snippet = "",
+                    handwriting = HandwritingContent(content.path, content.options),
+                    updatedAt = System.currentTimeMillis()
+                )
+                val insertionIndex = if (targetIndex == RecyclerView.NO_POSITION) {
+                    flow.cards.size
+                } else {
+                    targetIndex.coerceIn(0, flow.cards.size)
+                }
+                flow.cards.add(insertionIndex, card)
+                flowShuffleStates[flow.id]?.originalOrder?.add(insertionIndex, card.id)
+                flow.lastViewedCardIndex = insertionIndex
+                flow.lastViewedCardId = card.id
+                flow.lastViewedCardFocused = false
+                refreshFlow(flow, scrollToTop = false)
+                saveState()
+                snackbar(getString(R.string.snackbar_added_handwriting))
+            },
+            extras = HandwritingDialogExtras(
+                lockedPaperColor = Color.TRANSPARENT,
+                lockedPaperStyle = HandwritingPaperStyle.PLAIN,
+                lockedFormat = HandwritingFormat.PNG,
+                scaleContentToCardFont = true
+            )
+        )
+    }
+
     private fun editCard(
         flow: CardFlow,
         tappedCard: CardItem,
@@ -4126,7 +4175,17 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
-                val exportBitmap = handwritingView.exportBitmap()
+                val fontScaledHeightPx = TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    cardFontSizeSp,
+                    resources.displayMetrics
+                ).roundToInt().coerceAtLeast(1)
+                val exportBitmap = if (extras.scaleContentToCardFont) {
+                    val paddingPx = (fontScaledHeightPx * 0.15f).roundToInt().coerceAtLeast(2)
+                    handwritingView.exportContentBitmap(fontScaledHeightPx, paddingPx)
+                } else {
+                    handwritingView.exportBitmap()
+                }
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
                     return@setOnClickListener
@@ -4135,8 +4194,8 @@ class MainActivity : AppCompatActivity() {
                     backgroundColor = selectedPaperColor.color,
                     brushColor = selectedBrushColor.color,
                     brushSizeDp = selectedBrushSize,
-                    canvasWidth = selectedSize.width,
-                    canvasHeight = selectedSize.height,
+                    canvasWidth = exportBitmap.width,
+                    canvasHeight = exportBitmap.height,
                     format = selectedFormat,
                     paperStyle = selectedPaperStyle,
                     penType = selectedPenType,
@@ -7310,7 +7369,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onSingleTapUp(e: MotionEvent): Boolean {
                     val child = recycler.findChildViewUnder(e.x, e.y)
                     if (child != null) return false
-                    onEmptyAreaTapped()
+                    onEmptyAreaTapped(e.y)
                     return true
                 }
             }
@@ -7418,8 +7477,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        private fun onEmptyAreaTapped() {
-            showFlowLabelsWidgetTemporarily()
+        private fun onEmptyAreaTapped(tapY: Float) {
+            val flow = owningFlow()
+            if (flow == null || flow.id == VIDEO_FLOW_ID || activeQuery.isNotBlank()) {
+                showFlowLabelsWidgetTemporarily()
+                return
+            }
+            val targetIndex = layoutManager.indexForScreenY(tapY)
+            showInlineHandwritingDialog(flow, targetIndex)
         }
 
         private fun handleListCommitted(
