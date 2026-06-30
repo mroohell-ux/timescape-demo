@@ -4132,6 +4132,14 @@ class MainActivity : AppCompatActivity() {
                 button.insetBottom = 0
             }
 
+            var cursorX = 0f
+            var cursorY = 0f
+            val spaceWidth = guideLineHeightPx * 0.75f
+            val bufferLineHeight = guideLineHeightPx * 1.4f
+            var bufferBounds: RectF? = null
+            var hasBufferedText = false
+            var selectedInsertSizePx = cardFontSizeSp.coerceIn(8f, 48f)
+
             val insertionPreview = object : View(this) {
                 private val previewBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.parseColor("#FBFAFF")
@@ -4185,6 +4193,35 @@ class MainActivity : AppCompatActivity() {
                         canvas.drawRoundRect(previewRect, radius, radius, previewBackgroundPaint)
                     }
                     canvas.drawRoundRect(previewRect, radius, radius, previewBorderPaint)
+                    val bounds = bufferBounds
+                    if (viewportBitmap != null && bounds != null && handwritingView.width > 0) {
+                        val viewportScale = previewRect.width() / handwritingView.width.toFloat()
+                        val viewportHeight = previewRect.height() / viewportScale
+                        val viewportTop = (targetY - viewportHeight / 2f).coerceIn(
+                            0f,
+                            (handwritingView.height - viewportHeight).coerceAtLeast(0f)
+                        )
+                        val insertScale = selectedInsertSizePx / guideLineHeightPx.toFloat()
+                        val paddingPx = (guideLineHeightPx * 0.2f).roundToInt().coerceAtLeast(2)
+                        val src = Rect(
+                            (bounds.left - paddingPx).roundToInt().coerceAtLeast(0),
+                            (bounds.top - paddingPx).roundToInt().coerceAtLeast(0),
+                            (bounds.right + paddingPx).roundToInt().coerceAtMost(bufferWidth),
+                            (bounds.bottom + paddingPx).roundToInt().coerceAtMost(bufferHeight)
+                        )
+                        val destLeft = previewRect.left + targetX * viewportScale
+                        val destTop = previewRect.top + (targetY - viewportTop) * viewportScale
+                        val dest = RectF(
+                            destLeft,
+                            destTop,
+                            destLeft + src.width() * insertScale * viewportScale,
+                            destTop + src.height() * insertScale * viewportScale
+                        )
+                        canvas.save()
+                        canvas.clipRect(previewRect)
+                        canvas.drawBitmap(bufferBitmap, src, dest, bufferPaint)
+                        canvas.restore()
+                    }
                     if (viewportBitmap != null) return
                     val markerX = previewRect.left + 20f * density
                     val markerY = previewRect.centerY()
@@ -4213,26 +4250,6 @@ class MainActivity : AppCompatActivity() {
                     canvas.drawLine(markerX, markerY - markerRadius * 1.7f, markerX, markerY + markerRadius * 1.7f, previewMarkerPaint)
                 }
             }
-            val bufferPreview = ImageView(this).apply {
-                adjustViewBounds = true
-                background = roundedDrawable(Color.parseColor("#FBFAFF"), borderColor, 1f, 12f)
-                setPadding(
-                    (12 * density).roundToInt(),
-                    (8 * density).roundToInt(),
-                    (12 * density).roundToInt(),
-                    (8 * density).roundToInt()
-                )
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    (96 * density).roundToInt()
-                )
-            }
-            var cursorX = 0f
-            var cursorY = 0f
-            val spaceWidth = guideLineHeightPx * 0.75f
-            val bufferLineHeight = guideLineHeightPx * 1.4f
-            var bufferBounds: RectF? = null
-            var hasBufferedText = false
             val editor = HandwritingView(this).apply {
                 setCanvasSize(keyboardCanvasWidth, keyboardCanvasHeight)
                 setCanvasBackgroundColor(Color.WHITE)
@@ -4266,10 +4283,12 @@ class MainActivity : AppCompatActivity() {
                 valueFrom = 8f
                 valueTo = 48f
                 stepSize = 1f
-                value = cardFontSizeSp.coerceIn(valueFrom, valueTo)
+                value = selectedInsertSizePx.coerceIn(valueFrom, valueTo)
             }
             fun updateInsertSizeLabel() {
+                selectedInsertSizePx = insertSizeSlider.value
                 insertSizeValue.text = getString(R.string.handwriting_text_insert_size_value_short, insertSizeSlider.value)
+                insertionPreview.invalidate()
             }
             updateInsertSizeLabel()
             insertSizeSlider.addOnChangeListener { _, _, _ -> updateInsertSizeLabel() }
@@ -4419,14 +4438,12 @@ class MainActivity : AppCompatActivity() {
                 addView(editorFrame)
                 addView(autoCommitStatus)
                 addView(editorActions)
-                addView(bufferPreview)
                 addView(sizeHeader)
                 addView(insertSizeSlider)
                 addView(footerActions)
             }
             var commitRunnable: Runnable? = null
             var editorStrokeActive = false
-            var liveBufferPreviewBitmap: Bitmap? = null
             val inputDialog = AlertDialog.Builder(this)
                 .setView(container)
                 .create()
@@ -4438,22 +4455,7 @@ class MainActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.WRAP_CONTENT
                         )
                         fun updateBufferPreview() {
-                            liveBufferPreviewBitmap?.recycle()
-                            liveBufferPreviewBitmap = bufferBitmap.copy(Bitmap.Config.ARGB_8888, true).also { previewBitmap ->
-                                val liveBitmap = editor.exportPreviewContentBitmapScaled(1f, 0)
-                                if (liveBitmap != null) {
-                                    var previewX = cursorX
-                                    var previewY = cursorY
-                                    if (previewX > 0f && previewX + liveBitmap.width > bufferWidth) {
-                                        previewX = 0f
-                                        previewY += bufferLineHeight
-                                    }
-                                    Canvas(previewBitmap).drawBitmap(liveBitmap, previewX, previewY, bufferPaint)
-                                    liveBitmap.recycle()
-                                }
-                            }
-                            bufferPreview.setImageBitmap(liveBufferPreviewBitmap)
-                            bufferPreview.invalidate()
+                            insertionPreview.invalidate()
                         }
                         fun updateEditorActions() {
                             val hasInput = editor.hasDrawing()
@@ -4603,8 +4605,6 @@ class MainActivity : AppCompatActivity() {
                     }
                     setOnDismissListener {
                         commitRunnable?.let(editor::removeCallbacks)
-                        liveBufferPreviewBitmap?.recycle()
-                        liveBufferPreviewBitmap = null
                         handwritingView.clearTextInsertionPreview()
                     }
                 }
