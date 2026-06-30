@@ -4587,7 +4587,6 @@ class MainActivity : AppCompatActivity() {
         updateHistoryButtons()
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle(getString(titleRes))
             .setView(dialogView)
             .setPositiveButton(R.string.dialog_save, null)
             .setNegativeButton(android.R.string.cancel, null)
