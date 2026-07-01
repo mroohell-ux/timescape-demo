@@ -4124,7 +4124,9 @@ class MainActivity : AppCompatActivity() {
             val bufferLineHeight = guideLineHeightPx * 1.4f
             var bufferBounds: RectF? = null
             var hasBufferedText = false
-            var selectedInsertSizePx = cardFontSizeSp.coerceIn(8f, 48f)
+            var selectedInsertSizePx = prefs
+                .getFloat(KEY_HANDWRITING_TEXT_INSERT_SIZE_PX, cardFontSizeSp)
+                .coerceIn(8f, 48f)
 
             val insertionPreview = object : View(this) {
                 private val previewBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -4274,6 +4276,7 @@ class MainActivity : AppCompatActivity() {
             fun updateInsertSizeLabel() {
                 selectedInsertSizePx = insertSizeSlider.value
                 insertSizeValue.text = getString(R.string.handwriting_text_insert_size_value_short, insertSizeSlider.value)
+                prefs.edit().putFloat(KEY_HANDWRITING_TEXT_INSERT_SIZE_PX, selectedInsertSizePx).apply()
                 insertionPreview.invalidate()
             }
             updateInsertSizeLabel()
@@ -8135,6 +8138,7 @@ private const val KEY_HANDWRITING_DEFAULT_PEN_TYPE = "handwriting/default_pen_ty
 private const val KEY_HANDWRITING_DEFAULT_ERASER_TYPE = "handwriting/default_eraser_type"
 private const val KEY_HANDWRITING_LAST_PALETTE_SECTION = "handwriting/last_palette_section"
 private const val KEY_HANDWRITING_LAST_DRAWING_TOOL = "handwriting/last_drawing_tool"
+private const val KEY_HANDWRITING_TEXT_INSERT_SIZE_PX = "handwriting/text_insert_size_px"
 private const val STATE_PENDING_PDF_IMPORT_FLOW_ID = "state/pending_pdf_import_flow_id"
 private const val STATE_PENDING_EXPORT_FLOW_ID = "state/pending_export_flow_id"
 private const val STATE_PENDING_EXPORT_FILE_NAME = "state/pending_export_file_name"
