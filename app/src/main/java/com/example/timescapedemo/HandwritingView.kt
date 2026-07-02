@@ -28,6 +28,7 @@ import com.example.timescapedemo.HandwritingDrawingTool.TEXT
 import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
