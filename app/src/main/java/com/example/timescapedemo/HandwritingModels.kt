@@ -115,13 +115,15 @@ data class HandwritingSide(
 data class HandwritingContent(
     var path: String,
     var options: HandwritingOptions,
-    var back: HandwritingSide? = null
+    var back: HandwritingSide? = null,
+    var editLayerPath: String? = null,
+    var placedImage: HandwritingPlacedImage? = null
 ) {
     fun hasBack(): Boolean = back != null
 
     fun side(face: HandwritingFace): HandwritingSide = if (face == HandwritingFace.BACK) {
-        back ?: HandwritingSide(path, options)
+        back ?: HandwritingSide(path, options, editLayerPath, placedImage)
     } else {
-        HandwritingSide(path, options)
+        HandwritingSide(path, options, editLayerPath, placedImage)
     }
 }

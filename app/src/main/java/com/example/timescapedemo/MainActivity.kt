@@ -2284,7 +2284,7 @@ class MainActivity : AppCompatActivity() {
                     id = nextCardId++,
                     title = "",
                     snippet = "",
-                    handwriting = HandwritingContent(content.path, content.options),
+                    handwriting = HandwritingContent(content.path, content.options, editLayerPath = content.editLayerPath, placedImage = content.placedImage),
                     updatedAt = System.currentTimeMillis()
                 )
                 flow.cards.add(0, card)
@@ -2311,7 +2311,7 @@ class MainActivity : AppCompatActivity() {
             handwritingContent != null -> {
             showHandwritingDialog(
                 titleRes = R.string.dialog_edit_handwriting_title,
-                existing = if (face == HandwritingFace.BACK) handwritingContent.back else HandwritingSide(handwritingContent.path, handwritingContent.options),
+                existing = if (face == HandwritingFace.BACK) handwritingContent.back else handwritingContent.side(HandwritingFace.FRONT),
                 initialOptions = if (face == HandwritingFace.BACK) {
                     handwritingContent.back?.options ?: handwritingContent.options
                 } else handwritingContent.options,
@@ -2325,9 +2325,9 @@ class MainActivity : AppCompatActivity() {
                             val frontOptions = card.handwriting?.options ?: savedContent.options
                             val normalizedOptions = synchronizeBackPaper(frontOptions, savedContent.options)
                             if (card.handwriting == null) {
-                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions)
+                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions, editLayerPath = savedContent.editLayerPath, placedImage = savedContent.placedImage)
                             }
-                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions)
+                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions, savedContent.editLayerPath, savedContent.placedImage)
                         }
                     } else {
                         val content = savedContent ?: run {
@@ -2335,10 +2335,12 @@ class MainActivity : AppCompatActivity() {
                             return@showHandwritingDialog
                         }
                         if (card.handwriting == null) {
-                            card.handwriting = HandwritingContent(content.path, content.options)
+                            card.handwriting = HandwritingContent(content.path, content.options, editLayerPath = content.editLayerPath, placedImage = content.placedImage)
                         } else {
                             card.handwriting?.path = content.path
                             card.handwriting?.options = content.options
+                            card.handwriting?.editLayerPath = content.editLayerPath
+                            card.handwriting?.placedImage = content.placedImage
                             card.handwriting?.back?.let { backSide ->
                                 backSide.options = synchronizeBackPaper(content.options, backSide.options)
                             }
