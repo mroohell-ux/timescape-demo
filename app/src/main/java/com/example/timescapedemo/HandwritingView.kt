@@ -843,7 +843,6 @@ class HandwritingView @JvmOverloads constructor(
                     if (imagePlacementActive) {
                         imagePlacementActive = false
                         invalidate()
-                        return true
                     }
                     return false
                 }
