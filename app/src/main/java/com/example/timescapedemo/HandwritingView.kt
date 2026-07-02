@@ -168,10 +168,12 @@ class HandwritingView @JvmOverloads constructor(
             extraCanvas = null
             return
         }
+        val previousBitmap = extraBitmap
+        val previousHadContent = hasContent
+        val previousHadBase = hasBaseImage
         val newBitmap = Bitmap.createBitmap(w, h, Config.ARGB_8888)
         val newCanvas = Canvas(newBitmap)
         newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraBitmap?.recycle()
         extraBitmap = newBitmap
         extraCanvas = newCanvas
 
@@ -185,10 +187,20 @@ class HandwritingView @JvmOverloads constructor(
             hasContent = pendingHasContent || pendingHasBase
             pushCurrentState(hasContent, hasBaseImage)
             pendingBitmap = null
+        } else if (previousBitmap != null && !previousBitmap.isRecycled) {
+            val src = Rect(0, 0, previousBitmap.width, previousBitmap.height)
+            val dest = Rect(0, 0, w, h)
+            newCanvas.drawBitmap(previousBitmap, src, dest, bitmapPaint)
+            hasBaseImage = previousHadBase
+            hasContent = previousHadContent || previousHadBase
+            pushCurrentState(hasContent, hasBaseImage)
         } else {
             hasBaseImage = false
             hasContent = false
             pushCurrentState(false, false)
+        }
+        if (previousBitmap != null && previousBitmap !== newBitmap && !previousBitmap.isRecycled) {
+            previousBitmap.recycle()
         }
         pendingHasContent = false
         pendingHasBase = false
@@ -815,7 +827,8 @@ class HandwritingView @JvmOverloads constructor(
                 }
                 imagePlacementActive = true
                 disallowParentIntercept(true)
-                imageTouchMode = 1
+                val handleRadius = 28f * density
+                imageTouchMode = if (hypot(event.x - rect.right, event.y - rect.bottom) <= handleRadius) 3 else 1
                 imageTouchStartX = event.x
                 imageTouchStartY = event.y
                 imageStartRect.set(rect)
@@ -843,6 +856,14 @@ class HandwritingView @JvmOverloads constructor(
                     val halfWidth = (imageStartRect.width() * scale / 2f).coerceAtLeast(32f * density)
                     val halfHeight = (imageStartRect.height() * scale / 2f).coerceAtLeast(32f * density)
                     rect.set(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+                if (imageTouchMode == 3) {
+                    val aspect = (imageStartRect.width() / imageStartRect.height()).takeIf { it.isFinite() && it > 0f } ?: 1f
+                    val newWidth = (event.x - imageStartRect.left).coerceAtLeast(64f * density)
+                    val newHeight = (newWidth / aspect).coerceAtLeast(64f * density)
+                    rect.set(imageStartRect.left, imageStartRect.top, imageStartRect.left + newWidth, imageStartRect.top + newHeight)
                     clampPlacedImageRect(rect)
                     return true
                 }

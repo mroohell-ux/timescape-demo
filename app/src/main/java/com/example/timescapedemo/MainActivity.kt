@@ -4675,7 +4675,7 @@ class MainActivity : AppCompatActivity() {
             dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             dialog.window?.setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
             cancelButton.setOnClickListener { dialog.dismiss() }
             deleteButton.isVisible = onDelete != null
