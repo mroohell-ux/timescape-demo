@@ -23,7 +23,10 @@ enum class HandwritingFormat(
 enum class HandwritingPaperStyle {
     PLAIN,
     RULED,
-    GRID;
+    GRID,
+    DOTTED,
+    NOTEBOOK,
+    CORNELL;
 
     companion object {
         fun fromName(name: String?): HandwritingPaperStyle? =
@@ -35,7 +38,10 @@ enum class HandwritingPenType {
     ROUND,
     MARKER,
     CALLIGRAPHY,
-    HIGHLIGHTER;
+    HIGHLIGHTER,
+    PENCIL,
+    FOUNTAIN,
+    GEL;
 
     companion object {
         fun fromName(name: String?): HandwritingPenType? =

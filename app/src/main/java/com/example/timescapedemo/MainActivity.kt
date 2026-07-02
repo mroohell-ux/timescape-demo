@@ -3583,9 +3583,13 @@ class MainActivity : AppCompatActivity() {
             NamedColor(Color.WHITE, getString(R.string.handwriting_color_white)),
             NamedColor(Color.parseColor("#FFF4E0"), getString(R.string.handwriting_color_cream)),
             NamedColor(Color.parseColor("#FFF1CC"), getString(R.string.handwriting_color_parchment)),
+            NamedColor(Color.parseColor("#F7E7CE"), getString(R.string.handwriting_color_linen)),
+            NamedColor(Color.parseColor("#FCE4D6"), getString(R.string.handwriting_color_blush)),
             NamedColor(Color.parseColor("#ECEFF1"), getString(R.string.handwriting_color_fog)),
             NamedColor(Color.parseColor("#E3F2FD"), getString(R.string.handwriting_color_sky)),
+            NamedColor(Color.parseColor("#E0F7FA"), getString(R.string.handwriting_color_aqua)),
             NamedColor(Color.parseColor("#E8F5E9"), getString(R.string.handwriting_color_mint)),
+            NamedColor(Color.parseColor("#FFFDE7"), getString(R.string.handwriting_color_lemon)),
             NamedColor(Color.parseColor("#F3E5F5"), getString(R.string.handwriting_color_lavender)),
             NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight))
         )
@@ -3611,7 +3615,10 @@ class MainActivity : AppCompatActivity() {
             NamedColor(Color.parseColor("#F9A825"), getString(R.string.handwriting_color_amber)),
             NamedColor(Color.parseColor("#C62828"), getString(R.string.handwriting_color_red)),
             NamedColor(Color.parseColor("#AD1457"), getString(R.string.handwriting_color_magenta)),
-            NamedColor(Color.parseColor("#6A1B9A"), getString(R.string.handwriting_color_violet))
+            NamedColor(Color.parseColor("#6A1B9A"), getString(R.string.handwriting_color_violet)),
+            NamedColor(Color.parseColor("#4E342E"), getString(R.string.handwriting_color_brown)),
+            NamedColor(Color.parseColor("#FF6F00"), getString(R.string.handwriting_color_orange)),
+            NamedColor(Color.parseColor("#263238"), getString(R.string.handwriting_color_ink))
         )
         if (brushColorOptions.none { it.color == initialOptions.brushColor }) {
             brushColorOptions.add(0, NamedColor(initialOptions.brushColor, getString(R.string.handwriting_color_custom)))
@@ -3622,7 +3629,10 @@ class MainActivity : AppCompatActivity() {
         val paperStyleOptions = listOf(
             PaperStyleOption(HandwritingPaperStyle.PLAIN, getString(R.string.handwriting_paper_plain), R.drawable.ic_handwriting_paper_plain),
             PaperStyleOption(HandwritingPaperStyle.RULED, getString(R.string.handwriting_paper_ruled), R.drawable.ic_handwriting_paper_ruled),
-            PaperStyleOption(HandwritingPaperStyle.GRID, getString(R.string.handwriting_paper_grid), R.drawable.ic_handwriting_paper_grid)
+            PaperStyleOption(HandwritingPaperStyle.GRID, getString(R.string.handwriting_paper_grid), R.drawable.ic_handwriting_paper_grid),
+            PaperStyleOption(HandwritingPaperStyle.DOTTED, getString(R.string.handwriting_paper_dotted), R.drawable.ic_handwriting_paper_grid),
+            PaperStyleOption(HandwritingPaperStyle.NOTEBOOK, getString(R.string.handwriting_paper_notebook), R.drawable.ic_handwriting_paper_ruled),
+            PaperStyleOption(HandwritingPaperStyle.CORNELL, getString(R.string.handwriting_paper_cornell), R.drawable.ic_handwriting_paper_ruled)
         )
         var selectedPaperStyle = initialOptions.paperStyle.takeIf { option ->
             paperStyleOptions.any { it.style == option }
@@ -3633,7 +3643,10 @@ class MainActivity : AppCompatActivity() {
             HandwritingPenType.ROUND to getString(R.string.handwriting_pen_type_round),
             HandwritingPenType.MARKER to getString(R.string.handwriting_pen_type_marker),
             HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy),
-            HandwritingPenType.HIGHLIGHTER to getString(R.string.handwriting_pen_type_highlighter)
+            HandwritingPenType.HIGHLIGHTER to getString(R.string.handwriting_pen_type_highlighter),
+            HandwritingPenType.PENCIL to getString(R.string.handwriting_pen_type_pencil),
+            HandwritingPenType.FOUNTAIN to getString(R.string.handwriting_pen_type_fountain),
+            HandwritingPenType.GEL to getString(R.string.handwriting_pen_type_gel)
         )
         var selectedPenType = initialOptions.penType.takeIf { pen -> penTypeOptions.any { it.first == pen } }
             ?: HandwritingPenType.ROUND

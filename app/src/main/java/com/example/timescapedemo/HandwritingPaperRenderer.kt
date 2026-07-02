@@ -44,6 +44,9 @@ object HandwritingPaperRenderer {
         when (options.paperStyle) {
             HandwritingPaperStyle.RULED -> drawRuledGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
             HandwritingPaperStyle.GRID -> drawGridGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint)
+            HandwritingPaperStyle.DOTTED -> drawDottedGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint)
+            HandwritingPaperStyle.NOTEBOOK -> drawNotebookGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
+            HandwritingPaperStyle.CORNELL -> drawCornellGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
             HandwritingPaperStyle.PLAIN -> Unit
         }
         return bitmap
@@ -91,6 +94,38 @@ object HandwritingPaperRenderer {
             canvas.drawLine(x, 0f, x, height, guidePaint)
             x += spacing
         }
+    }
+
+    private fun drawDottedGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint) {
+        val dotPaint = Paint(guidePaint).apply {
+            style = Paint.Style.FILL
+            strokeWidth = 1f
+            alpha = (guidePaint.alpha * 0.8f).roundToInt().coerceIn(0, 255)
+        }
+        val radius = max(1f, guidePaint.strokeWidth * 1.15f)
+        var y = spacing
+        while (y < height) {
+            var x = spacing
+            while (x < width) {
+                canvas.drawCircle(x, y, radius, dotPaint)
+                x += spacing
+            }
+            y += spacing
+        }
+    }
+
+    private fun drawNotebookGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint, marginPaint: Paint, marginScale: Float) {
+        drawRuledGuides(canvas, width, height, spacing, guidePaint, marginPaint, marginScale)
+        val headerY = spacing * 1.55f
+        canvas.drawLine(0f, headerY, width, headerY, marginPaint)
+    }
+
+    private fun drawCornellGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint, marginPaint: Paint, marginScale: Float) {
+        drawRuledGuides(canvas, width, height, spacing, guidePaint, marginPaint, marginScale)
+        val cueX = width * 0.32f
+        val summaryY = height - spacing * 2.8f
+        canvas.drawLine(cueX, 0f, cueX, summaryY, marginPaint)
+        canvas.drawLine(0f, summaryY, width, summaryY, marginPaint)
     }
 
     @ColorInt

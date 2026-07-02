@@ -712,28 +712,61 @@ class HandwritingView @JvmOverloads constructor(
         guidePaint.strokeWidth = stroke
         marginPaint.strokeWidth = stroke * 1.2f
         when (paperStyle) {
-            HandwritingPaperStyle.RULED -> {
-                var y = spacing
-                while (y < height) {
-                    canvas.drawLine(0f, y, width, y, guidePaint)
-                    y += spacing
-                }
-                val marginX = 36f * density * scale
-                canvas.drawLine(marginX, 0f, marginX, height, marginPaint)
+            HandwritingPaperStyle.RULED -> drawRuledGuides(canvas, width, height, spacing, scale)
+            HandwritingPaperStyle.GRID -> drawGridGuides(canvas, width, height, spacing)
+            HandwritingPaperStyle.DOTTED -> drawDottedGuides(canvas, width, height, spacing)
+            HandwritingPaperStyle.NOTEBOOK -> {
+                drawRuledGuides(canvas, width, height, spacing, scale)
+                canvas.drawLine(0f, spacing * 1.55f, width, spacing * 1.55f, marginPaint)
             }
-            HandwritingPaperStyle.GRID -> {
-                var y = spacing
-                while (y < height) {
-                    canvas.drawLine(0f, y, width, y, guidePaint)
-                    y += spacing
-                }
-                var x = spacing
-                while (x < width) {
-                    canvas.drawLine(x, 0f, x, height, guidePaint)
-                    x += spacing
-                }
+            HandwritingPaperStyle.CORNELL -> {
+                drawRuledGuides(canvas, width, height, spacing, scale)
+                val summaryY = height - spacing * 2.8f
+                canvas.drawLine(width * 0.32f, 0f, width * 0.32f, summaryY, marginPaint)
+                canvas.drawLine(0f, summaryY, width, summaryY, marginPaint)
             }
             HandwritingPaperStyle.PLAIN -> Unit
+        }
+    }
+
+    private fun drawRuledGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, scale: Float) {
+        var y = spacing
+        while (y < height) {
+            canvas.drawLine(0f, y, width, y, guidePaint)
+            y += spacing
+        }
+        val marginX = 36f * density * scale
+        canvas.drawLine(marginX, 0f, marginX, height, marginPaint)
+    }
+
+    private fun drawGridGuides(canvas: Canvas, width: Float, height: Float, spacing: Float) {
+        var y = spacing
+        while (y < height) {
+            canvas.drawLine(0f, y, width, y, guidePaint)
+            y += spacing
+        }
+        var x = spacing
+        while (x < width) {
+            canvas.drawLine(x, 0f, x, height, guidePaint)
+            x += spacing
+        }
+    }
+
+    private fun drawDottedGuides(canvas: Canvas, width: Float, height: Float, spacing: Float) {
+        val dotPaint = Paint(guidePaint).apply {
+            style = Paint.Style.FILL
+            strokeWidth = 1f
+            alpha = (guidePaint.alpha * 0.8f).roundToInt().coerceIn(0, 255)
+        }
+        val radius = max(1f, guidePaint.strokeWidth * 1.15f)
+        var y = spacing
+        while (y < height) {
+            var x = spacing
+            while (x < width) {
+                canvas.drawCircle(x, y, radius, dotPaint)
+                x += spacing
+            }
+            y += spacing
         }
     }
 
@@ -764,6 +797,21 @@ class HandwritingView @JvmOverloads constructor(
                 penPaint.strokeJoin = Paint.Join.BEVEL
                 penPaint.pathEffect = createHighlighterPathEffect()
             }
+            HandwritingPenType.PENCIL -> {
+                penPaint.strokeCap = Paint.Cap.ROUND
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = createPencilPathEffect()
+            }
+            HandwritingPenType.FOUNTAIN -> {
+                penPaint.strokeCap = Paint.Cap.BUTT
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = createFountainPathEffect()
+            }
+            HandwritingPenType.GEL -> {
+                penPaint.strokeCap = Paint.Cap.ROUND
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = CornerPathEffect(penPaint.strokeWidth * 0.32f)
+            }
         }
     }
 
@@ -788,6 +836,22 @@ class HandwritingView @JvmOverloads constructor(
         return CornerPathEffect(softenRadius)
     }
 
+    private fun createPencilPathEffect(): android.graphics.PathEffect {
+        val segment = max(1f, penPaint.strokeWidth * 0.55f)
+        val jitter = max(1f, penPaint.strokeWidth * 0.35f)
+        val texture = DiscretePathEffect(segment, jitter)
+        val soften = CornerPathEffect(penPaint.strokeWidth * 0.18f)
+        return ComposePathEffect(soften, texture)
+    }
+
+    private fun createFountainPathEffect(): android.graphics.PathEffect {
+        val nib = buildCalligraphyNibPath(penPaint.strokeWidth * 0.82f)
+        val advance = max(1f, penPaint.strokeWidth * 0.22f)
+        val dash = PathDashPathEffect(nib, advance, 0f, PathDashPathEffect.Style.MORPH)
+        val smooth = CornerPathEffect(penPaint.strokeWidth * 0.3f)
+        return ComposePathEffect(smooth, dash)
+    }
+
     private fun updatePenColor() {
         val baseColor = brushColorInt
         val updatedColor = when (penType) {
@@ -796,6 +860,11 @@ class HandwritingView @JvmOverloads constructor(
                 val brightened = ColorUtils.blendARGB(baseColor, Color.WHITE, 0.2f)
                 ColorUtils.setAlphaComponent(brightened, targetAlpha)
             }
+            HandwritingPenType.PENCIL -> {
+                val targetAlpha = (Color.alpha(baseColor) * 0.72f).roundToInt().coerceIn(32, 255)
+                ColorUtils.setAlphaComponent(ColorUtils.blendARGB(baseColor, Color.GRAY, 0.24f), targetAlpha)
+            }
+            HandwritingPenType.GEL -> ColorUtils.blendARGB(baseColor, Color.WHITE, 0.06f)
             else -> baseColor
         }
         penPaint.color = updatedColor
