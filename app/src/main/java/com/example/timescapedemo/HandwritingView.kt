@@ -730,6 +730,9 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchStart(x: Float, y: Float) {
         ensureDrawingSurface()
+        if (!path.isEmpty) {
+            commitCurrentPath()
+        }
         path.reset()
         path.moveTo(x, y)
         currentX = x
@@ -752,7 +755,11 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun touchCancel() {
-        path.reset()
+        if (!path.isEmpty) {
+            commitCurrentPath()
+        } else {
+            path.reset()
+        }
     }
 
     private fun notifyStrokePreviewChanged() {
