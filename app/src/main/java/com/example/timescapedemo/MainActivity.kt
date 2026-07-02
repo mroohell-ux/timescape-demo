@@ -3906,7 +3906,7 @@ class MainActivity : AppCompatActivity() {
             clearButton.isEnabled = handwritingView.hasDrawing()
             styleToolbarButton(undoButton)
             styleToolbarButton(clearButton)
-            styleToolbarButton(insertPictureButton)
+            styleToolbarButton(insertPictureButton, handwritingView.isImagePlacementActive())
         }
 
         applyCanvasCardDisplaySize(selectedSize.width, selectedSize.height)
@@ -3936,8 +3936,14 @@ class MainActivity : AppCompatActivity() {
             updateHistoryButtons()
         }
         insertPictureButton.setOnClickListener {
+            if (handwritingView.hasPlacedImage() && handwritingView.selectPlacedImage()) {
+                hidePalette()
+                updateHistoryButtons()
+                return@setOnClickListener
+            }
             pendingHandwritingImageInsert = { bitmap ->
                 handwritingView.placeImage(bitmap)
+                hidePalette()
                 updateHistoryButtons()
             }
             openHandwritingInsertImage.launch(arrayOf("image/*"))
@@ -4026,6 +4032,7 @@ class MainActivity : AppCompatActivity() {
             styleToolbarButton(eraserButton, selectedDrawingTool == HandwritingDrawingTool.ERASER)
             styleToolbarButton(textButton, selectedDrawingTool == HandwritingDrawingTool.TEXT)
             styleToolbarButton(canvasButton, visiblePalette == HandwritingPaletteSection.CANVAS)
+            styleToolbarButton(insertPictureButton, handwritingView.isImagePlacementActive())
             val checkedId = when (visiblePalette) {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id

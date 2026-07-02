@@ -124,6 +124,7 @@ class HandwritingView @JvmOverloads constructor(
     private var imageTouchStartY = 0f
     private var imageStartRect = RectF()
     private var imageStartDistance = 0f
+    private var imagePlacementActive = false
 
     private var contentChangedListener: (() -> Unit)? = null
     private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
@@ -201,7 +202,7 @@ class HandwritingView @JvmOverloads constructor(
         drawPaperTexture(canvas, width.toFloat(), height.toFloat(), 1f)
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        drawPlacedImage(canvas, showHandles = true)
+        drawPlacedImage(canvas, showHandles = imagePlacementActive)
         canvas.drawPath(path, currentPreviewPaint())
         insertionMarker?.let { (x, y) -> drawInsertionMarker(canvas, x, y) }
     }
@@ -282,6 +283,7 @@ class HandwritingView @JvmOverloads constructor(
         placedImageBitmap?.recycle()
         placedImageBitmap = null
         placedImageRect = null
+        imagePlacementActive = false
         invalidate()
         notifyContentChanged()
     }
@@ -306,6 +308,7 @@ class HandwritingView @JvmOverloads constructor(
             (viewWidth + placedWidth) / 2f,
             (viewHeight + placedHeight) / 2f
         )
+        imagePlacementActive = true
         hasContent = true
         notifyContentChanged()
         invalidate()
@@ -321,6 +324,7 @@ class HandwritingView @JvmOverloads constructor(
             placedImageBitmap?.recycle()
             placedImageBitmap = null
             placedImageRect = null
+            imagePlacementActive = false
             hasContent = history.lastOrNull()?.hasDrawing ?: false
             invalidate()
             notifyContentChanged()
@@ -600,10 +604,23 @@ class HandwritingView @JvmOverloads constructor(
     fun getEraserType(): HandwritingEraserType = eraserType
 
     fun setDrawingTool(tool: HandwritingDrawingTool) {
-        if (drawingTool == tool) return
+        if (drawingTool == tool && !imagePlacementActive) return
         commitCurrentPath()
         drawingTool = tool
+        imagePlacementActive = false
         invalidate()
+    }
+
+    fun hasPlacedImage(): Boolean = placedImageBitmap != null
+
+    fun isImagePlacementActive(): Boolean = imagePlacementActive
+
+    fun selectPlacedImage(): Boolean {
+        if (placedImageBitmap == null) return false
+        commitCurrentPath()
+        imagePlacementActive = true
+        invalidate()
+        return true
     }
 
     fun setCanvasSize(widthPx: Int, heightPx: Int) {
@@ -695,6 +712,7 @@ class HandwritingView @JvmOverloads constructor(
         placedImageBitmap?.recycle()
         placedImageBitmap = null
         placedImageRect = null
+        imagePlacementActive = false
     }
 
     private fun touchStart(x: Float, y: Float) {
@@ -784,9 +802,18 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun handlePlacedImageTouch(event: MotionEvent): Boolean {
         val rect = placedImageRect ?: return false
+        val hitRect = RectF(rect).apply { inset(-24f * density, -24f * density) }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (!rect.contains(event.x, event.y)) return false
+                if (!hitRect.contains(event.x, event.y)) {
+                    if (imagePlacementActive) {
+                        imagePlacementActive = false
+                        invalidate()
+                        return true
+                    }
+                    return false
+                }
+                imagePlacementActive = true
                 disallowParentIntercept(true)
                 imageTouchMode = 1
                 imageTouchStartX = event.x
