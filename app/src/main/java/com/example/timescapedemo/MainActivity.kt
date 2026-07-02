@@ -3612,7 +3612,22 @@ class MainActivity : AppCompatActivity() {
             NamedColor(Color.parseColor("#E8F5E9"), getString(R.string.handwriting_color_mint)),
             NamedColor(Color.parseColor("#FFFDE7"), getString(R.string.handwriting_color_lemon)),
             NamedColor(Color.parseColor("#F3E5F5"), getString(R.string.handwriting_color_lavender)),
-            NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight))
+            NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight)),
+            NamedColor(Color.parseColor("#F6E6C8"), getString(R.string.handwriting_color_monet_sunlit_canvas)),
+            NamedColor(Color.parseColor("#D8E8D2"), getString(R.string.handwriting_color_monet_water_lily)),
+            NamedColor(Color.parseColor("#C9D8EE"), getString(R.string.handwriting_color_monet_morning_mist)),
+            NamedColor(Color.parseColor("#E8C7D6"), getString(R.string.handwriting_color_monet_garden_rose)),
+            NamedColor(Color.parseColor("#F2D28F"), getString(R.string.handwriting_color_monet_haystack_gold)),
+            NamedColor(Color.parseColor("#D8CFC4"), getString(R.string.handwriting_color_morandi_warm_stone)),
+            NamedColor(Color.parseColor("#C9B8A8"), getString(R.string.handwriting_color_morandi_clay)),
+            NamedColor(Color.parseColor("#B9C3B4"), getString(R.string.handwriting_color_morandi_sage)),
+            NamedColor(Color.parseColor("#AEB8C2"), getString(R.string.handwriting_color_morandi_blue_gray)),
+            NamedColor(Color.parseColor("#D7B8B2"), getString(R.string.handwriting_color_morandi_dusty_rose)),
+            NamedColor(Color.parseColor("#FFE4EC"), getString(R.string.handwriting_color_macaron_strawberry)),
+            NamedColor(Color.parseColor("#E6F7D9"), getString(R.string.handwriting_color_macaron_pistachio)),
+            NamedColor(Color.parseColor("#DFF3FF"), getString(R.string.handwriting_color_macaron_blueberry)),
+            NamedColor(Color.parseColor("#FFF0B8"), getString(R.string.handwriting_color_macaron_vanilla)),
+            NamedColor(Color.parseColor("#EADCF8"), getString(R.string.handwriting_color_macaron_lavender))
         )
         if (paperColorOptions.none { it.color == initialOptions.backgroundColor }) {
             paperColorOptions.add(0, NamedColor(initialOptions.backgroundColor, getString(R.string.handwriting_color_custom)))
