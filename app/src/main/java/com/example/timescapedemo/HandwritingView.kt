@@ -229,7 +229,10 @@ class HandwritingView @JvmOverloads constructor(
         }
         if (drawingTool == TEXT) {
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
+                MotionEvent.ACTION_DOWN -> {
+                    commitPlacedImageToCanvas(addToHistory = false)
+                    disallowParentIntercept(true)
+                }
                 MotionEvent.ACTION_UP -> {
                     performClick()
                     setTextInsertionPreview(x, y)
@@ -730,6 +733,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchStart(x: Float, y: Float) {
         ensureDrawingSurface()
+        commitPlacedImageToCanvas(addToHistory = false)
         path.reset()
         path.moveTo(x, y)
         currentX = x
@@ -813,6 +817,22 @@ class HandwritingView @JvmOverloads constructor(
         if (recycleAfter && !bitmap.isRecycled) {
             bitmap.recycle()
         }
+    }
+
+    private fun commitPlacedImageToCanvas(addToHistory: Boolean = true): Boolean {
+        val image = placedImageBitmap ?: return false
+        val rect = placedImageRect ?: return false
+        val canvas = ensureDrawingSurface() ?: return false
+        canvas.drawBitmap(image, null, rect, bitmapPaint)
+        placedImageBitmap?.recycle()
+        placedImageBitmap = null
+        placedImageRect = null
+        imagePlacementActive = false
+        hasContent = true
+        if (addToHistory) pushCurrentState(true, hasBaseImage)
+        notifyContentChanged()
+        invalidate()
+        return true
     }
 
     private fun drawPlacedImage(canvas: Canvas, showHandles: Boolean, scale: Float = 1f) {
