@@ -3937,13 +3937,13 @@ class MainActivity : AppCompatActivity() {
         }
         insertPictureButton.setOnClickListener {
             if (handwritingView.hasPlacedImage() && handwritingView.selectPlacedImage()) {
-                hidePalette()
+                if (palettePopup.isShowing) palettePopup.dismiss()
                 updateHistoryButtons()
                 return@setOnClickListener
             }
             pendingHandwritingImageInsert = { bitmap ->
                 handwritingView.placeImage(bitmap)
-                hidePalette()
+                if (palettePopup.isShowing) palettePopup.dismiss()
                 updateHistoryButtons()
             }
             openHandwritingInsertImage.launch(arrayOf("image/*"))
