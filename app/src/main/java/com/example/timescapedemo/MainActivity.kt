@@ -300,6 +300,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var pendingImageCardRequest: ImageCardRequest? = null
+    private var pendingHandwritingImageInsert: ((Bitmap) -> Unit)? = null
     private var pendingPdfImportFlowId: Long? = null
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
@@ -393,6 +394,20 @@ class MainActivity : AppCompatActivity() {
     private val openImageCard =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             handleImageCardResult(uri)
+        }
+
+    private val openHandwritingInsertImage =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val callback = pendingHandwritingImageInsert
+            pendingHandwritingImageInsert = null
+            if (uri == null || callback == null) return@registerForActivityResult
+            persistReadPermission(uri)
+            val bitmap = openImageUriStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            if (bitmap == null) {
+                snackbar(getString(R.string.snackbar_app_background_failed))
+            } else {
+                callback(bitmap)
+            }
         }
 
     private val openPdfCard =
@@ -3493,6 +3508,7 @@ class MainActivity : AppCompatActivity() {
         val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
+        val insertPictureButton = dialogView.findViewById<MaterialButton>(R.id.buttonInsertPictureHandwriting)
         val cancelButton = dialogView.findViewById<MaterialButton>(R.id.buttonCancelHandwriting)
         val doneButton = dialogView.findViewById<MaterialButton>(R.id.buttonDoneHandwriting)
         val deleteButton = dialogView.findViewById<MaterialButton>(R.id.buttonDeleteHandwriting)
@@ -3635,7 +3651,8 @@ class MainActivity : AppCompatActivity() {
             PaperStyleOption(HandwritingPaperStyle.GRID, getString(R.string.handwriting_paper_grid), R.drawable.ic_handwriting_paper_grid),
             PaperStyleOption(HandwritingPaperStyle.DOTTED, getString(R.string.handwriting_paper_dotted), R.drawable.ic_handwriting_paper_grid),
             PaperStyleOption(HandwritingPaperStyle.NOTEBOOK, getString(R.string.handwriting_paper_notebook), R.drawable.ic_handwriting_paper_ruled),
-            PaperStyleOption(HandwritingPaperStyle.CORNELL, getString(R.string.handwriting_paper_cornell), R.drawable.ic_handwriting_paper_ruled)
+            PaperStyleOption(HandwritingPaperStyle.CORNELL, getString(R.string.handwriting_paper_cornell), R.drawable.ic_handwriting_paper_ruled),
+            PaperStyleOption(HandwritingPaperStyle.VINTAGE, getString(R.string.handwriting_paper_vintage), R.drawable.ic_handwriting_paper_ruled)
         )
         var selectedPaperStyle = initialOptions.paperStyle.takeIf { option ->
             paperStyleOptions.any { it.style == option }
@@ -3889,6 +3906,7 @@ class MainActivity : AppCompatActivity() {
             clearButton.isEnabled = handwritingView.hasDrawing()
             styleToolbarButton(undoButton)
             styleToolbarButton(clearButton)
+            styleToolbarButton(insertPictureButton)
         }
 
         applyCanvasCardDisplaySize(selectedSize.width, selectedSize.height)
@@ -3916,6 +3934,13 @@ class MainActivity : AppCompatActivity() {
         clearButton.setOnClickListener {
             handwritingView.clear()
             updateHistoryButtons()
+        }
+        insertPictureButton.setOnClickListener {
+            pendingHandwritingImageInsert = { bitmap ->
+                handwritingView.placeImage(bitmap)
+                updateHistoryButtons()
+            }
+            openHandwritingInsertImage.launch(arrayOf("image/*"))
         }
 
         brushColorGroup.setOnCheckedStateChangeListener { group, checkedIds ->
@@ -4691,6 +4716,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.setOnDismissListener {
+            pendingHandwritingImageInsert = null
             if (palettePopup.isShowing) {
                 palettePopup.dismiss()
             }
@@ -8225,7 +8251,7 @@ private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
 private const val DEFAULT_CANVAS_RATIO = 0.75f
 private const val DEFAULT_HANDWRITING_BACKGROUND = -0x918
 private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
-private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.RULED
+private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.VINTAGE
 private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
 private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
 private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"

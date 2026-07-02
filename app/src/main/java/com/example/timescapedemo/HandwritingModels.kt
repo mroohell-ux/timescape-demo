@@ -26,7 +26,8 @@ enum class HandwritingPaperStyle {
     GRID,
     DOTTED,
     NOTEBOOK,
-    CORNELL;
+    CORNELL,
+    VINTAGE;
 
     companion object {
         fun fromName(name: String?): HandwritingPaperStyle? =

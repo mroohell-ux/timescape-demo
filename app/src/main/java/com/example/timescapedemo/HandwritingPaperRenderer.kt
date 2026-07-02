@@ -48,6 +48,7 @@ object HandwritingPaperRenderer {
             HandwritingPaperStyle.DOTTED -> drawDottedGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint)
             HandwritingPaperStyle.NOTEBOOK -> drawNotebookGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
             HandwritingPaperStyle.CORNELL -> drawCornellGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
+            HandwritingPaperStyle.VINTAGE -> drawVintageNotebookGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
             HandwritingPaperStyle.PLAIN -> Unit
         }
         return bitmap
@@ -127,6 +128,27 @@ object HandwritingPaperRenderer {
         val summaryY = height - spacing * 2.8f
         canvas.drawLine(cueX, 0f, cueX, summaryY, marginPaint)
         canvas.drawLine(0f, summaryY, width, summaryY, marginPaint)
+    }
+
+    private fun drawVintageNotebookGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint, marginPaint: Paint, marginScale: Float) {
+        val linePaint = Paint(guidePaint).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6F7F8B"), 0x2A)
+            strokeWidth = max(1f, guidePaint.strokeWidth * 0.75f)
+        }
+        var y = spacing * 1.8f
+        while (y < height - spacing) {
+            canvas.drawLine(width * 0.1f, y, width * 0.94f, y, linePaint)
+            y += spacing * 0.92f
+        }
+        val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, 1.8f * marginScale)
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#8C6F4D"), 0x24)
+        }
+        val inset = 10f * marginScale
+        canvas.drawRoundRect(inset, inset, width - inset, height - inset, 22f * marginScale, 22f * marginScale, edgePaint)
+        val spinePaint = Paint(edgePaint).apply { strokeWidth = max(1f, 2.4f * marginScale) }
+        canvas.drawLine(18f * marginScale, 28f * marginScale, 12f * marginScale, height - 30f * marginScale, spinePaint)
     }
 
     private fun drawPaperTexture(canvas: Canvas, width: Float, height: Float, @ColorInt backgroundColor: Int, scale: Float) {

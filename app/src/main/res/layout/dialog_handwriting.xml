@@ -75,6 +75,22 @@
                         app:iconPadding="0dp"
                         app:iconSize="21dp" />
 
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/buttonInsertPictureHandwriting"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="2dp"
+                        android:contentDescription="@string/handwriting_action_insert_picture"
+                        android:minWidth="0dp"
+                        android:padding="0dp"
+                        app:cornerRadius="20dp"
+                        app:icon="@drawable/ic_gallery"
+                        app:iconGravity="textStart"
+                        app:iconPadding="0dp"
+                        app:iconSize="21dp" />
+
                     <View
                         android:layout_width="1dp"
                         android:layout_height="24dp"
