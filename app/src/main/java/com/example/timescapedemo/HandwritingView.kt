@@ -229,13 +229,13 @@ class HandwritingView @JvmOverloads constructor(
         }
         if (drawingTool == TEXT) {
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
-                MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_DOWN -> {
+                    disallowParentIntercept(true)
                     performClick()
                     setTextInsertionPreview(x, y)
                     textInsertionTapListener?.invoke(x, y)
-                    disallowParentIntercept(false)
                 }
+                MotionEvent.ACTION_UP -> disallowParentIntercept(false)
                 MotionEvent.ACTION_CANCEL -> disallowParentIntercept(false)
             }
             return true
