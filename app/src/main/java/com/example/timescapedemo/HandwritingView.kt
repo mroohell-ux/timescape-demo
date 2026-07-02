@@ -728,6 +728,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun touchStart(x: Float, y: Float) {
+        ensureDrawingSurface()
         path.reset()
         path.moveTo(x, y)
         currentX = x
@@ -759,7 +760,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
-        val canvas = extraCanvas ?: return
+        val canvas = ensureDrawingSurface() ?: return
         canvas.drawPath(path, currentCommitPaint())
         path.reset()
         hasContent = true
@@ -767,6 +768,27 @@ class HandwritingView @JvmOverloads constructor(
             pushCurrentState(true, hasBaseImage)
         }
         notifyContentChanged()
+    }
+
+    private fun ensureDrawingSurface(): Canvas? {
+        if (width <= 0 || height <= 0) return extraCanvas
+        val existing = extraBitmap
+        if (existing != null && !existing.isRecycled && existing.width == width && existing.height == height && extraCanvas != null) {
+            return extraCanvas
+        }
+        val newBitmap = Bitmap.createBitmap(width, height, Config.ARGB_8888)
+        val newCanvas = Canvas(newBitmap)
+        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        if (existing != null && !existing.isRecycled) {
+            newCanvas.drawBitmap(existing, null, Rect(0, 0, width, height), bitmapPaint)
+            existing.recycle()
+        }
+        extraBitmap = newBitmap
+        extraCanvas = newCanvas
+        if (history.isEmpty()) {
+            pushCurrentState(hasContent, hasBaseImage)
+        }
+        return newCanvas
     }
 
     private fun drawBitmapOntoCanvas(bitmap: Bitmap, recycleAfter: Boolean = false) {
