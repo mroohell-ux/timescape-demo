@@ -24,9 +24,12 @@ import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
 import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
+import com.example.timescapedemo.HandwritingDrawingTool.TEXT
+import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HandwritingView @JvmOverloads constructor(
@@ -36,6 +39,17 @@ class HandwritingView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
+    data class InsertedHandwritingObject(
+        val id: String,
+        val type: String = "handwritingText",
+        val x: Float,
+        val y: Float,
+        val insertSize: Float,
+        val lineHeight: Float,
+        val bounds: RectF,
+        val scale: Float,
+        val createdAt: Long
+    )
 
     private val density = resources.displayMetrics.density
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -70,6 +84,11 @@ class HandwritingView @JvmOverloads constructor(
         strokeCap = Paint.Cap.SQUARE
         strokeJoin = Paint.Join.MITER
     }
+    private val insertionMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        color = Color.parseColor("#2962FF")
+    }
     private val path = Path()
     private val history = ArrayDeque<StateSnapshot>()
 
@@ -99,6 +118,11 @@ class HandwritingView @JvmOverloads constructor(
     private var exportHeight = 0
 
     private var contentChangedListener: (() -> Unit)? = null
+    private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
+    private var strokeActiveListener: ((active: Boolean) -> Unit)? = null
+    private var strokePreviewChangedListener: (() -> Unit)? = null
+    private val insertedHandwritingObjects = mutableListOf<InsertedHandwritingObject>()
+    private var insertionMarker: Pair<Float, Float>? = null
 
     private val maxHistory = 25
 
@@ -169,23 +193,46 @@ class HandwritingView @JvmOverloads constructor(
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, currentPreviewPaint())
+        insertionMarker?.let { (x, y) -> drawInsertionMarker(canvas, x, y) }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
+        if (drawingTool == TEXT) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
+                MotionEvent.ACTION_UP -> {
+                    performClick()
+                    setTextInsertionPreview(x, y)
+                    textInsertionTapListener?.invoke(x, y)
+                    disallowParentIntercept(false)
+                }
+                MotionEvent.ACTION_CANCEL -> disallowParentIntercept(false)
+            }
+            return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 disallowParentIntercept(true)
+                strokeActiveListener?.invoke(true)
                 touchStart(x, y)
+                notifyStrokePreviewChanged()
             }
-            MotionEvent.ACTION_MOVE -> touchMove(x, y)
+            MotionEvent.ACTION_MOVE -> {
+                touchMove(x, y)
+                notifyStrokePreviewChanged()
+            }
             MotionEvent.ACTION_UP -> {
                 touchUp()
+                notifyStrokePreviewChanged()
+                strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
             }
             MotionEvent.ACTION_CANCEL -> {
                 touchCancel()
+                notifyStrokePreviewChanged()
+                strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
             }
         }
@@ -217,6 +264,7 @@ class HandwritingView @JvmOverloads constructor(
         pendingBitmap = null
         pendingHasContent = false
         pendingHasBase = false
+        insertedHandwritingObjects.clear()
         invalidate()
         notifyContentChanged()
     }
@@ -284,6 +332,154 @@ class HandwritingView @JvmOverloads constructor(
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
         return result
+    }
+
+    fun exportContentBitmap(targetHeightPx: Int, paddingPx: Int): Bitmap? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        val contentBounds = findContentBounds(source) ?: return null
+        val paddedBounds = Rect(
+            (contentBounds.left - paddingPx).coerceAtLeast(0),
+            (contentBounds.top - paddingPx).coerceAtLeast(0),
+            (contentBounds.right + paddingPx).coerceAtMost(source.width),
+            (contentBounds.bottom + paddingPx).coerceAtMost(source.height)
+        )
+        val sourceWidth = paddedBounds.width().coerceAtLeast(1)
+        val sourceHeight = paddedBounds.height().coerceAtLeast(1)
+        val safeTargetHeight = targetHeightPx.coerceAtLeast(1)
+        val scale = safeTargetHeight.toFloat() / sourceHeight.toFloat()
+        val targetWidth = max(1, (sourceWidth * scale).roundToInt())
+        val result = Bitmap.createBitmap(targetWidth, safeTargetHeight, Config.ARGB_8888)
+        Canvas(result).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, safeTargetHeight), bitmapPaint)
+        }
+        return result
+    }
+
+    fun exportContentBitmapScaled(scale: Float, paddingPx: Int): Bitmap? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        val contentBounds = findContentBounds(source) ?: return null
+        val paddedBounds = Rect(
+            (contentBounds.left - paddingPx).coerceAtLeast(0),
+            (contentBounds.top - paddingPx).coerceAtLeast(0),
+            (contentBounds.right + paddingPx).coerceAtMost(source.width),
+            (contentBounds.bottom + paddingPx).coerceAtMost(source.height)
+        )
+        val safeScale = scale.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val targetWidth = max(1, (paddedBounds.width() * safeScale).roundToInt())
+        val targetHeight = max(1, (paddedBounds.height() * safeScale).roundToInt())
+        val result = Bitmap.createBitmap(targetWidth, targetHeight, Config.ARGB_8888)
+        Canvas(result).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, targetHeight), bitmapPaint)
+        }
+        return result
+    }
+
+    fun exportPreviewContentBitmapScaled(scale: Float, paddingPx: Int): Bitmap? {
+        val base = extraBitmap ?: return null
+        val source = base.copy(Config.ARGB_8888, true)
+        Canvas(source).drawPath(path, currentPreviewPaint())
+        val contentBounds = findContentBounds(source) ?: run {
+            source.recycle()
+            return null
+        }
+        val paddedBounds = Rect(
+            (contentBounds.left - paddingPx).coerceAtLeast(0),
+            (contentBounds.top - paddingPx).coerceAtLeast(0),
+            (contentBounds.right + paddingPx).coerceAtMost(source.width),
+            (contentBounds.bottom + paddingPx).coerceAtMost(source.height)
+        )
+        val safeScale = scale.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val targetWidth = max(1, (paddedBounds.width() * safeScale).roundToInt())
+        val targetHeight = max(1, (paddedBounds.height() * safeScale).roundToInt())
+        val result = Bitmap.createBitmap(targetWidth, targetHeight, Config.ARGB_8888)
+        Canvas(result).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            drawBitmap(source, paddedBounds, Rect(0, 0, targetWidth, targetHeight), bitmapPaint)
+        }
+        source.recycle()
+        return result
+    }
+
+    fun exportInsertionViewportBitmap(
+        markerX: Float,
+        markerY: Float,
+        outputWidth: Int,
+        outputHeight: Int
+    ): Bitmap? {
+        val source = extraBitmap ?: return null
+        if (width <= 0 || height <= 0 || outputWidth <= 0 || outputHeight <= 0) return null
+        val result = Bitmap.createBitmap(outputWidth, outputHeight, Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawColor(backgroundColorInt)
+        val scale = outputWidth.toFloat() / width.toFloat()
+        val viewportHeight = outputHeight / scale
+        val top = (markerY - viewportHeight / 2f).coerceIn(0f, (height - viewportHeight).coerceAtLeast(0f))
+
+        canvas.save()
+        canvas.scale(scale, scale)
+        canvas.translate(0f, -top)
+        drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
+        canvas.drawBitmap(source, 0f, 0f, bitmapPaint)
+        canvas.restore()
+
+        val boundaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6D4BD8"), 0xCC)
+            strokeWidth = (2f * density).coerceAtLeast(1f)
+            style = Paint.Style.STROKE
+        }
+        canvas.drawLine(0f, 0f, 0f, outputHeight.toFloat(), boundaryPaint)
+        canvas.drawLine(outputWidth.toFloat(), 0f, outputWidth.toFloat(), outputHeight.toFloat(), boundaryPaint)
+
+        val previewMarkerX = markerX.coerceIn(0f, width.toFloat()) * scale
+        val previewMarkerY = (markerY.coerceIn(0f, height.toFloat()) - top) * scale
+        val markerRadius = 7f * density
+        val markerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#6D4BD8")
+            strokeWidth = 2f * density
+            strokeCap = Paint.Cap.ROUND
+            style = Paint.Style.STROKE
+        }
+        val markerFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6D4BD8"), 0x22)
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(previewMarkerX, previewMarkerY, markerRadius * 1.8f, markerFillPaint)
+        canvas.drawCircle(previewMarkerX, previewMarkerY, markerRadius, markerPaint)
+        canvas.drawLine(previewMarkerX - markerRadius * 1.7f, previewMarkerY, previewMarkerX + markerRadius * 1.7f, previewMarkerY, markerPaint)
+        canvas.drawLine(previewMarkerX, previewMarkerY - markerRadius * 1.7f, previewMarkerX, previewMarkerY + markerRadius * 1.7f, markerPaint)
+        return result
+    }
+
+    fun contentBounds(): Rect? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        return findContentBounds(source)
+    }
+
+    private fun findContentBounds(bitmap: Bitmap): Rect? {
+        var left = bitmap.width
+        var top = bitmap.height
+        var right = -1
+        var bottom = -1
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                if (Color.alpha(bitmap.getPixel(x, y)) != 0) {
+                    left = min(left, x)
+                    top = min(top, y)
+                    right = max(right, x + 1)
+                    bottom = max(bottom, y + 1)
+                }
+                x++
+            }
+            y++
+        }
+        return if (right > left && bottom > top) Rect(left, top, right, bottom) else null
     }
 
     fun setCanvasBackgroundColor(@ColorInt color: Int) {
@@ -375,6 +571,64 @@ class HandwritingView @JvmOverloads constructor(
         contentChangedListener = listener
     }
 
+    fun setOnTextInsertionTapListener(listener: ((x: Float, y: Float) -> Unit)?) {
+        textInsertionTapListener = listener
+    }
+
+    fun setOnStrokeActiveListener(listener: ((active: Boolean) -> Unit)?) {
+        strokeActiveListener = listener
+    }
+
+    fun setOnStrokePreviewChangedListener(listener: (() -> Unit)?) {
+        strokePreviewChangedListener = listener
+    }
+
+    fun setTextInsertionPreview(x: Float, y: Float) {
+        insertionMarker = x to y
+        invalidate()
+    }
+
+    fun clearTextInsertionPreview() {
+        insertionMarker = null
+        invalidate()
+    }
+
+    fun insertBitmapAt(
+        bitmap: Bitmap,
+        x: Float,
+        y: Float,
+        insertSizePx: Float,
+        lineHeightPx: Float,
+        bounds: RectF,
+        scale: Float
+    ) {
+        commitCurrentPath()
+        val canvas = extraCanvas ?: return
+        canvas.drawBitmap(bitmap, x, y, bitmapPaint)
+        clearTextInsertionPreview()
+        insertedHandwritingObjects += InsertedHandwritingObject(
+            id = UUID.randomUUID().toString(),
+            x = x,
+            y = y,
+            insertSize = insertSizePx,
+            lineHeight = lineHeightPx,
+            bounds = bounds,
+            scale = scale,
+            createdAt = System.currentTimeMillis()
+        )
+        hasContent = true
+        pushCurrentState(true, hasBaseImage)
+        invalidate()
+        notifyContentChanged()
+    }
+
+    private fun drawInsertionMarker(canvas: Canvas, x: Float, y: Float) {
+        val radius = 10f * density
+        canvas.drawCircle(x, y, radius, insertionMarkerPaint)
+        canvas.drawLine(x - radius * 1.5f, y, x + radius * 1.5f, y, insertionMarkerPaint)
+        canvas.drawLine(x, y - radius * 1.5f, x, y + radius * 1.5f, insertionMarkerPaint)
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         recycleHistory()
@@ -410,6 +664,10 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchCancel() {
         path.reset()
+    }
+
+    private fun notifyStrokePreviewChanged() {
+        strokePreviewChangedListener?.invoke()
     }
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
@@ -629,10 +887,12 @@ class HandwritingView @JvmOverloads constructor(
     private fun currentCommitPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPaint
+        TEXT -> penPaint
     }
 
     private fun currentPreviewPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPreviewPaint
+        TEXT -> penPaint
     }
 }

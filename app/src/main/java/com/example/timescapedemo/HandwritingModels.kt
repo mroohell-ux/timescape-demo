@@ -66,7 +66,8 @@ enum class HandwritingPaletteSection {
 
 enum class HandwritingDrawingTool {
     PEN,
-    ERASER;
+    ERASER,
+    TEXT;
 
     companion object {
         fun fromName(name: String?): HandwritingDrawingTool? =
