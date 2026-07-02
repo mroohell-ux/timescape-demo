@@ -51,6 +51,10 @@ class HandwritingView @JvmOverloads constructor(
         val scale: Float,
         val createdAt: Long
     )
+    data class PlacedImageSnapshot(
+        val bitmap: Bitmap,
+        val bounds: RectF
+    )
 
     private val density = resources.displayMetrics.density
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -402,6 +406,28 @@ class HandwritingView @JvmOverloads constructor(
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
         return result
+    }
+
+    fun exportEditLayerBitmap(): Bitmap? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        return source.copy(Config.ARGB_8888, false)
+    }
+
+    fun placedImageSnapshot(): PlacedImageSnapshot? {
+        val image = placedImageBitmap ?: return null
+        val rect = placedImageRect ?: return null
+        return PlacedImageSnapshot(image.copy(Config.ARGB_8888, false), RectF(rect))
+    }
+
+    fun restorePlacedImage(bitmap: Bitmap, bounds: RectF) {
+        placedImageBitmap?.recycle()
+        placedImageBitmap = bitmap.copy(Config.ARGB_8888, false)
+        if (!bitmap.isRecycled) bitmap.recycle()
+        placedImageRect = RectF(bounds)
+        imagePlacementActive = true
+        invalidate()
+        notifyContentChanged()
     }
 
     fun exportContentBitmap(targetHeightPx: Int, paddingPx: Int): Bitmap? {

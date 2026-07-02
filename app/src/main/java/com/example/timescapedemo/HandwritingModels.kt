@@ -97,9 +97,19 @@ data class HandwritingOptions(
 
 enum class HandwritingFace { FRONT, BACK }
 
+data class HandwritingPlacedImage(
+    var path: String,
+    var left: Float,
+    var top: Float,
+    var right: Float,
+    var bottom: Float
+)
+
 data class HandwritingSide(
     var path: String,
-    var options: HandwritingOptions
+    var options: HandwritingOptions,
+    var editLayerPath: String? = null,
+    var placedImage: HandwritingPlacedImage? = null
 )
 
 data class HandwritingContent(

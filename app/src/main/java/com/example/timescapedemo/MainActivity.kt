@@ -3923,8 +3923,17 @@ class MainActivity : AppCompatActivity() {
         if (baseBitmap != null) {
             handwritingView.setBitmap(baseBitmap)
         } else {
-            existing?.path?.let { path ->
+            val editPath = existing?.editLayerPath ?: existing?.path
+            editPath?.let { path ->
                 loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
+            }
+            existing?.placedImage?.let { placed ->
+                loadHandwritingBitmap(placed.path)?.let { bitmap ->
+                    handwritingView.restorePlacedImage(
+                        bitmap,
+                        RectF(placed.left, placed.top, placed.right, placed.bottom)
+                    )
+                }
             }
         }
 
@@ -4710,7 +4719,11 @@ class MainActivity : AppCompatActivity() {
                     dialog.dismiss()
                     return@setOnClickListener
                 }
-                val saved = saveHandwritingContent(exportBitmap, options, existing)
+                val editLayerBitmap = handwritingView.exportEditLayerBitmap()
+                val placedImageSnapshot = handwritingView.placedImageSnapshot()
+                val saved = saveHandwritingContent(exportBitmap, options, existing, editLayerBitmap, placedImageSnapshot)
+                editLayerBitmap?.recycle()
+                placedImageSnapshot?.bitmap?.recycle()
                 exportBitmap.recycle()
                 if (saved == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
@@ -5317,7 +5330,9 @@ class MainActivity : AppCompatActivity() {
     private fun saveHandwritingContent(
         bitmap: Bitmap,
         options: HandwritingOptions,
-        existing: HandwritingSide?
+        existing: HandwritingSide?,
+        editLayerBitmap: Bitmap? = null,
+        placedImageSnapshot: HandwritingView.PlacedImageSnapshot? = null
     ): HandwritingSide? {
         val reuseExisting = existing?.takeIf { it.options.format == options.format }
         val filename = reuseExisting?.path ?: "handwriting_${System.currentTimeMillis()}.${options.format.extension}"
@@ -5330,7 +5345,27 @@ class MainActivity : AppCompatActivity() {
                 }
                 bitmap.compress(options.format.compressFormat, quality, out)
             }
-            HandwritingSide(filename, options)
+            val editLayerPath = editLayerBitmap?.let { layer ->
+                val editFilename = existing?.editLayerPath ?: "handwriting_edit_${System.currentTimeMillis()}.png"
+                openFileOutput(editFilename, MODE_PRIVATE).use { out ->
+                    layer.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                editFilename
+            } ?: existing?.editLayerPath
+            val placedImage = placedImageSnapshot?.let { snapshot ->
+                val imageFilename = existing?.placedImage?.path ?: "handwriting_placed_${System.currentTimeMillis()}.png"
+                openFileOutput(imageFilename, MODE_PRIVATE).use { out ->
+                    snapshot.bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                HandwritingPlacedImage(
+                    path = imageFilename,
+                    left = snapshot.bounds.left,
+                    top = snapshot.bounds.top,
+                    right = snapshot.bounds.right,
+                    bottom = snapshot.bounds.bottom
+                )
+            }
+            HandwritingSide(filename, options, editLayerPath, placedImage)
         }.getOrElse {
             if (reuseExisting == null) {
                 runCatching { deleteFile(filename) }
