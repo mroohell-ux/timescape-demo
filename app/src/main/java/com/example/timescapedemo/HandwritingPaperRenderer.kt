@@ -21,6 +21,7 @@ object HandwritingPaperRenderer {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(options.backgroundColor)
+        drawPaperTexture(canvas, width.toFloat(), height.toFloat(), options.backgroundColor, density * computeScale(options, width, height))
         if (options.paperStyle == HandwritingPaperStyle.PLAIN) {
             return bitmap
         }
@@ -44,6 +45,10 @@ object HandwritingPaperRenderer {
         when (options.paperStyle) {
             HandwritingPaperStyle.RULED -> drawRuledGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
             HandwritingPaperStyle.GRID -> drawGridGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint)
+            HandwritingPaperStyle.DOTTED -> drawDottedGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint)
+            HandwritingPaperStyle.NOTEBOOK -> drawNotebookGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
+            HandwritingPaperStyle.CORNELL -> drawCornellGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
+            HandwritingPaperStyle.VINTAGE -> drawVintageNotebookGuides(canvas, width.toFloat(), height.toFloat(), spacing, guidePaint, marginPaint, density * scale)
             HandwritingPaperStyle.PLAIN -> Unit
         }
         return bitmap
@@ -93,16 +98,88 @@ object HandwritingPaperRenderer {
         }
     }
 
+    private fun drawDottedGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint) {
+        val dotPaint = Paint(guidePaint).apply {
+            style = Paint.Style.FILL
+            strokeWidth = 1f
+            alpha = (guidePaint.alpha * 0.8f).roundToInt().coerceIn(0, 255)
+        }
+        val radius = max(1f, guidePaint.strokeWidth * 1.15f)
+        var y = spacing
+        while (y < height) {
+            var x = spacing
+            while (x < width) {
+                canvas.drawCircle(x, y, radius, dotPaint)
+                x += spacing
+            }
+            y += spacing
+        }
+    }
+
+    private fun drawNotebookGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint, marginPaint: Paint, marginScale: Float) {
+        drawRuledGuides(canvas, width, height, spacing, guidePaint, marginPaint, marginScale)
+        val headerY = spacing * 1.55f
+        canvas.drawLine(0f, headerY, width, headerY, marginPaint)
+    }
+
+    private fun drawCornellGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint, marginPaint: Paint, marginScale: Float) {
+        drawRuledGuides(canvas, width, height, spacing, guidePaint, marginPaint, marginScale)
+        val cueX = width * 0.32f
+        val summaryY = height - spacing * 2.8f
+        canvas.drawLine(cueX, 0f, cueX, summaryY, marginPaint)
+        canvas.drawLine(0f, summaryY, width, summaryY, marginPaint)
+    }
+
+    private fun drawVintageNotebookGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, guidePaint: Paint, marginPaint: Paint, marginScale: Float) {
+        val linePaint = Paint(guidePaint).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6F7F8B"), 0x2A)
+            strokeWidth = max(1f, guidePaint.strokeWidth * 0.75f)
+        }
+        var y = spacing * 1.8f
+        while (y < height - spacing) {
+            canvas.drawLine(width * 0.1f, y, width * 0.94f, y, linePaint)
+            y += spacing * 0.92f
+        }
+        val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, 1.8f * marginScale)
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#8C6F4D"), 0x24)
+        }
+        val inset = 10f * marginScale
+        canvas.drawRoundRect(inset, inset, width - inset, height - inset, 22f * marginScale, 22f * marginScale, edgePaint)
+        val spinePaint = Paint(edgePaint).apply { strokeWidth = max(1f, 2.4f * marginScale) }
+        canvas.drawLine(18f * marginScale, 28f * marginScale, 12f * marginScale, height - 30f * marginScale, spinePaint)
+    }
+
+    private fun drawPaperTexture(canvas: Canvas, width: Float, height: Float, @ColorInt backgroundColor: Int, scale: Float) {
+        val luminance = ColorUtils.calculateLuminance(backgroundColor)
+        val fiberColor = if (luminance < 0.5f) Color.WHITE else Color.parseColor("#7D5C3D")
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(fiberColor, if (luminance < 0.5f) 10 else 12)
+            strokeWidth = max(1f, 0.55f * scale)
+        }
+        val step = max(18f, 24f * scale)
+        var y = step * 0.6f
+        var index = 0
+        while (y < height) {
+            val startX = if (index % 2 == 0) width * 0.08f else width * 0.2f
+            val endX = (startX + width * 0.18f).coerceAtMost(width - 8f)
+            canvas.drawLine(startX, y, endX, y + (index % 3 - 1) * scale, paint)
+            y += step
+            index++
+        }
+    }
+
     @ColorInt
     private fun guideColor(@ColorInt backgroundColor: Int): Int {
         val luminance = ColorUtils.calculateLuminance(backgroundColor)
         val base = if (luminance < 0.5f) Color.WHITE else Color.BLACK
-        return ColorUtils.setAlphaComponent(base, (0.28f * 255).roundToInt())
+        return ColorUtils.setAlphaComponent(base, (0.16f * 255).roundToInt())
     }
 
     @ColorInt
     private fun marginColor(@ColorInt backgroundColor: Int): Int {
         val accent = ColorUtils.blendARGB(backgroundColor, Color.parseColor("#2962FF"), 0.55f)
-        return ColorUtils.setAlphaComponent(accent, (0.65f * 255).roundToInt())
+        return ColorUtils.setAlphaComponent(accent, (0.36f * 255).roundToInt())
     }
 }

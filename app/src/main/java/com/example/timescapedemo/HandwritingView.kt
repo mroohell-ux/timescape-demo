@@ -28,6 +28,7 @@ import com.example.timescapedemo.HandwritingDrawingTool.TEXT
 import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -50,6 +51,10 @@ class HandwritingView @JvmOverloads constructor(
         val scale: Float,
         val createdAt: Long
     )
+    data class PlacedImageSnapshot(
+        val bitmap: Bitmap,
+        val bounds: RectF
+    )
 
     private val density = resources.displayMetrics.density
     private val penPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -71,7 +76,7 @@ class HandwritingView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
         strokeWidth = 16f * density
-        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.28f * 255).roundToInt())
+        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.16f * 255).roundToInt())
     }
     private val bitmapPaint = Paint(Paint.DITHER_FLAG)
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -116,6 +121,14 @@ class HandwritingView @JvmOverloads constructor(
     private var targetAspectRatio: Float? = null
     private var exportWidth = 0
     private var exportHeight = 0
+    private var placedImageBitmap: Bitmap? = null
+    private var placedImageRect: RectF? = null
+    private var imageTouchMode = 0
+    private var imageTouchStartX = 0f
+    private var imageTouchStartY = 0f
+    private var imageStartRect = RectF()
+    private var imageStartDistance = 0f
+    private var imagePlacementActive = false
 
     private var contentChangedListener: (() -> Unit)? = null
     private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
@@ -159,10 +172,12 @@ class HandwritingView @JvmOverloads constructor(
             extraCanvas = null
             return
         }
+        val previousBitmap = extraBitmap
+        val previousHadContent = hasContent
+        val previousHadBase = hasBaseImage
         val newBitmap = Bitmap.createBitmap(w, h, Config.ARGB_8888)
         val newCanvas = Canvas(newBitmap)
         newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
-        extraBitmap?.recycle()
         extraBitmap = newBitmap
         extraCanvas = newCanvas
 
@@ -176,10 +191,20 @@ class HandwritingView @JvmOverloads constructor(
             hasContent = pendingHasContent || pendingHasBase
             pushCurrentState(hasContent, hasBaseImage)
             pendingBitmap = null
+        } else if (previousBitmap != null && !previousBitmap.isRecycled) {
+            val src = Rect(0, 0, previousBitmap.width, previousBitmap.height)
+            val dest = Rect(0, 0, w, h)
+            newCanvas.drawBitmap(previousBitmap, src, dest, bitmapPaint)
+            hasBaseImage = previousHadBase
+            hasContent = previousHadContent || previousHadBase
+            pushCurrentState(hasContent, hasBaseImage)
         } else {
             hasBaseImage = false
             hasContent = false
             pushCurrentState(false, false)
+        }
+        if (previousBitmap != null && previousBitmap !== newBitmap && !previousBitmap.isRecycled) {
+            previousBitmap.recycle()
         }
         pendingHasContent = false
         pendingHasBase = false
@@ -190,24 +215,31 @@ class HandwritingView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(backgroundColorInt)
+        drawPaperTexture(canvas, width.toFloat(), height.toFloat(), 1f)
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
+        drawPlacedImage(canvas, showHandles = false)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, currentPreviewPaint())
+        if (imagePlacementActive) drawPlacedImageHandles(canvas)
         insertionMarker?.let { (x, y) -> drawInsertionMarker(canvas, x, y) }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
+        if (placedImageBitmap != null && handlePlacedImageTouch(event)) {
+            invalidate()
+            return true
+        }
         if (drawingTool == TEXT) {
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
-                MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_DOWN -> {
+                    disallowParentIntercept(true)
                     performClick()
                     setTextInsertionPreview(x, y)
                     textInsertionTapListener?.invoke(x, y)
-                    disallowParentIntercept(false)
                 }
+                MotionEvent.ACTION_UP -> disallowParentIntercept(false)
                 MotionEvent.ACTION_CANCEL -> disallowParentIntercept(false)
             }
             return true
@@ -265,14 +297,54 @@ class HandwritingView @JvmOverloads constructor(
         pendingHasContent = false
         pendingHasBase = false
         insertedHandwritingObjects.clear()
+        placedImageBitmap?.recycle()
+        placedImageBitmap = null
+        placedImageRect = null
+        imagePlacementActive = false
         invalidate()
         notifyContentChanged()
+    }
+
+    fun placeImage(bitmap: Bitmap) {
+        commitCurrentPath()
+        placedImageBitmap?.recycle()
+        placedImageBitmap = bitmap.copy(Config.ARGB_8888, false)
+        if (!bitmap.isRecycled) bitmap.recycle()
+        val viewWidth = width.takeIf { it > 0 } ?: exportWidth.takeIf { it > 0 } ?: 1
+        val viewHeight = height.takeIf { it > 0 } ?: exportHeight.takeIf { it > 0 } ?: 1
+        val image = placedImageBitmap ?: return
+        val maxWidth = viewWidth * 0.62f
+        val maxHeight = viewHeight * 0.42f
+        val scale = min(maxWidth / image.width.toFloat(), maxHeight / image.height.toFloat())
+            .takeIf { it.isFinite() && it > 0f } ?: 1f
+        val placedWidth = image.width * scale
+        val placedHeight = image.height * scale
+        placedImageRect = RectF(
+            (viewWidth - placedWidth) / 2f,
+            (viewHeight - placedHeight) / 2f,
+            (viewWidth + placedWidth) / 2f,
+            (viewHeight + placedHeight) / 2f
+        )
+        imagePlacementActive = true
+        hasContent = true
+        notifyContentChanged()
+        invalidate()
     }
 
     fun undo(): Boolean {
         if (!path.isEmpty) {
             path.reset()
             invalidate()
+            return true
+        }
+        if (placedImageBitmap != null) {
+            placedImageBitmap?.recycle()
+            placedImageBitmap = null
+            placedImageRect = null
+            imagePlacementActive = false
+            hasContent = history.lastOrNull()?.hasDrawing ?: false
+            invalidate()
+            notifyContentChanged()
             return true
         }
         if (history.size <= 1) return false
@@ -290,7 +362,7 @@ class HandwritingView @JvmOverloads constructor(
 
     fun canUndo(): Boolean = !path.isEmpty || history.size > 1
 
-    fun hasDrawing(): Boolean = hasContent || !path.isEmpty
+    fun hasDrawing(): Boolean = hasContent || !path.isEmpty || placedImageBitmap != null
 
     fun setBitmap(bitmap: Bitmap?) {
         pendingBitmap?.recycle()
@@ -328,10 +400,34 @@ class HandwritingView @JvmOverloads constructor(
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
         val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
+        drawPaperTexture(canvas, targetW.toFloat(), targetH.toFloat(), scale)
         drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
+        drawPlacedImage(canvas, showHandles = false, scale = scale)
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
         return result
+    }
+
+    fun exportEditLayerBitmap(): Bitmap? {
+        commitCurrentPath(addToHistory = false)
+        val source = extraBitmap ?: return null
+        return source.copy(Config.ARGB_8888, false)
+    }
+
+    fun placedImageSnapshot(): PlacedImageSnapshot? {
+        val image = placedImageBitmap ?: return null
+        val rect = placedImageRect ?: return null
+        return PlacedImageSnapshot(image.copy(Config.ARGB_8888, false), RectF(rect))
+    }
+
+    fun restorePlacedImage(bitmap: Bitmap, bounds: RectF) {
+        placedImageBitmap?.recycle()
+        placedImageBitmap = bitmap.copy(Config.ARGB_8888, false)
+        if (!bitmap.isRecycled) bitmap.recycle()
+        placedImageRect = RectF(bounds)
+        imagePlacementActive = true
+        invalidate()
+        notifyContentChanged()
     }
 
     fun exportContentBitmap(targetHeightPx: Int, paddingPx: Int): Bitmap? {
@@ -416,6 +512,7 @@ class HandwritingView @JvmOverloads constructor(
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
         val scale = outputWidth.toFloat() / width.toFloat()
+        drawPaperTexture(canvas, outputWidth.toFloat(), outputHeight.toFloat(), scale)
         val viewportHeight = outputHeight / scale
         val top = (markerY - viewportHeight / 2f).coerceIn(0f, (height - viewportHeight).coerceAtLeast(0f))
 
@@ -546,10 +643,23 @@ class HandwritingView @JvmOverloads constructor(
     fun getEraserType(): HandwritingEraserType = eraserType
 
     fun setDrawingTool(tool: HandwritingDrawingTool) {
-        if (drawingTool == tool) return
+        if (drawingTool == tool && !imagePlacementActive) return
         commitCurrentPath()
         drawingTool = tool
+        imagePlacementActive = false
         invalidate()
+    }
+
+    fun hasPlacedImage(): Boolean = placedImageBitmap != null
+
+    fun isImagePlacementActive(): Boolean = imagePlacementActive
+
+    fun selectPlacedImage(): Boolean {
+        if (placedImageBitmap == null) return false
+        commitCurrentPath()
+        imagePlacementActive = true
+        invalidate()
+        return true
     }
 
     fun setCanvasSize(widthPx: Int, heightPx: Int) {
@@ -638,9 +748,17 @@ class HandwritingView @JvmOverloads constructor(
         extraCanvas = null
         pendingBitmap?.recycle()
         pendingBitmap = null
+        placedImageBitmap?.recycle()
+        placedImageBitmap = null
+        placedImageRect = null
+        imagePlacementActive = false
     }
 
     private fun touchStart(x: Float, y: Float) {
+        ensureDrawingSurface()
+        if (!path.isEmpty) {
+            commitCurrentPath()
+        }
         path.reset()
         path.moveTo(x, y)
         currentX = x
@@ -663,7 +781,11 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     private fun touchCancel() {
-        path.reset()
+        if (!path.isEmpty) {
+            commitCurrentPath()
+        } else {
+            path.reset()
+        }
     }
 
     private fun notifyStrokePreviewChanged() {
@@ -672,7 +794,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
-        val canvas = extraCanvas ?: return
+        val canvas = ensureDrawingSurface() ?: return
         canvas.drawPath(path, currentCommitPaint())
         path.reset()
         hasContent = true
@@ -680,6 +802,27 @@ class HandwritingView @JvmOverloads constructor(
             pushCurrentState(true, hasBaseImage)
         }
         notifyContentChanged()
+    }
+
+    private fun ensureDrawingSurface(): Canvas? {
+        if (width <= 0 || height <= 0) return extraCanvas
+        val existing = extraBitmap
+        if (existing != null && !existing.isRecycled && existing.width == width && existing.height == height && extraCanvas != null) {
+            return extraCanvas
+        }
+        val newBitmap = Bitmap.createBitmap(width, height, Config.ARGB_8888)
+        val newCanvas = Canvas(newBitmap)
+        newCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+        if (existing != null && !existing.isRecycled) {
+            newCanvas.drawBitmap(existing, null, Rect(0, 0, width, height), bitmapPaint)
+            existing.recycle()
+        }
+        extraBitmap = newBitmap
+        extraCanvas = newCanvas
+        if (history.isEmpty()) {
+            pushCurrentState(hasContent, hasBaseImage)
+        }
+        return newCanvas
     }
 
     private fun drawBitmapOntoCanvas(bitmap: Bitmap, recycleAfter: Boolean = false) {
@@ -705,6 +848,150 @@ class HandwritingView @JvmOverloads constructor(
         }
     }
 
+    private fun commitPlacedImageToCanvas(addToHistory: Boolean = true): Boolean {
+        val image = placedImageBitmap ?: return false
+        val rect = placedImageRect ?: return false
+        val canvas = ensureDrawingSurface() ?: return false
+        canvas.drawBitmap(image, null, rect, bitmapPaint)
+        placedImageBitmap?.recycle()
+        placedImageBitmap = null
+        placedImageRect = null
+        imagePlacementActive = false
+        hasContent = true
+        if (addToHistory) pushCurrentState(true, hasBaseImage)
+        notifyContentChanged()
+        invalidate()
+        return true
+    }
+
+    private fun drawPlacedImage(canvas: Canvas, showHandles: Boolean, scale: Float = 1f) {
+        val image = placedImageBitmap ?: return
+        val rect = placedImageRect ?: return
+        val drawRect = RectF(rect.left * scale, rect.top * scale, rect.right * scale, rect.bottom * scale)
+        canvas.drawBitmap(image, null, drawRect, bitmapPaint)
+        if (showHandles) drawPlacedImageHandles(canvas, scale)
+    }
+
+    private fun drawPlacedImageHandles(canvas: Canvas, scale: Float = 1f) {
+        val rect = placedImageRect ?: return
+        val drawRect = RectF(rect.left * scale, rect.top * scale, rect.right * scale, rect.bottom * scale)
+        val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#8A6040"), 0xAA)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f * density * scale
+        }
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(Color.WHITE, 0xCC)
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(drawRect, 12f * density * scale, 12f * density * scale, handlePaint)
+        canvas.drawCircle(drawRect.right, drawRect.bottom, 8f * density * scale, fillPaint)
+        canvas.drawCircle(drawRect.right, drawRect.bottom, 8f * density * scale, handlePaint)
+    }
+
+    private fun handlePlacedImageTouch(event: MotionEvent): Boolean {
+        val rect = placedImageRect ?: return false
+        val hitRect = RectF(rect).apply { inset(-8f * density, -8f * density) }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (!hitRect.contains(event.x, event.y)) {
+                    if (imagePlacementActive) {
+                        imagePlacementActive = false
+                        invalidate()
+                    }
+                    return false
+                }
+                imagePlacementActive = true
+                disallowParentIntercept(true)
+                val handleRadius = 18f * density
+                imageTouchMode = if (hypot(event.x - rect.right, event.y - rect.bottom) <= handleRadius) 3 else 1
+                imageTouchStartX = event.x
+                imageTouchStartY = event.y
+                imageStartRect.set(rect)
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount < 2) return false
+                imageTouchMode = 2
+                imageStartDistance = pointerDistance(event)
+                imageStartRect.set(rect)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (imageTouchMode == 1) {
+                    rect.set(imageStartRect)
+                    rect.offset(event.x - imageTouchStartX, event.y - imageTouchStartY)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+                if (imageTouchMode == 2 && event.pointerCount >= 2) {
+                    val distance = pointerDistance(event)
+                    val scale = (distance / imageStartDistance).takeIf { it.isFinite() && it > 0f } ?: 1f
+                    val centerX = imageStartRect.centerX()
+                    val centerY = imageStartRect.centerY()
+                    val halfWidth = (imageStartRect.width() * scale / 2f).coerceAtLeast(32f * density)
+                    val halfHeight = (imageStartRect.height() * scale / 2f).coerceAtLeast(32f * density)
+                    rect.set(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+                if (imageTouchMode == 3) {
+                    val aspect = (imageStartRect.width() / imageStartRect.height()).takeIf { it.isFinite() && it > 0f } ?: 1f
+                    val newWidth = (event.x - imageStartRect.left).coerceAtLeast(64f * density)
+                    val newHeight = (newWidth / aspect).coerceAtLeast(64f * density)
+                    rect.set(imageStartRect.left, imageStartRect.top, imageStartRect.left + newWidth, imageStartRect.top + newHeight)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                imageTouchMode = 0
+                disallowParentIntercept(false)
+                notifyContentChanged()
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                imageTouchMode = 1
+                imageStartRect.set(rect)
+                imageTouchStartX = event.x
+                imageTouchStartY = event.y
+                return true
+            }
+        }
+        return imageTouchMode != 0
+    }
+
+    private fun pointerDistance(event: MotionEvent): Float =
+        if (event.pointerCount >= 2) hypot(event.getX(1) - event.getX(0), event.getY(1) - event.getY(0)) else 1f
+
+    private fun clampPlacedImageRect(rect: RectF) {
+        if (width <= 0 || height <= 0) return
+        val minVisible = 36f * density
+        if (rect.right < minVisible) rect.offset(minVisible - rect.right, 0f)
+        if (rect.left > width - minVisible) rect.offset(width - minVisible - rect.left, 0f)
+        if (rect.bottom < minVisible) rect.offset(0f, minVisible - rect.bottom)
+        if (rect.top > height - minVisible) rect.offset(0f, height - minVisible - rect.top)
+    }
+
+    private fun drawPaperTexture(canvas: Canvas, width: Float, height: Float, scale: Float) {
+        val luminance = ColorUtils.calculateLuminance(backgroundColorInt)
+        val fiberColor = if (luminance < 0.5f) Color.WHITE else Color.parseColor("#7D5C3D")
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(fiberColor, if (luminance < 0.5f) 10 else 12)
+            strokeWidth = max(1f, 0.55f * density * scale)
+        }
+        val step = max(18f * density * scale, 24f * density * scale)
+        var y = step * 0.6f
+        var index = 0
+        while (y < height) {
+            val startX = if (index % 2 == 0) width * 0.08f else width * 0.2f
+            val endX = (startX + width * 0.18f).coerceAtMost(width - 8f * density * scale)
+            canvas.drawLine(startX, y, endX, y + (index % 3 - 1) * density * scale, paint)
+            y += step
+            index++
+        }
+    }
+
     private fun drawPaperGuides(canvas: Canvas, width: Float, height: Float, scale: Float) {
         if (paperStyle == HandwritingPaperStyle.PLAIN) return
         val spacing = 28f * density * scale
@@ -712,28 +999,82 @@ class HandwritingView @JvmOverloads constructor(
         guidePaint.strokeWidth = stroke
         marginPaint.strokeWidth = stroke * 1.2f
         when (paperStyle) {
-            HandwritingPaperStyle.RULED -> {
-                var y = spacing
-                while (y < height) {
-                    canvas.drawLine(0f, y, width, y, guidePaint)
-                    y += spacing
-                }
-                val marginX = 36f * density * scale
-                canvas.drawLine(marginX, 0f, marginX, height, marginPaint)
+            HandwritingPaperStyle.RULED -> drawRuledGuides(canvas, width, height, spacing, scale)
+            HandwritingPaperStyle.GRID -> drawGridGuides(canvas, width, height, spacing)
+            HandwritingPaperStyle.DOTTED -> drawDottedGuides(canvas, width, height, spacing)
+            HandwritingPaperStyle.NOTEBOOK -> {
+                drawRuledGuides(canvas, width, height, spacing, scale)
+                canvas.drawLine(0f, spacing * 1.55f, width, spacing * 1.55f, marginPaint)
             }
-            HandwritingPaperStyle.GRID -> {
-                var y = spacing
-                while (y < height) {
-                    canvas.drawLine(0f, y, width, y, guidePaint)
-                    y += spacing
-                }
-                var x = spacing
-                while (x < width) {
-                    canvas.drawLine(x, 0f, x, height, guidePaint)
-                    x += spacing
-                }
+            HandwritingPaperStyle.CORNELL -> {
+                drawRuledGuides(canvas, width, height, spacing, scale)
+                val summaryY = height - spacing * 2.8f
+                canvas.drawLine(width * 0.32f, 0f, width * 0.32f, summaryY, marginPaint)
+                canvas.drawLine(0f, summaryY, width, summaryY, marginPaint)
             }
+            HandwritingPaperStyle.VINTAGE -> drawVintageNotebookGuides(canvas, width, height, spacing, scale)
             HandwritingPaperStyle.PLAIN -> Unit
+        }
+    }
+
+    private fun drawVintageNotebookGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, scale: Float) {
+        val linePaint = Paint(guidePaint).apply {
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#6F7F8B"), 0x2A)
+            strokeWidth = max(1f, guidePaint.strokeWidth * 0.75f)
+        }
+        var y = spacing * 1.8f
+        while (y < height - spacing) {
+            canvas.drawLine(width * 0.1f, y, width * 0.94f, y, linePaint)
+            y += spacing * 0.92f
+        }
+        val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, 1.8f * density * scale)
+            color = ColorUtils.setAlphaComponent(Color.parseColor("#8C6F4D"), 0x24)
+        }
+        val inset = 10f * density * scale
+        canvas.drawRoundRect(inset, inset, width - inset, height - inset, 22f * density * scale, 22f * density * scale, edgePaint)
+        canvas.drawLine(18f * density * scale, 28f * density * scale, 12f * density * scale, height - 30f * density * scale, edgePaint)
+    }
+
+    private fun drawRuledGuides(canvas: Canvas, width: Float, height: Float, spacing: Float, scale: Float) {
+        var y = spacing
+        while (y < height) {
+            canvas.drawLine(0f, y, width, y, guidePaint)
+            y += spacing
+        }
+        val marginX = 36f * density * scale
+        canvas.drawLine(marginX, 0f, marginX, height, marginPaint)
+    }
+
+    private fun drawGridGuides(canvas: Canvas, width: Float, height: Float, spacing: Float) {
+        var y = spacing
+        while (y < height) {
+            canvas.drawLine(0f, y, width, y, guidePaint)
+            y += spacing
+        }
+        var x = spacing
+        while (x < width) {
+            canvas.drawLine(x, 0f, x, height, guidePaint)
+            x += spacing
+        }
+    }
+
+    private fun drawDottedGuides(canvas: Canvas, width: Float, height: Float, spacing: Float) {
+        val dotPaint = Paint(guidePaint).apply {
+            style = Paint.Style.FILL
+            strokeWidth = 1f
+            alpha = (guidePaint.alpha * 0.8f).roundToInt().coerceIn(0, 255)
+        }
+        val radius = max(1f, guidePaint.strokeWidth * 1.15f)
+        var y = spacing
+        while (y < height) {
+            var x = spacing
+            while (x < width) {
+                canvas.drawCircle(x, y, radius, dotPaint)
+                x += spacing
+            }
+            y += spacing
         }
     }
 
@@ -764,6 +1105,21 @@ class HandwritingView @JvmOverloads constructor(
                 penPaint.strokeJoin = Paint.Join.BEVEL
                 penPaint.pathEffect = createHighlighterPathEffect()
             }
+            HandwritingPenType.PENCIL -> {
+                penPaint.strokeCap = Paint.Cap.ROUND
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = createPencilPathEffect()
+            }
+            HandwritingPenType.FOUNTAIN -> {
+                penPaint.strokeCap = Paint.Cap.BUTT
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = createFountainPathEffect()
+            }
+            HandwritingPenType.GEL -> {
+                penPaint.strokeCap = Paint.Cap.ROUND
+                penPaint.strokeJoin = Paint.Join.ROUND
+                penPaint.pathEffect = CornerPathEffect(penPaint.strokeWidth * 0.32f)
+            }
         }
     }
 
@@ -788,6 +1144,22 @@ class HandwritingView @JvmOverloads constructor(
         return CornerPathEffect(softenRadius)
     }
 
+    private fun createPencilPathEffect(): android.graphics.PathEffect {
+        val segment = max(1f, penPaint.strokeWidth * 0.55f)
+        val jitter = max(1f, penPaint.strokeWidth * 0.35f)
+        val texture = DiscretePathEffect(segment, jitter)
+        val soften = CornerPathEffect(penPaint.strokeWidth * 0.18f)
+        return ComposePathEffect(soften, texture)
+    }
+
+    private fun createFountainPathEffect(): android.graphics.PathEffect {
+        val nib = buildCalligraphyNibPath(penPaint.strokeWidth * 0.82f)
+        val advance = max(1f, penPaint.strokeWidth * 0.22f)
+        val dash = PathDashPathEffect(nib, advance, 0f, PathDashPathEffect.Style.MORPH)
+        val smooth = CornerPathEffect(penPaint.strokeWidth * 0.3f)
+        return ComposePathEffect(smooth, dash)
+    }
+
     private fun updatePenColor() {
         val baseColor = brushColorInt
         val updatedColor = when (penType) {
@@ -796,6 +1168,11 @@ class HandwritingView @JvmOverloads constructor(
                 val brightened = ColorUtils.blendARGB(baseColor, Color.WHITE, 0.2f)
                 ColorUtils.setAlphaComponent(brightened, targetAlpha)
             }
+            HandwritingPenType.PENCIL -> {
+                val targetAlpha = (Color.alpha(baseColor) * 0.72f).roundToInt().coerceIn(32, 255)
+                ColorUtils.setAlphaComponent(ColorUtils.blendARGB(baseColor, Color.GRAY, 0.24f), targetAlpha)
+            }
+            HandwritingPenType.GEL -> ColorUtils.blendARGB(baseColor, Color.WHITE, 0.06f)
             else -> baseColor
         }
         penPaint.color = updatedColor
@@ -840,10 +1217,10 @@ class HandwritingView @JvmOverloads constructor(
     private fun updateGuidePaintColor() {
         val luminance = ColorUtils.calculateLuminance(backgroundColorInt)
         val baseColor = if (luminance < 0.5) Color.WHITE else Color.BLACK
-        val lineColor = ColorUtils.setAlphaComponent(baseColor, (0.28f * 255).roundToInt())
+        val lineColor = ColorUtils.setAlphaComponent(baseColor, (0.16f * 255).roundToInt())
         guidePaint.color = lineColor
         val accent = ColorUtils.blendARGB(backgroundColorInt, Color.parseColor("#2962FF"), 0.55f)
-        marginPaint.color = ColorUtils.setAlphaComponent(accent, (0.65f * 255).roundToInt())
+        marginPaint.color = ColorUtils.setAlphaComponent(accent, (0.36f * 255).roundToInt())
     }
 
     private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {

@@ -300,6 +300,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var pendingImageCardRequest: ImageCardRequest? = null
+    private var pendingHandwritingImageInsert: ((Bitmap) -> Unit)? = null
     private var pendingPdfImportFlowId: Long? = null
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
@@ -393,6 +394,20 @@ class MainActivity : AppCompatActivity() {
     private val openImageCard =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             handleImageCardResult(uri)
+        }
+
+    private val openHandwritingInsertImage =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val callback = pendingHandwritingImageInsert
+            pendingHandwritingImageInsert = null
+            if (uri == null || callback == null) return@registerForActivityResult
+            persistReadPermission(uri)
+            val bitmap = openImageUriStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            if (bitmap == null) {
+                snackbar(getString(R.string.snackbar_app_background_failed))
+            } else {
+                callback(bitmap)
+            }
         }
 
     private val openPdfCard =
@@ -2269,7 +2284,7 @@ class MainActivity : AppCompatActivity() {
                     id = nextCardId++,
                     title = "",
                     snippet = "",
-                    handwriting = HandwritingContent(content.path, content.options),
+                    handwriting = HandwritingContent(content.path, content.options, editLayerPath = content.editLayerPath, placedImage = content.placedImage),
                     updatedAt = System.currentTimeMillis()
                 )
                 flow.cards.add(0, card)
@@ -2296,7 +2311,7 @@ class MainActivity : AppCompatActivity() {
             handwritingContent != null -> {
             showHandwritingDialog(
                 titleRes = R.string.dialog_edit_handwriting_title,
-                existing = if (face == HandwritingFace.BACK) handwritingContent.back else HandwritingSide(handwritingContent.path, handwritingContent.options),
+                existing = if (face == HandwritingFace.BACK) handwritingContent.back else handwritingContent.side(HandwritingFace.FRONT),
                 initialOptions = if (face == HandwritingFace.BACK) {
                     handwritingContent.back?.options ?: handwritingContent.options
                 } else handwritingContent.options,
@@ -2310,9 +2325,9 @@ class MainActivity : AppCompatActivity() {
                             val frontOptions = card.handwriting?.options ?: savedContent.options
                             val normalizedOptions = synchronizeBackPaper(frontOptions, savedContent.options)
                             if (card.handwriting == null) {
-                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions)
+                                card.handwriting = HandwritingContent(savedContent.path, normalizedOptions, editLayerPath = savedContent.editLayerPath, placedImage = savedContent.placedImage)
                             }
-                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions)
+                            card.handwriting?.back = HandwritingSide(savedContent.path, normalizedOptions, savedContent.editLayerPath, savedContent.placedImage)
                         }
                     } else {
                         val content = savedContent ?: run {
@@ -2320,10 +2335,12 @@ class MainActivity : AppCompatActivity() {
                             return@showHandwritingDialog
                         }
                         if (card.handwriting == null) {
-                            card.handwriting = HandwritingContent(content.path, content.options)
+                            card.handwriting = HandwritingContent(content.path, content.options, editLayerPath = content.editLayerPath, placedImage = content.placedImage)
                         } else {
                             card.handwriting?.path = content.path
                             card.handwriting?.options = content.options
+                            card.handwriting?.editLayerPath = content.editLayerPath
+                            card.handwriting?.placedImage = content.placedImage
                             card.handwriting?.back?.let { backSide ->
                                 backSide.options = synchronizeBackPaper(content.options, backSide.options)
                             }
@@ -3493,6 +3510,10 @@ class MainActivity : AppCompatActivity() {
         val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
+        val insertPictureButton = dialogView.findViewById<MaterialButton>(R.id.buttonInsertPictureHandwriting)
+        val cancelButton = dialogView.findViewById<MaterialButton>(R.id.buttonCancelHandwriting)
+        val doneButton = dialogView.findViewById<MaterialButton>(R.id.buttonDoneHandwriting)
+        val deleteButton = dialogView.findViewById<MaterialButton>(R.id.buttonDeleteHandwriting)
         val toolToggleGroup = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.groupPaletteToggles)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
@@ -3583,9 +3604,13 @@ class MainActivity : AppCompatActivity() {
             NamedColor(Color.WHITE, getString(R.string.handwriting_color_white)),
             NamedColor(Color.parseColor("#FFF4E0"), getString(R.string.handwriting_color_cream)),
             NamedColor(Color.parseColor("#FFF1CC"), getString(R.string.handwriting_color_parchment)),
+            NamedColor(Color.parseColor("#F7E7CE"), getString(R.string.handwriting_color_linen)),
+            NamedColor(Color.parseColor("#FCE4D6"), getString(R.string.handwriting_color_blush)),
             NamedColor(Color.parseColor("#ECEFF1"), getString(R.string.handwriting_color_fog)),
             NamedColor(Color.parseColor("#E3F2FD"), getString(R.string.handwriting_color_sky)),
+            NamedColor(Color.parseColor("#E0F7FA"), getString(R.string.handwriting_color_aqua)),
             NamedColor(Color.parseColor("#E8F5E9"), getString(R.string.handwriting_color_mint)),
+            NamedColor(Color.parseColor("#FFFDE7"), getString(R.string.handwriting_color_lemon)),
             NamedColor(Color.parseColor("#F3E5F5"), getString(R.string.handwriting_color_lavender)),
             NamedColor(Color.parseColor("#101820"), getString(R.string.handwriting_color_midnight))
         )
@@ -3611,7 +3636,10 @@ class MainActivity : AppCompatActivity() {
             NamedColor(Color.parseColor("#F9A825"), getString(R.string.handwriting_color_amber)),
             NamedColor(Color.parseColor("#C62828"), getString(R.string.handwriting_color_red)),
             NamedColor(Color.parseColor("#AD1457"), getString(R.string.handwriting_color_magenta)),
-            NamedColor(Color.parseColor("#6A1B9A"), getString(R.string.handwriting_color_violet))
+            NamedColor(Color.parseColor("#6A1B9A"), getString(R.string.handwriting_color_violet)),
+            NamedColor(Color.parseColor("#4E342E"), getString(R.string.handwriting_color_brown)),
+            NamedColor(Color.parseColor("#FF6F00"), getString(R.string.handwriting_color_orange)),
+            NamedColor(Color.parseColor("#263238"), getString(R.string.handwriting_color_ink))
         )
         if (brushColorOptions.none { it.color == initialOptions.brushColor }) {
             brushColorOptions.add(0, NamedColor(initialOptions.brushColor, getString(R.string.handwriting_color_custom)))
@@ -3622,7 +3650,11 @@ class MainActivity : AppCompatActivity() {
         val paperStyleOptions = listOf(
             PaperStyleOption(HandwritingPaperStyle.PLAIN, getString(R.string.handwriting_paper_plain), R.drawable.ic_handwriting_paper_plain),
             PaperStyleOption(HandwritingPaperStyle.RULED, getString(R.string.handwriting_paper_ruled), R.drawable.ic_handwriting_paper_ruled),
-            PaperStyleOption(HandwritingPaperStyle.GRID, getString(R.string.handwriting_paper_grid), R.drawable.ic_handwriting_paper_grid)
+            PaperStyleOption(HandwritingPaperStyle.GRID, getString(R.string.handwriting_paper_grid), R.drawable.ic_handwriting_paper_grid),
+            PaperStyleOption(HandwritingPaperStyle.DOTTED, getString(R.string.handwriting_paper_dotted), R.drawable.ic_handwriting_paper_grid),
+            PaperStyleOption(HandwritingPaperStyle.NOTEBOOK, getString(R.string.handwriting_paper_notebook), R.drawable.ic_handwriting_paper_ruled),
+            PaperStyleOption(HandwritingPaperStyle.CORNELL, getString(R.string.handwriting_paper_cornell), R.drawable.ic_handwriting_paper_ruled),
+            PaperStyleOption(HandwritingPaperStyle.VINTAGE, getString(R.string.handwriting_paper_vintage), R.drawable.ic_handwriting_paper_ruled)
         )
         var selectedPaperStyle = initialOptions.paperStyle.takeIf { option ->
             paperStyleOptions.any { it.style == option }
@@ -3633,7 +3665,10 @@ class MainActivity : AppCompatActivity() {
             HandwritingPenType.ROUND to getString(R.string.handwriting_pen_type_round),
             HandwritingPenType.MARKER to getString(R.string.handwriting_pen_type_marker),
             HandwritingPenType.CALLIGRAPHY to getString(R.string.handwriting_pen_type_calligraphy),
-            HandwritingPenType.HIGHLIGHTER to getString(R.string.handwriting_pen_type_highlighter)
+            HandwritingPenType.HIGHLIGHTER to getString(R.string.handwriting_pen_type_highlighter),
+            HandwritingPenType.PENCIL to getString(R.string.handwriting_pen_type_pencil),
+            HandwritingPenType.FOUNTAIN to getString(R.string.handwriting_pen_type_fountain),
+            HandwritingPenType.GEL to getString(R.string.handwriting_pen_type_gel)
         )
         var selectedPenType = initialOptions.penType.takeIf { pen -> penTypeOptions.any { it.first == pen } }
             ?: HandwritingPenType.ROUND
@@ -3716,6 +3751,17 @@ class MainActivity : AppCompatActivity() {
                 isClickable = true
                 isFocusable = true
                 isCheckedIconVisible = true
+                chipMinHeight = 40f * resources.displayMetrics.density
+                chipCornerRadius = 20f * resources.displayMetrics.density
+                chipBackgroundColor = ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                    intArrayOf(Color.parseColor("#21B88652"), Color.TRANSPARENT)
+                )
+                chipStrokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(Color.parseColor("#B88652"), 0x22))
+                chipStrokeWidth = 1f * resources.displayMetrics.density
+                rippleColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(Color.parseColor("#8A6040"), 0x16))
+                setTextColor(Color.parseColor("#5F4837"))
+                checkedIconTint = ColorStateList.valueOf(Color.parseColor("#8A6040"))
                 if (iconRes != null) {
                     setChipIconResource(iconRes)
                     isChipIconVisible = true
@@ -3821,6 +3867,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         val density = resources.displayMetrics.density
+        val toolbarIconColor = Color.parseColor("#8A6040")
+        val toolbarSelectedColor = Color.parseColor("#21B88652")
+        val toolbarDisabledColor = ColorUtils.setAlphaComponent(toolbarIconColor, 0x55)
+
+        fun styleToolbarButton(button: MaterialButton, selected: Boolean = false) {
+            button.isAllCaps = false
+            button.cornerRadius = (20 * density).roundToInt()
+            button.insetTop = 0
+            button.insetBottom = 0
+            button.backgroundTintList = ColorStateList.valueOf(if (selected) toolbarSelectedColor else Color.TRANSPARENT)
+            button.iconTint = ColorStateList.valueOf(if (button.isEnabled) toolbarIconColor else toolbarDisabledColor)
+            button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+            button.strokeWidth = 0
+            button.rippleColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(toolbarIconColor, 0x16))
+        }
+
         val palettePopup = PopupWindow(
             paletteView,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -3844,6 +3906,9 @@ class MainActivity : AppCompatActivity() {
         fun updateHistoryButtons() {
             undoButton.isEnabled = handwritingView.canUndo()
             clearButton.isEnabled = handwritingView.hasDrawing()
+            styleToolbarButton(undoButton)
+            styleToolbarButton(clearButton)
+            styleToolbarButton(insertPictureButton, handwritingView.isImagePlacementActive())
         }
 
         applyCanvasCardDisplaySize(selectedSize.width, selectedSize.height)
@@ -3860,8 +3925,17 @@ class MainActivity : AppCompatActivity() {
         if (baseBitmap != null) {
             handwritingView.setBitmap(baseBitmap)
         } else {
-            existing?.path?.let { path ->
+            val editPath = existing?.editLayerPath ?: existing?.path
+            editPath?.let { path ->
                 loadHandwritingBitmap(path)?.let { handwritingView.setBitmap(it) }
+            }
+            existing?.placedImage?.let { placed ->
+                loadHandwritingBitmap(placed.path)?.let { bitmap ->
+                    handwritingView.restorePlacedImage(
+                        bitmap,
+                        RectF(placed.left, placed.top, placed.right, placed.bottom)
+                    )
+                }
             }
         }
 
@@ -3871,6 +3945,19 @@ class MainActivity : AppCompatActivity() {
         clearButton.setOnClickListener {
             handwritingView.clear()
             updateHistoryButtons()
+        }
+        insertPictureButton.setOnClickListener {
+            if (handwritingView.hasPlacedImage() && handwritingView.selectPlacedImage()) {
+                if (palettePopup.isShowing) palettePopup.dismiss()
+                updateHistoryButtons()
+                return@setOnClickListener
+            }
+            pendingHandwritingImageInsert = { bitmap ->
+                handwritingView.placeImage(bitmap)
+                if (palettePopup.isShowing) palettePopup.dismiss()
+                updateHistoryButtons()
+            }
+            openHandwritingInsertImage.launch(arrayOf("image/*"))
         }
 
         brushColorGroup.setOnCheckedStateChangeListener { group, checkedIds ->
@@ -3952,9 +4039,11 @@ class MainActivity : AppCompatActivity() {
         var visiblePalette: HandwritingPaletteSection? = null
 
         fun updateToolButtons() {
-            penButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.PEN) 1f else 0.65f
-            eraserButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.ERASER) 1f else 0.65f
-            textButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.TEXT) 1f else 0.65f
+            styleToolbarButton(penButton, selectedDrawingTool == HandwritingDrawingTool.PEN)
+            styleToolbarButton(eraserButton, selectedDrawingTool == HandwritingDrawingTool.ERASER)
+            styleToolbarButton(textButton, selectedDrawingTool == HandwritingDrawingTool.TEXT)
+            styleToolbarButton(canvasButton, visiblePalette == HandwritingPaletteSection.CANVAS)
+            styleToolbarButton(insertPictureButton, handwritingView.isImagePlacementActive())
             val checkedId = when (visiblePalette) {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
@@ -4591,21 +4680,23 @@ class MainActivity : AppCompatActivity() {
 
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
-            .setPositiveButton(R.string.dialog_save, null)
-            .setNegativeButton(android.R.string.cancel, null)
-            .apply {
-                if (onDelete != null) {
-                    setNeutralButton(R.string.dialog_delete, null)
-                }
-            }
             .create()
 
         dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             dialog.window?.setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            cancelButton.setOnClickListener { dialog.dismiss() }
+            deleteButton.isVisible = onDelete != null
+            onDelete?.let { deleteCallback ->
+                deleteButton.setOnClickListener {
+                    deleteCallback()
+                    dialog.dismiss()
+                }
+            }
+            doneButton.setOnClickListener {
                 val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
@@ -4630,7 +4721,11 @@ class MainActivity : AppCompatActivity() {
                     dialog.dismiss()
                     return@setOnClickListener
                 }
-                val saved = saveHandwritingContent(exportBitmap, options, existing)
+                val editLayerBitmap = handwritingView.exportEditLayerBitmap()
+                val placedImageSnapshot = handwritingView.placedImageSnapshot()
+                val saved = saveHandwritingContent(exportBitmap, options, existing, editLayerBitmap, placedImageSnapshot)
+                editLayerBitmap?.recycle()
+                placedImageSnapshot?.bitmap?.recycle()
                 exportBitmap.recycle()
                 if (saved == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
@@ -4640,15 +4735,10 @@ class MainActivity : AppCompatActivity() {
                 onSave(saved)
                 dialog.dismiss()
             }
-            onDelete?.let { deleteCallback ->
-                dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
-                    deleteCallback()
-                    dialog.dismiss()
-                }
-            }
         }
 
         dialog.setOnDismissListener {
+            pendingHandwritingImageInsert = null
             if (palettePopup.isShowing) {
                 palettePopup.dismiss()
             }
@@ -5242,7 +5332,9 @@ class MainActivity : AppCompatActivity() {
     private fun saveHandwritingContent(
         bitmap: Bitmap,
         options: HandwritingOptions,
-        existing: HandwritingSide?
+        existing: HandwritingSide?,
+        editLayerBitmap: Bitmap? = null,
+        placedImageSnapshot: HandwritingView.PlacedImageSnapshot? = null
     ): HandwritingSide? {
         val reuseExisting = existing?.takeIf { it.options.format == options.format }
         val filename = reuseExisting?.path ?: "handwriting_${System.currentTimeMillis()}.${options.format.extension}"
@@ -5255,7 +5347,27 @@ class MainActivity : AppCompatActivity() {
                 }
                 bitmap.compress(options.format.compressFormat, quality, out)
             }
-            HandwritingSide(filename, options)
+            val editLayerPath = editLayerBitmap?.let { layer ->
+                val editFilename = existing?.editLayerPath ?: "handwriting_edit_${System.currentTimeMillis()}.png"
+                openFileOutput(editFilename, MODE_PRIVATE).use { out ->
+                    layer.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                editFilename
+            } ?: existing?.editLayerPath
+            val placedImage = placedImageSnapshot?.let { snapshot ->
+                val imageFilename = existing?.placedImage?.path ?: "handwriting_placed_${System.currentTimeMillis()}.png"
+                openFileOutput(imageFilename, MODE_PRIVATE).use { out ->
+                    snapshot.bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                HandwritingPlacedImage(
+                    path = imageFilename,
+                    left = snapshot.bounds.left,
+                    top = snapshot.bounds.top,
+                    right = snapshot.bounds.right,
+                    bottom = snapshot.bounds.bottom
+                )
+            }
+            HandwritingSide(filename, options, editLayerPath, placedImage)
         }.getOrElse {
             if (reuseExisting == null) {
                 runCatching { deleteFile(filename) }
@@ -5297,10 +5409,10 @@ class MainActivity : AppCompatActivity() {
     private fun cardCanvasBounds(): Pair<Int, Int> {
         val metrics = resources.displayMetrics
         val density = metrics.density
-        val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
+        val horizontalInsetPx = (12 * density).roundToInt()
+        val minSidePx = (360 * density).roundToInt()
         val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx).coerceAtLeast(1)
-        val maxHeight = (metrics.heightPixels * 2f / 3f).roundToInt().coerceAtLeast(1)
+        val maxHeight = (metrics.heightPixels * 0.84f).roundToInt().coerceAtLeast(1)
         return availableWidth to maxHeight
     }
 
@@ -8181,9 +8293,9 @@ private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
 private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
 private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
 private const val DEFAULT_CANVAS_RATIO = 0.75f
-private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
+private const val DEFAULT_HANDWRITING_BACKGROUND = -0x918
 private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
-private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
+private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.VINTAGE
 private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
 private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
 private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"

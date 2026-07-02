@@ -23,7 +23,11 @@ enum class HandwritingFormat(
 enum class HandwritingPaperStyle {
     PLAIN,
     RULED,
-    GRID;
+    GRID,
+    DOTTED,
+    NOTEBOOK,
+    CORNELL,
+    VINTAGE;
 
     companion object {
         fun fromName(name: String?): HandwritingPaperStyle? =
@@ -35,7 +39,10 @@ enum class HandwritingPenType {
     ROUND,
     MARKER,
     CALLIGRAPHY,
-    HIGHLIGHTER;
+    HIGHLIGHTER,
+    PENCIL,
+    FOUNTAIN,
+    GEL;
 
     companion object {
         fun fromName(name: String?): HandwritingPenType? =
@@ -90,21 +97,33 @@ data class HandwritingOptions(
 
 enum class HandwritingFace { FRONT, BACK }
 
+data class HandwritingPlacedImage(
+    var path: String,
+    var left: Float,
+    var top: Float,
+    var right: Float,
+    var bottom: Float
+)
+
 data class HandwritingSide(
     var path: String,
-    var options: HandwritingOptions
+    var options: HandwritingOptions,
+    var editLayerPath: String? = null,
+    var placedImage: HandwritingPlacedImage? = null
 )
 
 data class HandwritingContent(
     var path: String,
     var options: HandwritingOptions,
-    var back: HandwritingSide? = null
+    var back: HandwritingSide? = null,
+    var editLayerPath: String? = null,
+    var placedImage: HandwritingPlacedImage? = null
 ) {
     fun hasBack(): Boolean = back != null
 
     fun side(face: HandwritingFace): HandwritingSide = if (face == HandwritingFace.BACK) {
-        back ?: HandwritingSide(path, options)
+        back ?: HandwritingSide(path, options, editLayerPath, placedImage)
     } else {
-        HandwritingSide(path, options)
+        HandwritingSide(path, options, editLayerPath, placedImage)
     }
 }
