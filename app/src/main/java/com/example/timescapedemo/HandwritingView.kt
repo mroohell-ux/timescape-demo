@@ -213,9 +213,10 @@ class HandwritingView @JvmOverloads constructor(
         canvas.drawColor(backgroundColorInt)
         drawPaperTexture(canvas, width.toFloat(), height.toFloat(), 1f)
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
+        drawPlacedImage(canvas, showHandles = false)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        drawPlacedImage(canvas, showHandles = imagePlacementActive)
         canvas.drawPath(path, currentPreviewPaint())
+        if (imagePlacementActive) drawPlacedImageHandles(canvas)
         insertionMarker?.let { (x, y) -> drawInsertionMarker(canvas, x, y) }
     }
 
@@ -397,9 +398,9 @@ class HandwritingView @JvmOverloads constructor(
         val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
         drawPaperTexture(canvas, targetW.toFloat(), targetH.toFloat(), scale)
         drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
+        drawPlacedImage(canvas, showHandles = false, scale = scale)
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
-        drawPlacedImage(canvas, showHandles = false, scale = scale)
         return result
     }
 
@@ -819,19 +820,24 @@ class HandwritingView @JvmOverloads constructor(
         val rect = placedImageRect ?: return
         val drawRect = RectF(rect.left * scale, rect.top * scale, rect.right * scale, rect.bottom * scale)
         canvas.drawBitmap(image, null, drawRect, bitmapPaint)
-        if (!showHandles) return
+        if (showHandles) drawPlacedImageHandles(canvas, scale)
+    }
+
+    private fun drawPlacedImageHandles(canvas: Canvas, scale: Float = 1f) {
+        val rect = placedImageRect ?: return
+        val drawRect = RectF(rect.left * scale, rect.top * scale, rect.right * scale, rect.bottom * scale)
         val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ColorUtils.setAlphaComponent(Color.parseColor("#8A6040"), 0xAA)
             style = Paint.Style.STROKE
-            strokeWidth = 1.5f * density
+            strokeWidth = 1.5f * density * scale
         }
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ColorUtils.setAlphaComponent(Color.WHITE, 0xCC)
             style = Paint.Style.FILL
         }
-        canvas.drawRoundRect(drawRect, 12f * density, 12f * density, handlePaint)
-        canvas.drawCircle(drawRect.right, drawRect.bottom, 8f * density, fillPaint)
-        canvas.drawCircle(drawRect.right, drawRect.bottom, 8f * density, handlePaint)
+        canvas.drawRoundRect(drawRect, 12f * density * scale, 12f * density * scale, handlePaint)
+        canvas.drawCircle(drawRect.right, drawRect.bottom, 8f * density * scale, fillPaint)
+        canvas.drawCircle(drawRect.right, drawRect.bottom, 8f * density * scale, handlePaint)
     }
 
     private fun handlePlacedImageTouch(event: MotionEvent): Boolean {
