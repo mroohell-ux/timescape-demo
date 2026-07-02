@@ -3,223 +3,287 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/cardHandwritingOptions"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="12dp"
+    android:layout_height="match_parent"
     android:visibility="gone"
-    app:cardBackgroundColor="@color/handwriting_toolbar_surface"
-    app:cardCornerRadius="24dp"
-    app:cardElevation="8dp"
-    app:strokeColor="@color/handwriting_toolbar_stroke"
-    app:strokeWidth="1dp"
-    app:cardUseCompatPadding="true">
+    app:cardBackgroundColor="#FFFDF8"
+    app:cardCornerRadius="28dp"
+    app:cardElevation="12dp"
+    app:strokeColor="#1AB88652"
+    app:strokeWidth="1dp">
 
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/scrollPaletteOptions"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:overScrollMode="never">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="44dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="10dp"
+            android:background="#33A18462" />
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/scrollPaletteOptions"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:fillViewport="false"
+            android:overScrollMode="ifContentScrolls"
+            android:paddingBottom="104dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:animateLayoutChanges="true"
+                android:orientation="vertical"
+                android:paddingStart="22dp"
+                android:paddingTop="18dp"
+                android:paddingEnd="22dp"
+                android:paddingBottom="24dp">
+
+                <LinearLayout
+                    android:id="@+id/containerPenOptions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/handwriting_pen_color_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupBrushColors"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:chipSpacingHorizontal="10dp"
+                        app:chipSpacingVertical="10dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+
+                    <TextView
+                        android:id="@+id/textBrushSizeLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="22dp"
+                        android:text="@string/handwriting_brush_size_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+                    <TextView
+                        android:id="@+id/textBrushSizeValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#8A7461"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/sliderBrushSize"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:stepSize="0.25"
+                        android:valueFrom="0.75"
+                        android:valueTo="12"
+                        app:labelBehavior="gone"
+                        app:trackColorActive="#B88652"
+                        app:trackColorInactive="#E6D8C9" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="22dp"
+                        android:text="@string/handwriting_pen_type_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupPenTypes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:chipSpacingHorizontal="10dp"
+                        app:chipSpacingVertical="10dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/containerCanvasOptions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/handwriting_paper_style_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupPaperStyles"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:chipSpacingHorizontal="10dp"
+                        app:chipSpacingVertical="10dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:text="@string/handwriting_paper_color_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupPaperColors"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        app:chipSpacingHorizontal="12dp"
+                        app:chipSpacingVertical="12dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:text="@string/handwriting_canvas_size_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupCanvasSizes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:chipSpacingHorizontal="10dp"
+                        app:chipSpacingVertical="10dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:text="@string/handwriting_canvas_format_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupExportFormats"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:chipSpacingHorizontal="10dp"
+                        app:chipSpacingVertical="10dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/containerEraserOptions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/handwriting_eraser_size_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+                    <TextView
+                        android:id="@+id/textEraserSizeValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#8A7461"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/sliderEraserSize"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        app:labelBehavior="gone"
+                        app:trackColorActive="#B88652"
+                        app:trackColorInactive="#E6D8C9" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="22dp"
+                        android:text="@string/handwriting_eraser_type_label"
+                        android:textColor="#4F3B2F"
+                        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/groupEraserTypes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:chipSpacingHorizontal="10dp"
+                        app:chipSpacingVertical="10dp"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true" />
+                </LinearLayout>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:animateLayoutChanges="true"
-            android:orientation="vertical"
-            android:padding="18dp">
+            android:layout_height="88dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="22dp"
+            android:paddingEnd="22dp"
+            android:paddingBottom="16dp">
 
-        <LinearLayout
-            android:id="@+id/containerPenOptions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonPaletteCancel"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="@android:string/cancel"
+                android:textAllCaps="false"
+                android:textColor="#6B5544"
+                app:cornerRadius="24dp"
+                app:strokeColor="#33B88652" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/handwriting_pen_color_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupBrushColors"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
-
-            <TextView
-                android:id="@+id/textBrushSizeLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/handwriting_brush_size_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <TextView
-                android:id="@+id/textBrushSizeValue"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
-
-            <com.google.android.material.slider.Slider
-                android:id="@+id/sliderBrushSize"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:stepSize="0.25"
-                android:valueFrom="0.75"
-                android:valueTo="12"
-                app:labelBehavior="gone"
-                app:trackColorActive="?attr/colorPrimary"
-                app:trackColorInactive="@android:color/darker_gray" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:text="@string/handwriting_pen_type_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupPenTypes"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonPaletteDone"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1.25"
+                android:text="@string/dialog_done"
+                android:textAllCaps="false"
+                android:textColor="@android:color/white"
+                app:backgroundTint="#B88652"
+                app:cornerRadius="24dp" />
         </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/containerCanvasOptions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/handwriting_paper_style_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupPaperStyles"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:text="@string/handwriting_paper_color_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupPaperColors"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:text="@string/handwriting_canvas_size_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupCanvasSizes"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:text="@string/handwriting_canvas_format_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupExportFormats"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/containerEraserOptions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/handwriting_eraser_size_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <TextView
-                android:id="@+id/textEraserSizeValue"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
-
-            <com.google.android.material.slider.Slider
-                android:id="@+id/sliderEraserSize"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                app:labelBehavior="gone"
-                app:trackColorActive="?attr/colorPrimary"
-                app:trackColorInactive="@android:color/darker_gray" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:text="@string/handwriting_eraser_type_label"
-                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2" />
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/groupEraserTypes"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:chipSpacingHorizontal="8dp"
-                app:chipSpacingVertical="8dp"
-                app:selectionRequired="true"
-                app:singleLine="false"
-                app:singleSelection="true" />
-        </LinearLayout>
-        </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

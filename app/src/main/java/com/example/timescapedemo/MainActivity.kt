@@ -3537,6 +3537,8 @@ class MainActivity : AppCompatActivity() {
         val paperColorGroup = paletteView.findViewById<ChipGroup>(R.id.groupPaperColors)
         val canvasSizeGroup = paletteView.findViewById<ChipGroup>(R.id.groupCanvasSizes)
         val formatGroup = paletteView.findViewById<ChipGroup>(R.id.groupExportFormats)
+        val paletteCancelButton = paletteView.findViewById<MaterialButton>(R.id.buttonPaletteCancel)
+        val paletteDoneButton = paletteView.findViewById<MaterialButton>(R.id.buttonPaletteDone)
 
         val (maxCanvasWidth, maxCanvasHeight) = cardCanvasBounds()
         data class CanvasSizeOption(val key: String, val label: String, val width: Int, val height: Int)
@@ -3766,14 +3768,21 @@ class MainActivity : AppCompatActivity() {
                 isClickable = true
                 isFocusable = true
                 isCheckedIconVisible = true
-                chipMinHeight = 40f * resources.displayMetrics.density
-                chipCornerRadius = 20f * resources.displayMetrics.density
+                chipMinHeight = 44f * resources.displayMetrics.density
+                chipCornerRadius = 22f * resources.displayMetrics.density
+                chipStartPadding = 14f * resources.displayMetrics.density
+                chipEndPadding = 14f * resources.displayMetrics.density
+                textStartPadding = 2f * resources.displayMetrics.density
+                textEndPadding = 2f * resources.displayMetrics.density
                 chipBackgroundColor = ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(Color.parseColor("#21B88652"), Color.TRANSPARENT)
+                    intArrayOf(Color.parseColor("#26B88652"), Color.parseColor("#FFF8F0"))
                 )
-                chipStrokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(Color.parseColor("#B88652"), 0x22))
-                chipStrokeWidth = 1f * resources.displayMetrics.density
+                chipStrokeColor = ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                    intArrayOf(Color.parseColor("#B88652"), Color.parseColor("#2EB88652"))
+                )
+                chipStrokeWidth = 1.25f * resources.displayMetrics.density
                 rippleColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(Color.parseColor("#8A6040"), 0x16))
                 setTextColor(Color.parseColor("#5F4837"))
                 checkedIconTint = ColorStateList.valueOf(Color.parseColor("#8A6040"))
@@ -3792,15 +3801,22 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         Color.BLACK
                     }
+                    minWidth = (44 * density).roundToInt()
+                    chipMinHeight = 44f * density
+                    chipCornerRadius = 22f * density
+                    chipStartPadding = 0f
+                    chipEndPadding = 0f
+                    iconStartPadding = 0f
+                    iconEndPadding = 0f
                     chipBackgroundColor = ColorStateList.valueOf(colorInt)
                     checkedIconTint = ColorStateList.valueOf(onColor)
-                    val uncheckedStroke = ColorUtils.setAlphaComponent(onColor, (0.28f * 255).roundToInt())
-                    val checkedStroke = ColorUtils.setAlphaComponent(onColor, (0.54f * 255).roundToInt())
+                    val uncheckedStroke = ColorUtils.setAlphaComponent(Color.parseColor("#6B5544"), (0.22f * 255).roundToInt())
+                    val checkedStroke = Color.parseColor("#B88652")
                     chipStrokeColor = ColorStateList(
                         arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                         intArrayOf(checkedStroke, uncheckedStroke)
                     )
-                    chipStrokeWidth = (1.5f * density)
+                    chipStrokeWidth = 2f * density
                     rippleColor = ColorStateList.valueOf(
                         ColorUtils.setAlphaComponent(onColor, (0.16f * 255).roundToInt())
                     )
@@ -3907,8 +3923,12 @@ class MainActivity : AppCompatActivity() {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             isOutsideTouchable = true
             isFocusable = true
-            elevation = 6f * density
+            elevation = 14f * density
+            isClippingEnabled = false
         }
+
+        paletteCancelButton.setOnClickListener { palettePopup.dismiss() }
+        paletteDoneButton.setOnClickListener { palettePopup.dismiss() }
 
         fun measurePaletteHeight(width: Int): Int {
             if (width <= 0) return 0
@@ -4098,60 +4118,25 @@ class MainActivity : AppCompatActivity() {
             penOptionsContainer.isVisible = section == HandwritingPaletteSection.PEN
             eraserOptionsContainer.isVisible = section == HandwritingPaletteSection.ERASER
             canvasOptionsContainer.isVisible = section == HandwritingPaletteSection.CANVAS
-            val yOffset = (8 * density).roundToInt()
-            val safeMargin = (12 * density).roundToInt()
+            val sideMargin = (12 * density).roundToInt()
+            val bottomMargin = (10 * density).roundToInt()
             val windowRect = Rect()
             dialogView.getWindowVisibleDisplayFrame(windowRect)
             if (windowRect.width() <= 0 || windowRect.height() <= 0) {
                 val metrics = resources.displayMetrics
                 windowRect.set(0, 0, metrics.widthPixels, metrics.heightPixels)
             }
-            val maxPopupWidth = windowRect.width() - safeMargin * 2
-            val computedWidth = computePaletteWidth()
-            val popupWidth = if (maxPopupWidth > 0) {
-                computedWidth.coerceAtMost(maxPopupWidth)
-            } else {
-                computedWidth
-            }
+            val popupWidth = (windowRect.width() - sideMargin * 2).coerceAtLeast((280 * density).roundToInt())
             if (palettePopup.width != popupWidth) {
                 palettePopup.width = popupWidth
             }
+            val maxPopupHeight = (windowRect.height() * 0.84f).roundToInt()
+            val minPopupHeight = min((360 * density).roundToInt(), maxPopupHeight)
             val desiredHeight = measurePaletteHeight(popupWidth)
-            val maxPopupHeight = windowRect.height() - safeMargin * 2
-            val popupHeight = if (maxPopupHeight > 0) {
-                desiredHeight.coerceAtMost(maxPopupHeight)
-            } else {
-                desiredHeight
-            }
+            val popupHeight = desiredHeight.coerceIn(minPopupHeight, maxPopupHeight)
             palettePopup.height = popupHeight
-            val anchorLocation = IntArray(2)
-            anchor.getLocationOnScreen(anchorLocation)
-            val anchorLeft = anchorLocation[0]
-            val anchorTop = anchorLocation[1]
-            val anchorBottom = anchorTop + anchor.height
-            val anchorCenterX = anchorLeft + anchor.width / 2
-            val horizontalMin = windowRect.left + safeMargin
-            val horizontalMax = windowRect.right - popupWidth - safeMargin
-            val popupX = if (horizontalMin <= horizontalMax) {
-                (anchorCenterX - popupWidth / 2).coerceIn(horizontalMin, horizontalMax)
-            } else {
-                horizontalMin
-            }
-            val availableBelow = windowRect.bottom - anchorBottom - yOffset
-            val availableAbove = anchorTop - windowRect.top - yOffset
-            val shouldShowAbove = popupHeight > availableBelow && availableAbove > availableBelow
-            val verticalMin = windowRect.top + safeMargin
-            val verticalMax = windowRect.bottom - popupHeight - safeMargin
-            val popupY = if (verticalMin <= verticalMax) {
-                val desiredY = if (shouldShowAbove) {
-                    anchorTop - yOffset - popupHeight
-                } else {
-                    anchorBottom + yOffset
-                }
-                desiredY.coerceIn(verticalMin, verticalMax)
-            } else {
-                verticalMin
-            }
+            val popupX = windowRect.left + sideMargin
+            val popupY = windowRect.bottom - popupHeight - bottomMargin
             paletteScroll.scrollTo(0, 0)
             paletteScroll.isVerticalScrollBarEnabled = popupHeight < desiredHeight
             if (!palettePopup.isShowing) {
