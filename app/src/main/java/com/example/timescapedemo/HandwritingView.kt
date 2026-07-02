@@ -891,7 +891,7 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun handlePlacedImageTouch(event: MotionEvent): Boolean {
         val rect = placedImageRect ?: return false
-        val hitRect = RectF(rect).apply { inset(-24f * density, -24f * density) }
+        val hitRect = RectF(rect).apply { inset(-8f * density, -8f * density) }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (!hitRect.contains(event.x, event.y)) {
@@ -903,7 +903,7 @@ class HandwritingView @JvmOverloads constructor(
                 }
                 imagePlacementActive = true
                 disallowParentIntercept(true)
-                val handleRadius = 28f * density
+                val handleRadius = 18f * density
                 imageTouchMode = if (hypot(event.x - rect.right, event.y - rect.bottom) <= handleRadius) 3 else 1
                 imageTouchStartX = event.x
                 imageTouchStartY = event.y
