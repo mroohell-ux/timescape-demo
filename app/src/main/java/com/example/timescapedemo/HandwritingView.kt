@@ -229,10 +229,7 @@ class HandwritingView @JvmOverloads constructor(
         }
         if (drawingTool == TEXT) {
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    commitPlacedImageToCanvas(addToHistory = false)
-                    disallowParentIntercept(true)
-                }
+                MotionEvent.ACTION_DOWN -> disallowParentIntercept(true)
                 MotionEvent.ACTION_UP -> {
                     performClick()
                     setTextInsertionPreview(x, y)
@@ -733,7 +730,6 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchStart(x: Float, y: Float) {
         ensureDrawingSurface()
-        commitPlacedImageToCanvas(addToHistory = false)
         path.reset()
         path.moveTo(x, y)
         currentX = x
