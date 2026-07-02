@@ -71,7 +71,7 @@ class HandwritingView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
         strokeWidth = 16f * density
-        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.28f * 255).roundToInt())
+        color = ColorUtils.setAlphaComponent(Color.BLACK, (0.16f * 255).roundToInt())
     }
     private val bitmapPaint = Paint(Paint.DITHER_FLAG)
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -190,6 +190,7 @@ class HandwritingView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(backgroundColorInt)
+        drawPaperTexture(canvas, width.toFloat(), height.toFloat(), 1f)
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawPath(path, currentPreviewPaint())
@@ -328,6 +329,7 @@ class HandwritingView @JvmOverloads constructor(
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
         val scale = if (width > 0) targetW.toFloat() / width.toFloat() else 1f
+        drawPaperTexture(canvas, targetW.toFloat(), targetH.toFloat(), scale)
         drawPaperGuides(canvas, targetW.toFloat(), targetH.toFloat(), scale)
         val destRect = Rect(0, 0, targetW, targetH)
         canvas.drawBitmap(source, null, destRect, null)
@@ -416,6 +418,7 @@ class HandwritingView @JvmOverloads constructor(
         val canvas = Canvas(result)
         canvas.drawColor(backgroundColorInt)
         val scale = outputWidth.toFloat() / width.toFloat()
+        drawPaperTexture(canvas, outputWidth.toFloat(), outputHeight.toFloat(), scale)
         val viewportHeight = outputHeight / scale
         val top = (markerY - viewportHeight / 2f).coerceIn(0f, (height - viewportHeight).coerceAtLeast(0f))
 
@@ -705,6 +708,25 @@ class HandwritingView @JvmOverloads constructor(
         }
     }
 
+    private fun drawPaperTexture(canvas: Canvas, width: Float, height: Float, scale: Float) {
+        val luminance = ColorUtils.calculateLuminance(backgroundColorInt)
+        val fiberColor = if (luminance < 0.5f) Color.WHITE else Color.parseColor("#7D5C3D")
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(fiberColor, if (luminance < 0.5f) 10 else 12)
+            strokeWidth = max(1f, 0.55f * density * scale)
+        }
+        val step = max(18f * density * scale, 24f * density * scale)
+        var y = step * 0.6f
+        var index = 0
+        while (y < height) {
+            val startX = if (index % 2 == 0) width * 0.08f else width * 0.2f
+            val endX = (startX + width * 0.18f).coerceAtMost(width - 8f * density * scale)
+            canvas.drawLine(startX, y, endX, y + (index % 3 - 1) * density * scale, paint)
+            y += step
+            index++
+        }
+    }
+
     private fun drawPaperGuides(canvas: Canvas, width: Float, height: Float, scale: Float) {
         if (paperStyle == HandwritingPaperStyle.PLAIN) return
         val spacing = 28f * density * scale
@@ -909,10 +931,10 @@ class HandwritingView @JvmOverloads constructor(
     private fun updateGuidePaintColor() {
         val luminance = ColorUtils.calculateLuminance(backgroundColorInt)
         val baseColor = if (luminance < 0.5) Color.WHITE else Color.BLACK
-        val lineColor = ColorUtils.setAlphaComponent(baseColor, (0.28f * 255).roundToInt())
+        val lineColor = ColorUtils.setAlphaComponent(baseColor, (0.16f * 255).roundToInt())
         guidePaint.color = lineColor
         val accent = ColorUtils.blendARGB(backgroundColorInt, Color.parseColor("#2962FF"), 0.55f)
-        marginPaint.color = ColorUtils.setAlphaComponent(accent, (0.65f * 255).roundToInt())
+        marginPaint.color = ColorUtils.setAlphaComponent(accent, (0.36f * 255).roundToInt())
     }
 
     private fun pushCurrentState(hasDrawing: Boolean, hasBase: Boolean) {

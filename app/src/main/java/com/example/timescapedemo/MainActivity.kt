@@ -3493,6 +3493,9 @@ class MainActivity : AppCompatActivity() {
         val handwritingCard = dialogView.findViewById<MaterialCardView>(R.id.cardHandwritingCanvas)
         val undoButton = dialogView.findViewById<MaterialButton>(R.id.buttonUndoHandwriting)
         val clearButton = dialogView.findViewById<MaterialButton>(R.id.buttonClearHandwriting)
+        val cancelButton = dialogView.findViewById<MaterialButton>(R.id.buttonCancelHandwriting)
+        val doneButton = dialogView.findViewById<MaterialButton>(R.id.buttonDoneHandwriting)
+        val deleteButton = dialogView.findViewById<MaterialButton>(R.id.buttonDeleteHandwriting)
         val toolToggleGroup = dialogView.findViewById<MaterialButtonToggleGroup>(R.id.groupPaletteToggles)
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
@@ -3729,6 +3732,17 @@ class MainActivity : AppCompatActivity() {
                 isClickable = true
                 isFocusable = true
                 isCheckedIconVisible = true
+                chipMinHeight = 40f * resources.displayMetrics.density
+                chipCornerRadius = 20f * resources.displayMetrics.density
+                chipBackgroundColor = ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                    intArrayOf(Color.parseColor("#21B88652"), Color.TRANSPARENT)
+                )
+                chipStrokeColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(Color.parseColor("#B88652"), 0x22))
+                chipStrokeWidth = 1f * resources.displayMetrics.density
+                rippleColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(Color.parseColor("#8A6040"), 0x16))
+                setTextColor(Color.parseColor("#5F4837"))
+                checkedIconTint = ColorStateList.valueOf(Color.parseColor("#8A6040"))
                 if (iconRes != null) {
                     setChipIconResource(iconRes)
                     isChipIconVisible = true
@@ -3834,6 +3848,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         val density = resources.displayMetrics.density
+        val toolbarIconColor = Color.parseColor("#8A6040")
+        val toolbarSelectedColor = Color.parseColor("#21B88652")
+        val toolbarDisabledColor = ColorUtils.setAlphaComponent(toolbarIconColor, 0x55)
+
+        fun styleToolbarButton(button: MaterialButton, selected: Boolean = false) {
+            button.isAllCaps = false
+            button.cornerRadius = (20 * density).roundToInt()
+            button.insetTop = 0
+            button.insetBottom = 0
+            button.backgroundTintList = ColorStateList.valueOf(if (selected) toolbarSelectedColor else Color.TRANSPARENT)
+            button.iconTint = ColorStateList.valueOf(if (button.isEnabled) toolbarIconColor else toolbarDisabledColor)
+            button.strokeColor = ColorStateList.valueOf(Color.TRANSPARENT)
+            button.strokeWidth = 0
+            button.rippleColor = ColorStateList.valueOf(ColorUtils.setAlphaComponent(toolbarIconColor, 0x16))
+        }
+
         val palettePopup = PopupWindow(
             paletteView,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -3857,6 +3887,8 @@ class MainActivity : AppCompatActivity() {
         fun updateHistoryButtons() {
             undoButton.isEnabled = handwritingView.canUndo()
             clearButton.isEnabled = handwritingView.hasDrawing()
+            styleToolbarButton(undoButton)
+            styleToolbarButton(clearButton)
         }
 
         applyCanvasCardDisplaySize(selectedSize.width, selectedSize.height)
@@ -3965,9 +3997,10 @@ class MainActivity : AppCompatActivity() {
         var visiblePalette: HandwritingPaletteSection? = null
 
         fun updateToolButtons() {
-            penButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.PEN) 1f else 0.65f
-            eraserButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.ERASER) 1f else 0.65f
-            textButton.alpha = if (selectedDrawingTool == HandwritingDrawingTool.TEXT) 1f else 0.65f
+            styleToolbarButton(penButton, selectedDrawingTool == HandwritingDrawingTool.PEN)
+            styleToolbarButton(eraserButton, selectedDrawingTool == HandwritingDrawingTool.ERASER)
+            styleToolbarButton(textButton, selectedDrawingTool == HandwritingDrawingTool.TEXT)
+            styleToolbarButton(canvasButton, visiblePalette == HandwritingPaletteSection.CANVAS)
             val checkedId = when (visiblePalette) {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
@@ -4604,21 +4637,23 @@ class MainActivity : AppCompatActivity() {
 
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
-            .setPositiveButton(R.string.dialog_save, null)
-            .setNegativeButton(android.R.string.cancel, null)
-            .apply {
-                if (onDelete != null) {
-                    setNeutralButton(R.string.dialog_delete, null)
-                }
-            }
             .create()
 
         dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             dialog.window?.setLayout(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            cancelButton.setOnClickListener { dialog.dismiss() }
+            deleteButton.isVisible = onDelete != null
+            onDelete?.let { deleteCallback ->
+                deleteButton.setOnClickListener {
+                    deleteCallback()
+                    dialog.dismiss()
+                }
+            }
+            doneButton.setOnClickListener {
                 val exportBitmap = handwritingView.exportBitmap()
                 if (exportBitmap == null) {
                     snackbar(getString(R.string.snackbar_handwriting_save_failed))
@@ -4652,12 +4687,6 @@ class MainActivity : AppCompatActivity() {
                 persistHandwritingDefaults(options, selectedPalette, selectedDrawingTool)
                 onSave(saved)
                 dialog.dismiss()
-            }
-            onDelete?.let { deleteCallback ->
-                dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
-                    deleteCallback()
-                    dialog.dismiss()
-                }
             }
         }
 
@@ -8194,9 +8223,9 @@ private const val MIN_HANDWRITING_ERASER_SIZE_DP = 4f
 private const val MAX_HANDWRITING_ERASER_SIZE_DP = 48f
 private const val DEFAULT_HANDWRITING_ERASER_SIZE_DP = 16f
 private const val DEFAULT_CANVAS_RATIO = 0.75f
-private const val DEFAULT_HANDWRITING_BACKGROUND = -0x1
+private const val DEFAULT_HANDWRITING_BACKGROUND = -0x918
 private const val DEFAULT_HANDWRITING_BRUSH = -0x1000000
-private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.PLAIN
+private val DEFAULT_HANDWRITING_PAPER_STYLE = HandwritingPaperStyle.RULED
 private val DEFAULT_HANDWRITING_PEN_TYPE = HandwritingPenType.ROUND
 private val DEFAULT_HANDWRITING_ERASER_TYPE = HandwritingEraserType.ROUND
 private const val EXPORT_FILE_DATE_PATTERN = "yyyyMMdd_HHmmss"

@@ -21,6 +21,7 @@ object HandwritingPaperRenderer {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(options.backgroundColor)
+        drawPaperTexture(canvas, width.toFloat(), height.toFloat(), options.backgroundColor, density * computeScale(options, width, height))
         if (options.paperStyle == HandwritingPaperStyle.PLAIN) {
             return bitmap
         }
@@ -128,16 +129,35 @@ object HandwritingPaperRenderer {
         canvas.drawLine(0f, summaryY, width, summaryY, marginPaint)
     }
 
+    private fun drawPaperTexture(canvas: Canvas, width: Float, height: Float, @ColorInt backgroundColor: Int, scale: Float) {
+        val luminance = ColorUtils.calculateLuminance(backgroundColor)
+        val fiberColor = if (luminance < 0.5f) Color.WHITE else Color.parseColor("#7D5C3D")
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(fiberColor, if (luminance < 0.5f) 10 else 12)
+            strokeWidth = max(1f, 0.55f * scale)
+        }
+        val step = max(18f, 24f * scale)
+        var y = step * 0.6f
+        var index = 0
+        while (y < height) {
+            val startX = if (index % 2 == 0) width * 0.08f else width * 0.2f
+            val endX = (startX + width * 0.18f).coerceAtMost(width - 8f)
+            canvas.drawLine(startX, y, endX, y + (index % 3 - 1) * scale, paint)
+            y += step
+            index++
+        }
+    }
+
     @ColorInt
     private fun guideColor(@ColorInt backgroundColor: Int): Int {
         val luminance = ColorUtils.calculateLuminance(backgroundColor)
         val base = if (luminance < 0.5f) Color.WHITE else Color.BLACK
-        return ColorUtils.setAlphaComponent(base, (0.28f * 255).roundToInt())
+        return ColorUtils.setAlphaComponent(base, (0.16f * 255).roundToInt())
     }
 
     @ColorInt
     private fun marginColor(@ColorInt backgroundColor: Int): Int {
         val accent = ColorUtils.blendARGB(backgroundColor, Color.parseColor("#2962FF"), 0.55f)
-        return ColorUtils.setAlphaComponent(accent, (0.65f * 255).roundToInt())
+        return ColorUtils.setAlphaComponent(accent, (0.36f * 255).roundToInt())
     }
 }
