@@ -5372,10 +5372,10 @@ class MainActivity : AppCompatActivity() {
     private fun cardCanvasBounds(): Pair<Int, Int> {
         val metrics = resources.displayMetrics
         val density = metrics.density
-        val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
+        val horizontalInsetPx = (12 * density).roundToInt()
+        val minSidePx = (360 * density).roundToInt()
         val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx).coerceAtLeast(1)
-        val maxHeight = (metrics.heightPixels * 2f / 3f).roundToInt().coerceAtLeast(1)
+        val maxHeight = (metrics.heightPixels * 0.84f).roundToInt().coerceAtLeast(1)
         return availableWidth to maxHeight
     }
 
