@@ -3518,6 +3518,7 @@ class MainActivity : AppCompatActivity() {
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
         val textButton = dialogView.findViewById<MaterialButton>(R.id.buttonTextInsert)
+        val lassoButton = dialogView.findViewById<MaterialButton>(R.id.buttonLassoSelect)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         canvasButton.isGone = extras.disableCanvasPalette
         val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
@@ -3943,7 +3944,9 @@ class MainActivity : AppCompatActivity() {
             if (handwritingView.undo()) updateHistoryButtons()
         }
         clearButton.setOnClickListener {
-            handwritingView.clear()
+            if (!handwritingView.deleteLassoSelection()) {
+                handwritingView.clear()
+            }
             updateHistoryButtons()
         }
         insertPictureButton.setOnClickListener {
@@ -4042,13 +4045,18 @@ class MainActivity : AppCompatActivity() {
             styleToolbarButton(penButton, selectedDrawingTool == HandwritingDrawingTool.PEN)
             styleToolbarButton(eraserButton, selectedDrawingTool == HandwritingDrawingTool.ERASER)
             styleToolbarButton(textButton, selectedDrawingTool == HandwritingDrawingTool.TEXT)
+            styleToolbarButton(lassoButton, selectedDrawingTool == HandwritingDrawingTool.LASSO)
             styleToolbarButton(canvasButton, visiblePalette == HandwritingPaletteSection.CANVAS)
             styleToolbarButton(insertPictureButton, handwritingView.isImagePlacementActive())
             val checkedId = when (visiblePalette) {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
                 HandwritingPaletteSection.CANVAS -> if (extras.disableCanvasPalette) View.NO_ID else canvasButton.id
-                else -> if (selectedDrawingTool == HandwritingDrawingTool.TEXT) textButton.id else View.NO_ID
+                else -> when (selectedDrawingTool) {
+                    HandwritingDrawingTool.TEXT -> textButton.id
+                    HandwritingDrawingTool.LASSO -> lassoButton.id
+                    else -> View.NO_ID
+                }
             }
             if (checkedId == View.NO_ID) {
                 toolToggleGroup.clearChecked()
@@ -4665,6 +4673,11 @@ class MainActivity : AppCompatActivity() {
         textButton.setOnClickListener {
             hidePalette()
             setDrawingTool(HandwritingDrawingTool.TEXT)
+        }
+
+        lassoButton.setOnClickListener {
+            hidePalette()
+            setDrawingTool(HandwritingDrawingTool.LASSO)
         }
 
         if (!extras.disableCanvasPalette) {
