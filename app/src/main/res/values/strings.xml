@@ -251,7 +251,7 @@
     <string name="card_title_speak_content_desc">Speak "%1$s"</string>
     <string name="handwriting_tool_pen">Pen options</string>
     <string name="handwriting_tool_eraser">Eraser options</string>
-    <string name="handwriting_tool_text">Insert handwritten text</string>
+    <string name="handwriting_tool_text">Text and paste tool</string>
     <string name="handwriting_tool_canvas">Canvas options</string>
     <string name="handwriting_tool_lasso">Lasso select handwriting</string>
     <string name="handwriting_text_insert_size_label">Insert size</string>
