@@ -4510,12 +4510,7 @@ class MainActivity : AppCompatActivity() {
             }
             val footerActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(cancelTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                    marginEnd = (8 * density).roundToInt()
-                })
-                addView(saveTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                    marginStart = (8 * density).roundToInt()
-                })
+                addView(cancelTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight))
             }
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -4528,13 +4523,6 @@ class MainActivity : AppCompatActivity() {
                 )
                 addView(header)
                 addView(insertionPointLabel)
-                addView(previewLabel)
-                addView(insertionPreview)
-                addView(flowHint)
-                addView(keyboardHint)
-                addView(writeHeader)
-                addView(editorFrame)
-                addView(autoCommitStatus)
                 addView(sizeHeader)
                 addView(insertSizeSlider)
                 addView(sectionLabel(getString(R.string.handwriting_text_paste_label)))
