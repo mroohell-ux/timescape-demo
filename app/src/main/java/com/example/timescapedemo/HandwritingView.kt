@@ -732,10 +732,14 @@ class HandwritingView @JvmOverloads constructor(
             layout.draw(this)
         }
         selectedBitmap?.recycle()
-        selectedBitmap = bitmap
+        selectedBitmap = null
+        selectedRect = null
+        placedImageBitmap?.recycle()
+        placedImageBitmap = bitmap
         val left = x.coerceIn(0f, width.toFloat())
         val top = y.coerceIn(0f, height.toFloat())
-        selectedRect = RectF(left, top, left + bitmap.width, top + bitmap.height).also(::clampPlacedImageRect)
+        placedImageRect = RectF(left, top, left + bitmap.width, top + bitmap.height).also(::clampPlacedImageRect)
+        imagePlacementActive = true
         hasContent = true
         invalidate()
         notifyContentChanged()
