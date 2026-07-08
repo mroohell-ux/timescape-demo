@@ -16,6 +16,9 @@ import android.graphics.ComposePathEffect
 import android.graphics.DiscretePathEffect
 import android.graphics.Matrix
 import android.graphics.PathDashPathEffect
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -689,6 +692,54 @@ class HandwritingView @JvmOverloads constructor(
         drawingTool = tool
         imagePlacementActive = false
         invalidate()
+    }
+
+
+    fun placeTextBlock(
+        text: String,
+        x: Float,
+        y: Float,
+        @ColorInt color: Int = brushColorInt,
+        textSizePx: Float = 28f * density
+    ): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        commitSelection()
+        commitCurrentPath()
+        val maxWidth = ((width.takeIf { it > 0 } ?: exportWidth.takeIf { it > 0 } ?: 320) * 0.72f)
+            .roundToInt()
+            .coerceAtLeast((120f * density).roundToInt())
+        val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            this.textSize = textSizePx.coerceAtLeast(8f * density)
+            typeface = android.graphics.Typeface.DEFAULT
+        }
+        val layout = StaticLayout.Builder.obtain(trimmed, 0, trimmed.length, textPaint, maxWidth)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1.05f)
+            .setIncludePad(true)
+            .build()
+        val horizontalPadding = (12f * density).roundToInt()
+        val verticalPadding = (8f * density).roundToInt()
+        val bitmap = Bitmap.createBitmap(
+            (layout.width + horizontalPadding * 2).coerceAtLeast(1),
+            (layout.height + verticalPadding * 2).coerceAtLeast(1),
+            Config.ARGB_8888
+        )
+        Canvas(bitmap).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            translate(horizontalPadding.toFloat(), verticalPadding.toFloat())
+            layout.draw(this)
+        }
+        selectedBitmap?.recycle()
+        selectedBitmap = bitmap
+        val left = x.coerceIn(0f, width.toFloat())
+        val top = y.coerceIn(0f, height.toFloat())
+        selectedRect = RectF(left, top, left + bitmap.width, top + bitmap.height).also(::clampPlacedImageRect)
+        hasContent = true
+        invalidate()
+        notifyContentChanged()
+        return true
     }
 
     fun hasActiveLassoSelection(): Boolean = selectedBitmap != null

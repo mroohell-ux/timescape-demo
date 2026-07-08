@@ -13,6 +13,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.Context
 
@@ -4476,6 +4477,37 @@ class MainActivity : AppCompatActivity() {
                 backgroundTintList = ColorStateList.valueOf(accentColor)
                 cornerRadius = (16 * density).roundToInt()
             }
+            val clipboardText = (getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
+                ?.primaryClip
+                ?.takeIf { clip -> clip.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(this)
+                ?.toString()
+                .orEmpty()
+            val pasteTextInput = EditText(this).apply {
+                setText(clipboardText)
+                hint = getString(R.string.handwriting_text_paste_hint)
+                minLines = 2
+                maxLines = 4
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                setTextColor(textPrimaryColor)
+                setHintTextColor(textSecondaryColor)
+                background = roundedDrawable(Color.WHITE, borderColor, 1f, 14f)
+                setPadding(
+                    (14 * density).roundToInt(),
+                    (10 * density).roundToInt(),
+                    (14 * density).roundToInt(),
+                    (10 * density).roundToInt()
+                )
+            }
+            val pasteTextButton = MaterialButton(this).apply {
+                text = getString(R.string.handwriting_text_paste_action)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                backgroundTintList = ColorStateList.valueOf(accentColor)
+                cornerRadius = (16 * density).roundToInt()
+            }
             val footerActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(cancelTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
@@ -4505,6 +4537,13 @@ class MainActivity : AppCompatActivity() {
                 addView(autoCommitStatus)
                 addView(sizeHeader)
                 addView(insertSizeSlider)
+                addView(sectionLabel(getString(R.string.handwriting_text_paste_label)))
+                addView(pasteTextInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = (8 * density).roundToInt()
+                })
+                addView(pasteTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
+                    bottomMargin = (12 * density).roundToInt()
+                })
                 addView(footerActions)
             }
             var commitRunnable: Runnable? = null
@@ -4594,6 +4633,20 @@ class MainActivity : AppCompatActivity() {
                         updateBufferPreview()
                         closeButton.setOnClickListener { dismiss() }
                         cancelTextButton.setOnClickListener { dismiss() }
+                        pasteTextButton.setOnClickListener {
+                            val typedText = pasteTextInput.text?.toString().orEmpty()
+                            if (handwritingView.placeTextBlock(
+                                    text = typedText,
+                                    x = targetX,
+                                    y = targetY,
+                                    color = selectedBrushColor.color,
+                                    textSizePx = insertSizeSlider.value.coerceAtLeast(8f)
+                                )
+                            ) {
+                                updateHistoryButtons()
+                                dismiss()
+                            }
+                        }
                         saveTextButton.setOnClickListener {
                             cancelAutoCommit()
                             commitKeyboardStrokes(addTrailingSpace = false)
