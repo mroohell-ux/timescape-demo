@@ -1857,7 +1857,15 @@ class MainActivity : AppCompatActivity() {
             flow.lastViewedCardFocused = previousViewedFocused && flow.lastViewedCardId != card.id
         }
         refreshFlow(flow, scrollToTop = false)
-        saveState()
+        if (controller != null) {
+            // Wait for the submitted move to commit and restore the next-card state before
+            // saveState() captures visible flow state from the RecyclerView.
+            controller.recycler.post {
+                controller.recycler.post { saveState() }
+            }
+        } else {
+            saveState()
+        }
     }
 
     private fun toggleShuffleCards() {
