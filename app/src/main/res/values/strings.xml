@@ -276,6 +276,8 @@
     <string name="handwriting_eraser_type_round">Round</string>
     <string name="handwriting_eraser_type_block">Block</string>
     <string name="card_sticky_notes_content_desc">Open sticky notes</string>
+    <string name="card_collection_move_front_content_desc">Collect card and move it to the front</string>
+    <string name="card_collection_restore_content_desc">Uncollect card and restore original position</string>
     <string name="dialog_sticky_notes_title">Card sticky notes</string>
     <string name="dialog_sticky_add">Add</string>
     <string name="dialog_sticky_auto_generate">Auto generate</string>

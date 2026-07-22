@@ -89,6 +89,7 @@ import androidx.core.view.updatePadding
 import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
@@ -129,6 +130,7 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1812,6 +1814,186 @@ class MainActivity : AppCompatActivity() {
         refreshFlow(targetFlow, scrollToTop = true)
         saveState()
         snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
+    }
+
+    private fun animateCollectionThrow(cardView: View, movingUp: Boolean) {
+        if (cardView.width <= 0 || cardView.height <= 0) return
+        val root = window.decorView as? ViewGroup ?: return
+        val startLocation = IntArray(2)
+        val rootLocation = IntArray(2)
+        cardView.getLocationOnScreen(startLocation)
+        root.getLocationOnScreen(rootLocation)
+        val snapshot = Bitmap.createBitmap(cardView.width, cardView.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(snapshot)
+        cardView.draw(canvas)
+        val startX = (startLocation[0] - rootLocation[0]).toFloat()
+        val startY = (startLocation[1] - rootLocation[1]).toFloat()
+        val density = resources.displayMetrics.density
+        val cameraDistance = density * CARD_COLLECTION_THROW_CAMERA_DISTANCE
+        val baseElevation = cardView.elevation + CARD_COLLECTION_THROW_ELEVATION
+        val verticalDirection = if (movingUp) -1f else 1f
+        val horizontalDirection = if (movingUp) -1f else 1f
+        val liftY = -verticalDirection * CARD_COLLECTION_THROW_LIFT_PX * density
+        val travelY = max(cardView.height * CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER, root.height * 0.48f) * verticalDirection
+        val travelX = cardView.width * CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION * horizontalDirection
+        val curveX = cardView.width * CARD_COLLECTION_THROW_CURVE_FRACTION * horizontalDirection
+        val flipX = CARD_COLLECTION_THROW_FLIP_X_DEG * verticalDirection
+        val twist = CARD_COLLECTION_THROW_ROTATION_DEG * horizontalDirection
+
+        fun buildThrowLayer(alphaMultiplier: Float, extraScale: Float): ImageView = ImageView(this).apply {
+            setImageBitmap(snapshot)
+            scaleType = ImageView.ScaleType.FIT_XY
+            pivotX = cardView.width * 0.5f
+            pivotY = cardView.height * 0.5f
+            this.cameraDistance = cameraDistance
+            elevation = baseElevation
+            alpha = alphaMultiplier
+            x = startX
+            y = startY
+            scaleX = extraScale
+            scaleY = extraScale
+            layoutParams = ViewGroup.LayoutParams(cardView.width, cardView.height)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRenderEffect(
+                    RenderEffect.createBlurEffect(
+                        CARD_COLLECTION_THROW_BLUR_RADIUS_PX,
+                        CARD_COLLECTION_THROW_BLUR_RADIUS_PX,
+                        Shader.TileMode.CLAMP
+                    )
+                )
+            }
+        }
+
+        val blurView = buildThrowLayer(CARD_COLLECTION_THROW_BLUR_ALPHA, CARD_COLLECTION_THROW_BLUR_SCALE)
+        val throwView = buildThrowLayer(1f, 1f)
+        root.addView(blurView)
+        root.addView(throwView)
+
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = CARD_COLLECTION_THROW_ANIMATION_MS
+            addUpdateListener { animation ->
+                val progress = animation.animatedValue as Float
+                val liftProgress = (progress / CARD_COLLECTION_THROW_LIFT_PORTION).coerceIn(0f, 1f)
+                val flightProgress = ((progress - CARD_COLLECTION_THROW_LIFT_PORTION) / (1f - CARD_COLLECTION_THROW_LIFT_PORTION))
+                    .coerceIn(0f, 1f)
+                val lifted = smoothStep(liftProgress)
+                val flight = flightProgress * flightProgress
+                val arc = sin(flightProgress * Math.PI).toFloat()
+                val fade = ((flightProgress - CARD_COLLECTION_THROW_FADE_START) / (1f - CARD_COLLECTION_THROW_FADE_START))
+                    .coerceIn(0f, 1f)
+                val x = startX + (travelX * flight) + (curveX * arc)
+                val y = startY + (liftY * lifted) + (travelY * flight)
+                val scale = 1f + ((CARD_COLLECTION_THROW_POP_SCALE - 1f) * lifted) - ((1f - CARD_COLLECTION_THROW_SCALE) * flight)
+                val rotationX = flipX * flight
+                val rotationY = CARD_COLLECTION_THROW_FLIP_Y_DEG * horizontalDirection * arc
+                val rotationZ = twist * flight
+                val alpha = 1f - fade
+                val depth = CARD_COLLECTION_THROW_ELEVATION * (1f - flightProgress) + CARD_COLLECTION_THROW_DEPTH_Z * arc
+
+                applyThrowFrame(throwView, x, y, scale, rotationX, rotationY, rotationZ, alpha, depth)
+                applyThrowFrame(
+                    blurView,
+                    x - (travelX * CARD_COLLECTION_THROW_BLUR_LAG_FRACTION),
+                    y - (travelY * CARD_COLLECTION_THROW_BLUR_LAG_FRACTION),
+                    scale * CARD_COLLECTION_THROW_BLUR_SCALE,
+                    rotationX * CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION,
+                    rotationY * CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION,
+                    rotationZ * CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION,
+                    alpha * CARD_COLLECTION_THROW_BLUR_ALPHA * flightProgress,
+                    depth - CARD_COLLECTION_THROW_BLUR_DEPTH_OFFSET
+                )
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cleanedUp = false
+
+                override fun onAnimationEnd(animation: Animator) {
+                    cleanup()
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    cleanup()
+                }
+
+                private fun cleanup() {
+                    if (cleanedUp) return
+                    cleanedUp = true
+                    root.removeView(throwView)
+                    root.removeView(blurView)
+                    snapshot.recycle()
+                }
+            })
+        }
+        animator.start()
+    }
+
+    private fun applyThrowFrame(
+        view: View,
+        x: Float,
+        y: Float,
+        scale: Float,
+        rotationX: Float,
+        rotationY: Float,
+        rotationZ: Float,
+        alpha: Float,
+        translationZ: Float
+    ) {
+        view.x = x
+        view.y = y
+        view.scaleX = scale
+        view.scaleY = scale
+        view.rotationX = rotationX
+        view.rotationY = rotationY
+        view.rotation = rotationZ
+        view.alpha = alpha.coerceIn(0f, 1f)
+        view.translationZ = translationZ
+    }
+
+    private fun smoothStep(value: Float): Float {
+        val t = value.coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+
+    private fun toggleCardCollection(flow: CardFlow, cardId: Long) {
+        val currentIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (currentIndex == -1) return
+        val controller = flowControllers[flow.id]
+        controller?.captureState(flow)
+        val card = flow.cards[currentIndex]
+        val wasCollected = card.isCollected
+        val nextCardId = flow.cards.getOrNull(currentIndex + 1)?.id
+            ?: flow.cards.getOrNull(currentIndex - 1)?.id
+
+        flow.cards.removeAt(currentIndex)
+        if (wasCollected) {
+            val targetIndex = card.collectionOriginalIndex
+                ?.coerceIn(0, flow.cards.size)
+                ?: currentIndex.coerceIn(0, flow.cards.size)
+            card.isCollected = false
+            card.collectionOriginalIndex = null
+            flow.cards.add(targetIndex, card)
+        } else {
+            card.isCollected = true
+            card.collectionOriginalIndex = currentIndex
+            flow.cards.add(0, card)
+        }
+
+        val nextIndex = nextCardId
+            ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+            ?: flow.cards.indexOfFirst { it.id == card.id }.takeIf { it >= 0 }
+            ?: 0
+        flow.lastViewedCardIndex = nextIndex
+        flow.lastViewedCardId = flow.cards.getOrNull(nextIndex)?.id
+        flow.lastViewedCardFocused = true
+        refreshFlow(flow, scrollToTop = false)
+        if (controller != null) {
+            // Wait for the submitted move to commit and restore the next-card state before
+            // saveState() captures visible flow state from the RecyclerView.
+            controller.recycler.post {
+                controller.recycler.post { saveState() }
+            }
+        } else {
+            saveState()
+        }
     }
 
     private fun toggleShuffleCards() {
@@ -7135,7 +7317,9 @@ class MainActivity : AppCompatActivity() {
                                     parseHandwritingSide(it, baseHandwritingOptions)
                                 },
                                 stickyNotes = stickyNotes,
-                                video = parseVideoCardData(cardObj.optJSONObject("video"))
+                                video = parseVideoCardData(cardObj.optJSONObject("video")),
+                                isCollected = cardObj.optBoolean("isCollected", false),
+                                collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 }
                             )
                         }
                     }
@@ -7278,6 +7462,8 @@ class MainActivity : AppCompatActivity() {
                 card.recognizedText?.let { obj.put("recognizedText", it) }
                 obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
+                obj.put("isCollected", card.isCollected)
+                card.collectionOriginalIndex?.let { obj.put("collectionOriginalIndex", it) }
                 card.handwriting?.let { content ->
                     val handwritingObj = JSONObject().apply {
                         put("path", content.path)
@@ -7721,6 +7907,12 @@ class MainActivity : AppCompatActivity() {
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
+            recycler.itemAnimator = DefaultItemAnimator().apply {
+                moveDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+                addDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+                removeDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+                changeDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+            }
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
             lateinit var holder: FlowVH
@@ -7731,6 +7923,7 @@ class MainActivity : AppCompatActivity() {
                         holder.onCardDoubleTapped(card, index) },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
+                    onCollectionClick = { card, cardView -> holder.onCollectionTapped(card, cardView) },
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
                     onVideoProgressChanged = { cardId, progressMs, durationMs ->
                         updateVideoWatchProgress(cardId, progressMs, durationMs)
@@ -7829,6 +8022,12 @@ class MainActivity : AppCompatActivity() {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
                 val target = flow.cards.firstOrNull { it.id == card.id } ?: return
                 showStickyNotesDialog(flow, target)
+            }
+
+            fun onCollectionTapped(card: CardItem, cardView: View) {
+                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                animateCollectionThrow(cardView, movingUp = !card.isCollected)
+                toggleCardCollection(flow, card.id)
             }
 
             fun onCardLongPressed(index: Int, cardView: View): Boolean {
@@ -8273,6 +8472,28 @@ private const val FLOW_REORDER_DRAG_LABEL = "flow_reorder_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
+private const val CARD_COLLECTION_MOVE_ANIMATION_MS = 450L
+private const val CARD_COLLECTION_THROW_ANIMATION_MS = 760L
+private const val CARD_COLLECTION_THROW_LIFT_PORTION = 0.18f
+private const val CARD_COLLECTION_THROW_FADE_START = 0.62f
+private const val CARD_COLLECTION_THROW_LIFT_PX = 18f
+private const val CARD_COLLECTION_THROW_ELEVATION = 36f
+private const val CARD_COLLECTION_THROW_DEPTH_Z = 72f
+private const val CARD_COLLECTION_THROW_CAMERA_DISTANCE = 8_000f
+private const val CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER = 1.8f
+private const val CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION = 0.34f
+private const val CARD_COLLECTION_THROW_CURVE_FRACTION = 0.18f
+private const val CARD_COLLECTION_THROW_ROTATION_DEG = 42f
+private const val CARD_COLLECTION_THROW_FLIP_X_DEG = 168f
+private const val CARD_COLLECTION_THROW_FLIP_Y_DEG = 42f
+private const val CARD_COLLECTION_THROW_POP_SCALE = 1.08f
+private const val CARD_COLLECTION_THROW_SCALE = 0.7f
+private const val CARD_COLLECTION_THROW_BLUR_ALPHA = 0.36f
+private const val CARD_COLLECTION_THROW_BLUR_SCALE = 1.06f
+private const val CARD_COLLECTION_THROW_BLUR_RADIUS_PX = 10f
+private const val CARD_COLLECTION_THROW_BLUR_LAG_FRACTION = 0.075f
+private const val CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION = 0.82f
+private const val CARD_COLLECTION_THROW_BLUR_DEPTH_OFFSET = 12f
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
 private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
