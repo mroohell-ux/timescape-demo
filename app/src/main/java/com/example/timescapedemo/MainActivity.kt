@@ -50,7 +50,6 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -131,6 +130,7 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1826,39 +1826,83 @@ class MainActivity : AppCompatActivity() {
         val snapshot = Bitmap.createBitmap(cardView.width, cardView.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(snapshot)
         cardView.draw(canvas)
-        val throwView = ImageView(this).apply {
+        val startX = (startLocation[0] - rootLocation[0]).toFloat()
+        val startY = (startLocation[1] - rootLocation[1]).toFloat()
+        val density = resources.displayMetrics.density
+        val cameraDistance = density * CARD_COLLECTION_THROW_CAMERA_DISTANCE
+        val baseElevation = cardView.elevation + CARD_COLLECTION_THROW_ELEVATION
+        val verticalDirection = if (movingUp) -1f else 1f
+        val horizontalDirection = if (movingUp) -1f else 1f
+        val liftY = -verticalDirection * CARD_COLLECTION_THROW_LIFT_PX * density
+        val travelY = max(cardView.height * CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER, root.height * 0.48f) * verticalDirection
+        val travelX = cardView.width * CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION * horizontalDirection
+        val curveX = cardView.width * CARD_COLLECTION_THROW_CURVE_FRACTION * horizontalDirection
+        val flipX = CARD_COLLECTION_THROW_FLIP_X_DEG * verticalDirection
+        val twist = CARD_COLLECTION_THROW_ROTATION_DEG * horizontalDirection
+
+        fun buildThrowLayer(alphaMultiplier: Float, extraScale: Float): ImageView = ImageView(this).apply {
             setImageBitmap(snapshot)
             scaleType = ImageView.ScaleType.FIT_XY
             pivotX = cardView.width * 0.5f
-            pivotY = cardView.height * 0.52f
-            cameraDistance = resources.displayMetrics.density * CARD_COLLECTION_THROW_CAMERA_DISTANCE
-            elevation = cardView.elevation + CARD_COLLECTION_THROW_ELEVATION
-            x = (startLocation[0] - rootLocation[0]).toFloat()
-            y = (startLocation[1] - rootLocation[1]).toFloat()
+            pivotY = cardView.height * 0.5f
+            this.cameraDistance = cameraDistance
+            elevation = baseElevation
+            alpha = alphaMultiplier
+            x = startX
+            y = startY
+            scaleX = extraScale
+            scaleY = extraScale
             layoutParams = ViewGroup.LayoutParams(cardView.width, cardView.height)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRenderEffect(
+                    RenderEffect.createBlurEffect(
+                        CARD_COLLECTION_THROW_BLUR_RADIUS_PX,
+                        CARD_COLLECTION_THROW_BLUR_RADIUS_PX,
+                        Shader.TileMode.CLAMP
+                    )
+                )
+            }
         }
+
+        val blurView = buildThrowLayer(CARD_COLLECTION_THROW_BLUR_ALPHA, CARD_COLLECTION_THROW_BLUR_SCALE)
+        val throwView = buildThrowLayer(1f, 1f)
+        root.addView(blurView)
         root.addView(throwView)
-        val verticalDirection = if (movingUp) -1f else 1f
-        val horizontalDirection = if (movingUp) -1f else 1f
-        val travelY = max(cardView.height * CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER, root.height * 0.38f) * verticalDirection
-        val travelX = cardView.width * CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION * horizontalDirection
-        val flipX = CARD_COLLECTION_THROW_FLIP_X_DEG * verticalDirection
-        val flipY = CARD_COLLECTION_THROW_FLIP_Y_DEG * horizontalDirection
-        val twist = CARD_COLLECTION_THROW_ROTATION_DEG * horizontalDirection
-        AnimatorSet().apply {
-            playTogether(
-                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_Y, 0f, travelY * 0.18f, travelY * 0.62f, travelY),
-                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_X, 0f, travelX * 0.18f, travelX * 0.72f, travelX),
-                ObjectAnimator.ofFloat(throwView, View.ROTATION_X, 0f, flipX * 0.28f, flipX * 0.72f, flipX),
-                ObjectAnimator.ofFloat(throwView, View.ROTATION_Y, 0f, -flipY * 0.18f, flipY * 0.42f, flipY),
-                ObjectAnimator.ofFloat(throwView, View.ROTATION, 0f, twist * 0.18f, twist * 0.78f, twist),
-                ObjectAnimator.ofFloat(throwView, View.SCALE_X, 1f, CARD_COLLECTION_THROW_POP_SCALE, CARD_COLLECTION_THROW_SCALE),
-                ObjectAnimator.ofFloat(throwView, View.SCALE_Y, 1f, CARD_COLLECTION_THROW_POP_SCALE, CARD_COLLECTION_THROW_SCALE),
-                ObjectAnimator.ofFloat(throwView, View.ALPHA, 1f, 1f, 0.72f, 0f),
-                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_Z, 0f, CARD_COLLECTION_THROW_ELEVATION, 0f)
-            )
+
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = CARD_COLLECTION_THROW_ANIMATION_MS
-            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { animation ->
+                val progress = animation.animatedValue as Float
+                val liftProgress = (progress / CARD_COLLECTION_THROW_LIFT_PORTION).coerceIn(0f, 1f)
+                val flightProgress = ((progress - CARD_COLLECTION_THROW_LIFT_PORTION) / (1f - CARD_COLLECTION_THROW_LIFT_PORTION))
+                    .coerceIn(0f, 1f)
+                val lifted = smoothStep(liftProgress)
+                val flight = flightProgress * flightProgress
+                val arc = sin(flightProgress * Math.PI).toFloat()
+                val fade = ((flightProgress - CARD_COLLECTION_THROW_FADE_START) / (1f - CARD_COLLECTION_THROW_FADE_START))
+                    .coerceIn(0f, 1f)
+                val x = startX + (travelX * flight) + (curveX * arc)
+                val y = startY + (liftY * lifted) + (travelY * flight)
+                val scale = 1f + ((CARD_COLLECTION_THROW_POP_SCALE - 1f) * lifted) - ((1f - CARD_COLLECTION_THROW_SCALE) * flight)
+                val rotationX = flipX * flight
+                val rotationY = CARD_COLLECTION_THROW_FLIP_Y_DEG * horizontalDirection * arc
+                val rotationZ = twist * flight
+                val alpha = 1f - fade
+                val depth = CARD_COLLECTION_THROW_ELEVATION * (1f - flightProgress) + CARD_COLLECTION_THROW_DEPTH_Z * arc
+
+                applyThrowFrame(throwView, x, y, scale, rotationX, rotationY, rotationZ, alpha, depth)
+                applyThrowFrame(
+                    blurView,
+                    x - (travelX * CARD_COLLECTION_THROW_BLUR_LAG_FRACTION),
+                    y - (travelY * CARD_COLLECTION_THROW_BLUR_LAG_FRACTION),
+                    scale * CARD_COLLECTION_THROW_BLUR_SCALE,
+                    rotationX * CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION,
+                    rotationY * CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION,
+                    rotationZ * CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION,
+                    alpha * CARD_COLLECTION_THROW_BLUR_ALPHA * flightProgress,
+                    depth - CARD_COLLECTION_THROW_BLUR_DEPTH_OFFSET
+                )
+            }
             addListener(object : AnimatorListenerAdapter() {
                 private var cleanedUp = false
 
@@ -1874,11 +1918,39 @@ class MainActivity : AppCompatActivity() {
                     if (cleanedUp) return
                     cleanedUp = true
                     root.removeView(throwView)
+                    root.removeView(blurView)
                     snapshot.recycle()
                 }
             })
-            start()
         }
+        animator.start()
+    }
+
+    private fun applyThrowFrame(
+        view: View,
+        x: Float,
+        y: Float,
+        scale: Float,
+        rotationX: Float,
+        rotationY: Float,
+        rotationZ: Float,
+        alpha: Float,
+        translationZ: Float
+    ) {
+        view.x = x
+        view.y = y
+        view.scaleX = scale
+        view.scaleY = scale
+        view.rotationX = rotationX
+        view.rotationY = rotationY
+        view.rotation = rotationZ
+        view.alpha = alpha.coerceIn(0f, 1f)
+        view.translationZ = translationZ
+    }
+
+    private fun smoothStep(value: Float): Float {
+        val t = value.coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
     }
 
     private fun toggleCardCollection(flow: CardFlow, cardId: Long) {
@@ -8401,16 +8473,27 @@ private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val CARD_COLLECTION_MOVE_ANIMATION_MS = 450L
-private const val CARD_COLLECTION_THROW_ANIMATION_MS = 680L
+private const val CARD_COLLECTION_THROW_ANIMATION_MS = 760L
+private const val CARD_COLLECTION_THROW_LIFT_PORTION = 0.18f
+private const val CARD_COLLECTION_THROW_FADE_START = 0.62f
+private const val CARD_COLLECTION_THROW_LIFT_PX = 18f
 private const val CARD_COLLECTION_THROW_ELEVATION = 36f
+private const val CARD_COLLECTION_THROW_DEPTH_Z = 72f
 private const val CARD_COLLECTION_THROW_CAMERA_DISTANCE = 8_000f
-private const val CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER = 1.45f
-private const val CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION = 0.22f
-private const val CARD_COLLECTION_THROW_ROTATION_DEG = 24f
-private const val CARD_COLLECTION_THROW_FLIP_X_DEG = 132f
-private const val CARD_COLLECTION_THROW_FLIP_Y_DEG = 34f
-private const val CARD_COLLECTION_THROW_POP_SCALE = 1.04f
-private const val CARD_COLLECTION_THROW_SCALE = 0.82f
+private const val CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER = 1.8f
+private const val CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION = 0.34f
+private const val CARD_COLLECTION_THROW_CURVE_FRACTION = 0.18f
+private const val CARD_COLLECTION_THROW_ROTATION_DEG = 42f
+private const val CARD_COLLECTION_THROW_FLIP_X_DEG = 168f
+private const val CARD_COLLECTION_THROW_FLIP_Y_DEG = 42f
+private const val CARD_COLLECTION_THROW_POP_SCALE = 1.08f
+private const val CARD_COLLECTION_THROW_SCALE = 0.7f
+private const val CARD_COLLECTION_THROW_BLUR_ALPHA = 0.36f
+private const val CARD_COLLECTION_THROW_BLUR_SCALE = 1.06f
+private const val CARD_COLLECTION_THROW_BLUR_RADIUS_PX = 10f
+private const val CARD_COLLECTION_THROW_BLUR_LAG_FRACTION = 0.075f
+private const val CARD_COLLECTION_THROW_BLUR_ROTATION_FRACTION = 0.82f
+private const val CARD_COLLECTION_THROW_BLUR_DEPTH_OFFSET = 12f
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
 private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
