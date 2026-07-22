@@ -92,7 +92,9 @@ data class CardItem(
     var recognizedText: String? = null,
     var relativeTimeText: CharSequence? = null,
     val stickyNotes: MutableList<StickyNote> = mutableListOf(),
-    var video: VideoCardData? = null
+    var video: VideoCardData? = null,
+    var isCollected: Boolean = false,
+    var collectionOriginalIndex: Int? = null
 )
 
 data class CardImage(
@@ -117,6 +119,7 @@ class CardsAdapter(
     private val onItemDoubleClick: (card: CardItem, index: Int) -> Unit,
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onStickyNotesClick: (CardItem) -> Unit,
+    private val onCollectionClick: ((CardItem) -> Unit)? = null,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
@@ -138,6 +141,7 @@ class CardsAdapter(
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
+        val collectionButton: ImageButton = v.findViewById(R.id.buttonCollectionStar)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -334,6 +338,12 @@ class CardsAdapter(
                 getItemAt(index)?.let(onStickyNotesClick)
             }
         }
+        vh.collectionButton.setOnClickListener {
+            val index = vh.bindingAdapterPosition
+            if (index != RecyclerView.NO_POSITION) {
+                getItemAt(index)?.let { card -> onCollectionClick?.invoke(card) }
+            }
+        }
         return vh
     }
 
@@ -348,6 +358,18 @@ class CardsAdapter(
             null
         }
         holder.stickyNotesButton.imageTintList = stickyIconTint
+        holder.collectionButton.isVisible = onCollectionClick != null
+        holder.collectionButton.isSelected = item.isCollected
+        holder.collectionButton.imageTintList = ColorStateList.valueOf(
+            if (item.isCollected) {
+                ContextCompat.getColor(holder.itemView.context, R.color.collection_star_selected_tint)
+            } else {
+                ContextCompat.getColor(holder.itemView.context, R.color.collection_star_empty_tint)
+            }
+        )
+        holder.collectionButton.contentDescription = holder.itemView.context.getString(
+            if (item.isCollected) R.string.card_collection_restore_content_desc else R.string.card_collection_move_front_content_desc
+        )
 
         // ---- Bind text ----
         holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(

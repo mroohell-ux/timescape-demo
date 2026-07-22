@@ -1814,6 +1814,34 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_moved_card_to_flow, targetFlow.name))
     }
 
+    private fun toggleCardCollection(flow: CardFlow, cardId: Long) {
+        val currentIndex = flow.cards.indexOfFirst { it.id == cardId }
+        if (currentIndex == -1) return
+        val controller = flowControllers[flow.id]
+        controller?.captureState(flow)
+        val card = flow.cards.removeAt(currentIndex)
+        var shouldScrollToTop = true
+        if (card.isCollected) {
+            val targetIndex = card.collectionOriginalIndex
+                ?.coerceIn(0, flow.cards.size)
+                ?: currentIndex.coerceIn(0, flow.cards.size)
+            card.isCollected = false
+            card.collectionOriginalIndex = null
+            flow.cards.add(targetIndex, card)
+            flow.lastViewedCardIndex = targetIndex
+            shouldScrollToTop = false
+        } else {
+            card.isCollected = true
+            card.collectionOriginalIndex = currentIndex
+            flow.cards.add(0, card)
+            flow.lastViewedCardIndex = 0
+        }
+        flow.lastViewedCardId = card.id
+        flow.lastViewedCardFocused = false
+        refreshFlow(flow, scrollToTop = shouldScrollToTop)
+        saveState()
+    }
+
     private fun toggleShuffleCards() {
         val flow = currentFlow()
         if (flow == null) {
@@ -7135,7 +7163,9 @@ class MainActivity : AppCompatActivity() {
                                     parseHandwritingSide(it, baseHandwritingOptions)
                                 },
                                 stickyNotes = stickyNotes,
-                                video = parseVideoCardData(cardObj.optJSONObject("video"))
+                                video = parseVideoCardData(cardObj.optJSONObject("video")),
+                                isCollected = cardObj.optBoolean("isCollected", false),
+                                collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 }
                             )
                         }
                     }
@@ -7278,6 +7308,8 @@ class MainActivity : AppCompatActivity() {
                 card.recognizedText?.let { obj.put("recognizedText", it) }
                 obj.put("textColor", colorToString(card.textColor))
                 obj.put("updatedAt", card.updatedAt)
+                obj.put("isCollected", card.isCollected)
+                card.collectionOriginalIndex?.let { obj.put("collectionOriginalIndex", it) }
                 card.handwriting?.let { content ->
                     val handwritingObj = JSONObject().apply {
                         put("path", content.path)
@@ -7731,6 +7763,7 @@ class MainActivity : AppCompatActivity() {
                         holder.onCardDoubleTapped(card, index) },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
+                    onCollectionClick = { card -> holder.onCollectionTapped(card) },
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
                     onVideoProgressChanged = { cardId, progressMs, durationMs ->
                         updateVideoWatchProgress(cardId, progressMs, durationMs)
@@ -7829,6 +7862,11 @@ class MainActivity : AppCompatActivity() {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
                 val target = flow.cards.firstOrNull { it.id == card.id } ?: return
                 showStickyNotesDialog(flow, target)
+            }
+
+            fun onCollectionTapped(card: CardItem) {
+                val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                toggleCardCollection(flow, card.id)
             }
 
             fun onCardLongPressed(index: Int, cardView: View): Boolean {

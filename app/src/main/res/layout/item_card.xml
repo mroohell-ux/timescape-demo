@@ -265,6 +265,19 @@
         </FrameLayout>
 
         <ImageButton
+            android:id="@+id/buttonCollectionStar"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="12dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/card_collection_move_front_content_desc"
+            android:padding="8dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_collection_star"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <ImageButton
             android:id="@+id/buttonStickyNotes"
             android:layout_width="40dp"
             android:layout_height="40dp"

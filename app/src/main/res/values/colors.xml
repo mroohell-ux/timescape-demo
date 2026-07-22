@@ -15,4 +15,6 @@
     <color name="handwriting_accent_soft">#21B88652</color>
     <color name="handwriting_icon">#8A6040</color>
     <color name="handwriting_text_secondary">#8A6A52</color>
+    <color name="collection_star_empty_tint">#CCFFFFFF</color>
+    <color name="collection_star_selected_tint">#FFFFD54F</color>
 </resources>
