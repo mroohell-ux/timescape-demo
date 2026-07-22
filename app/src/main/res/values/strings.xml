@@ -262,13 +262,15 @@
     <string name="handwriting_text_insertion_point">Insertion point: %1$.0f, %2$.0f</string>
     <string name="handwriting_text_flow_hint">Words start at the tapped point and keep flowing to the right.</string>
     <string name="handwriting_text_insertion_preview">Notebook insertion preview</string>
-    <string name="handwriting_text_insert_subtitle">Will insert at selected position</string>
+    <string name="handwriting_text_insert_subtitle">Type or recognize handwriting from the canvas</string>
     <string name="handwriting_text_preview_label">Preview</string>
     <string name="handwriting_text_write_label">Write here</string>
     <string name="handwriting_text_paste_label">Paste typed text</string>
     <string name="handwriting_text_paste_hint">Paste or type text to place on the canvas</string>
     <string name="handwriting_text_paste_action">Place text block</string>
-    <string name="handwriting_text_recognize_action">Recognize handwriting</string>
+    <string name="handwriting_text_canvas_hint">Write on the canvas first. Reopen this text tool to recognize it or paste typed text below.</string>
+    <string name="handwriting_text_write_on_canvas_action">Back to canvas</string>
+    <string name="handwriting_text_recognize_action">Recognize canvas handwriting</string>
     <string name="handwriting_text_recognize_empty">Write something first, then try recognizing it.</string>
     <string name="handwriting_text_recognize_failed">Couldnt recognize that handwriting.</string>
     <string name="handwriting_text_recognize_downloading">Preparing handwriting recognizer…</string>

@@ -4468,6 +4468,20 @@ class MainActivity : AppCompatActivity() {
                 addView(sectionLabel(getString(R.string.handwriting_text_insert_size_label)), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(insertSizeValue)
             }
+            val canvasHint = TextView(this).apply {
+                text = getString(R.string.handwriting_text_canvas_hint)
+                textSize = 14f
+                setTextColor(textSecondaryColor)
+                setPadding(0, (8 * density).roundToInt(), 0, (12 * density).roundToInt())
+            }
+            val backToCanvasButton = MaterialButton(this).apply {
+                text = getString(R.string.handwriting_text_write_on_canvas_action)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(textPrimaryColor)
+                backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F4F2F7"))
+                cornerRadius = (16 * density).roundToInt()
+            }
             val cancelTextButton = MaterialButton(this).apply {
                 text = getString(android.R.string.cancel)
                 isAllCaps = false
@@ -4538,6 +4552,10 @@ class MainActivity : AppCompatActivity() {
                 )
                 addView(header)
                 addView(insertionPointLabel)
+                addView(canvasHint)
+                addView(backToCanvasButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
+                    bottomMargin = (12 * density).roundToInt()
+                })
                 addView(sizeHeader)
                 addView(insertSizeSlider)
                 addView(sectionLabel(getString(R.string.handwriting_text_paste_label)))
@@ -4639,6 +4657,7 @@ class MainActivity : AppCompatActivity() {
                         updateBufferPreview()
                         closeButton.setOnClickListener { dismiss() }
                         cancelTextButton.setOnClickListener { dismiss() }
+                        backToCanvasButton.setOnClickListener { dismiss() }
                         pasteTextButton.setOnClickListener {
                             val typedText = pasteTextInput.text?.toString().orEmpty()
                             if (handwritingView.placeTextBlock(
