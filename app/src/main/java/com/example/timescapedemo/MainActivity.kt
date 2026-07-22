@@ -50,7 +50,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.view.animation.AccelerateInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -1830,28 +1830,35 @@ class MainActivity : AppCompatActivity() {
             setImageBitmap(snapshot)
             scaleType = ImageView.ScaleType.FIT_XY
             pivotX = cardView.width * 0.5f
-            pivotY = if (movingUp) 0f else cardView.height.toFloat()
+            pivotY = cardView.height * 0.52f
+            cameraDistance = resources.displayMetrics.density * CARD_COLLECTION_THROW_CAMERA_DISTANCE
             elevation = cardView.elevation + CARD_COLLECTION_THROW_ELEVATION
             x = (startLocation[0] - rootLocation[0]).toFloat()
             y = (startLocation[1] - rootLocation[1]).toFloat()
             layoutParams = ViewGroup.LayoutParams(cardView.width, cardView.height)
         }
         root.addView(throwView)
-        val direction = if (movingUp) -1f else 1f
-        val travelY = max(cardView.height * CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER, root.height * 0.38f) * direction
-        val travelX = cardView.width * if (movingUp) -0.14f else 0.14f
-        val rotation = if (movingUp) -CARD_COLLECTION_THROW_ROTATION_DEG else CARD_COLLECTION_THROW_ROTATION_DEG
+        val verticalDirection = if (movingUp) -1f else 1f
+        val horizontalDirection = if (movingUp) -1f else 1f
+        val travelY = max(cardView.height * CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER, root.height * 0.38f) * verticalDirection
+        val travelX = cardView.width * CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION * horizontalDirection
+        val flipX = CARD_COLLECTION_THROW_FLIP_X_DEG * verticalDirection
+        val flipY = CARD_COLLECTION_THROW_FLIP_Y_DEG * horizontalDirection
+        val twist = CARD_COLLECTION_THROW_ROTATION_DEG * horizontalDirection
         AnimatorSet().apply {
             playTogether(
-                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_Y, 0f, travelY),
-                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_X, 0f, travelX),
-                ObjectAnimator.ofFloat(throwView, View.ROTATION, 0f, rotation),
-                ObjectAnimator.ofFloat(throwView, View.SCALE_X, 1f, CARD_COLLECTION_THROW_SCALE),
-                ObjectAnimator.ofFloat(throwView, View.SCALE_Y, 1f, CARD_COLLECTION_THROW_SCALE),
-                ObjectAnimator.ofFloat(throwView, View.ALPHA, 1f, 0f)
+                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_Y, 0f, travelY * 0.18f, travelY * 0.62f, travelY),
+                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_X, 0f, travelX * 0.18f, travelX * 0.72f, travelX),
+                ObjectAnimator.ofFloat(throwView, View.ROTATION_X, 0f, flipX * 0.28f, flipX * 0.72f, flipX),
+                ObjectAnimator.ofFloat(throwView, View.ROTATION_Y, 0f, -flipY * 0.18f, flipY * 0.42f, flipY),
+                ObjectAnimator.ofFloat(throwView, View.ROTATION, 0f, twist * 0.18f, twist * 0.78f, twist),
+                ObjectAnimator.ofFloat(throwView, View.SCALE_X, 1f, CARD_COLLECTION_THROW_POP_SCALE, CARD_COLLECTION_THROW_SCALE),
+                ObjectAnimator.ofFloat(throwView, View.SCALE_Y, 1f, CARD_COLLECTION_THROW_POP_SCALE, CARD_COLLECTION_THROW_SCALE),
+                ObjectAnimator.ofFloat(throwView, View.ALPHA, 1f, 1f, 0.72f, 0f),
+                ObjectAnimator.ofFloat(throwView, View.TRANSLATION_Z, 0f, CARD_COLLECTION_THROW_ELEVATION, 0f)
             )
             duration = CARD_COLLECTION_THROW_ANIMATION_MS
-            interpolator = AccelerateInterpolator()
+            interpolator = AccelerateDecelerateInterpolator()
             addListener(object : AnimatorListenerAdapter() {
                 private var cleanedUp = false
 
@@ -8394,11 +8401,16 @@ private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
 private const val CARD_COLLECTION_MOVE_ANIMATION_MS = 450L
-private const val CARD_COLLECTION_THROW_ANIMATION_MS = 520L
+private const val CARD_COLLECTION_THROW_ANIMATION_MS = 680L
 private const val CARD_COLLECTION_THROW_ELEVATION = 36f
+private const val CARD_COLLECTION_THROW_CAMERA_DISTANCE = 8_000f
 private const val CARD_COLLECTION_THROW_DISTANCE_MULTIPLIER = 1.45f
-private const val CARD_COLLECTION_THROW_ROTATION_DEG = 16f
-private const val CARD_COLLECTION_THROW_SCALE = 0.88f
+private const val CARD_COLLECTION_THROW_SIDE_DRIFT_FRACTION = 0.22f
+private const val CARD_COLLECTION_THROW_ROTATION_DEG = 24f
+private const val CARD_COLLECTION_THROW_FLIP_X_DEG = 132f
+private const val CARD_COLLECTION_THROW_FLIP_Y_DEG = 34f
+private const val CARD_COLLECTION_THROW_POP_SCALE = 1.04f
+private const val CARD_COLLECTION_THROW_SCALE = 0.82f
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
 private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
