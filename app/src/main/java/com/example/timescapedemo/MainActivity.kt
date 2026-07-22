@@ -1819,26 +1819,44 @@ class MainActivity : AppCompatActivity() {
         if (currentIndex == -1) return
         val controller = flowControllers[flow.id]
         controller?.captureState(flow)
-        val card = flow.cards.removeAt(currentIndex)
-        var shouldScrollToTop = true
-        if (card.isCollected) {
+        val previousViewedCardId = flow.lastViewedCardId
+        val previousViewedIndex = flow.lastViewedCardIndex
+        val previousViewedFocused = flow.lastViewedCardFocused
+        val card = flow.cards[currentIndex]
+        val wasCollected = card.isCollected
+        val nextCardId = if (!wasCollected) {
+            flow.cards.getOrNull(currentIndex + 1)?.id ?: flow.cards.getOrNull(currentIndex - 1)?.id
+        } else {
+            null
+        }
+
+        flow.cards.removeAt(currentIndex)
+        if (wasCollected) {
             val targetIndex = card.collectionOriginalIndex
                 ?.coerceIn(0, flow.cards.size)
                 ?: currentIndex.coerceIn(0, flow.cards.size)
             card.isCollected = false
             card.collectionOriginalIndex = null
             flow.cards.add(targetIndex, card)
-            flow.lastViewedCardIndex = targetIndex
-            shouldScrollToTop = false
+            val restoredIndex = previousViewedCardId
+                ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+                ?: previousViewedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
+            flow.lastViewedCardIndex = restoredIndex
+            flow.lastViewedCardId = flow.cards.getOrNull(restoredIndex)?.id
+            flow.lastViewedCardFocused = previousViewedFocused && flow.lastViewedCardId != null
         } else {
             card.isCollected = true
             card.collectionOriginalIndex = currentIndex
             flow.cards.add(0, card)
-            flow.lastViewedCardIndex = 0
+            val nextIndex = nextCardId
+                ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+                ?: flow.cards.indexOfFirst { it.id == card.id }.takeIf { it >= 0 }
+                ?: 0
+            flow.lastViewedCardIndex = nextIndex
+            flow.lastViewedCardId = flow.cards.getOrNull(nextIndex)?.id
+            flow.lastViewedCardFocused = previousViewedFocused && flow.lastViewedCardId != card.id
         }
-        flow.lastViewedCardId = card.id
-        flow.lastViewedCardFocused = false
-        refreshFlow(flow, scrollToTop = shouldScrollToTop)
+        refreshFlow(flow, scrollToTop = false)
         saveState()
     }
 
