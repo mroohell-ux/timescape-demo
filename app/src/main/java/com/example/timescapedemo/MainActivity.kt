@@ -89,6 +89,7 @@ import androidx.core.view.updatePadding
 import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.CompositePageTransformer
@@ -1819,16 +1820,10 @@ class MainActivity : AppCompatActivity() {
         if (currentIndex == -1) return
         val controller = flowControllers[flow.id]
         controller?.captureState(flow)
-        val previousViewedCardId = flow.lastViewedCardId
-        val previousViewedIndex = flow.lastViewedCardIndex
-        val previousViewedFocused = flow.lastViewedCardFocused
         val card = flow.cards[currentIndex]
         val wasCollected = card.isCollected
-        val nextCardId = if (!wasCollected) {
-            flow.cards.getOrNull(currentIndex + 1)?.id ?: flow.cards.getOrNull(currentIndex - 1)?.id
-        } else {
-            null
-        }
+        val nextCardId = flow.cards.getOrNull(currentIndex + 1)?.id
+            ?: flow.cards.getOrNull(currentIndex - 1)?.id
 
         flow.cards.removeAt(currentIndex)
         if (wasCollected) {
@@ -1838,24 +1833,19 @@ class MainActivity : AppCompatActivity() {
             card.isCollected = false
             card.collectionOriginalIndex = null
             flow.cards.add(targetIndex, card)
-            val restoredIndex = previousViewedCardId
-                ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
-                ?: previousViewedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
-            flow.lastViewedCardIndex = restoredIndex
-            flow.lastViewedCardId = flow.cards.getOrNull(restoredIndex)?.id
-            flow.lastViewedCardFocused = previousViewedFocused && flow.lastViewedCardId != null
         } else {
             card.isCollected = true
             card.collectionOriginalIndex = currentIndex
             flow.cards.add(0, card)
-            val nextIndex = nextCardId
-                ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
-                ?: flow.cards.indexOfFirst { it.id == card.id }.takeIf { it >= 0 }
-                ?: 0
-            flow.lastViewedCardIndex = nextIndex
-            flow.lastViewedCardId = flow.cards.getOrNull(nextIndex)?.id
-            flow.lastViewedCardFocused = previousViewedFocused && flow.lastViewedCardId != card.id
         }
+
+        val nextIndex = nextCardId
+            ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+            ?: flow.cards.indexOfFirst { it.id == card.id }.takeIf { it >= 0 }
+            ?: 0
+        flow.lastViewedCardIndex = nextIndex
+        flow.lastViewedCardId = flow.cards.getOrNull(nextIndex)?.id
+        flow.lastViewedCardFocused = true
         refreshFlow(flow, scrollToTop = false)
         if (controller != null) {
             // Wait for the submitted move to commit and restore the next-card state before
@@ -7779,6 +7769,12 @@ class MainActivity : AppCompatActivity() {
             val layoutManager = createLayoutManager()
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
+            recycler.itemAnimator = DefaultItemAnimator().apply {
+                moveDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+                addDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+                removeDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+                changeDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
+            }
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
             lateinit var holder: FlowVH
@@ -8337,6 +8333,7 @@ private const val FLOW_REORDER_DRAG_LABEL = "flow_reorder_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L
+private const val CARD_COLLECTION_MOVE_ANIMATION_MS = 450L
 private const val FLOW_OPTIONS_DOUBLE_TAP_WINDOW_MS = 350L
 private const val FLOW_LABELS_VISIBLE_DURATION_MS = 10_000L
 private const val FLOW_LABELS_INTERACTION_RETRY_MS = 500L
