@@ -119,7 +119,7 @@ class CardsAdapter(
     private val onItemDoubleClick: (card: CardItem, index: Int) -> Unit,
     private val onItemLongPress: (index: Int, view: View) -> Boolean,
     private val onStickyNotesClick: (CardItem) -> Unit,
-    private val onCollectionClick: ((CardItem) -> Unit)? = null,
+    private val onCollectionClick: ((CardItem, View) -> Unit)? = null,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
@@ -341,7 +341,7 @@ class CardsAdapter(
         vh.collectionButton.setOnClickListener {
             val index = vh.bindingAdapterPosition
             if (index != RecyclerView.NO_POSITION) {
-                getItemAt(index)?.let { card -> onCollectionClick?.invoke(card) }
+                getItemAt(index)?.let { card -> onCollectionClick?.invoke(card, vh.itemView) }
             }
         }
         return vh
