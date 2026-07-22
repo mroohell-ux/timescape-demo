@@ -29,7 +29,7 @@ import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.LASSO
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import com.example.timescapedemo.HandwritingDrawingTool.TEXT
-import com.google.mlkit.vision.digitalink.Ink
+import com.google.mlkit.vision.digitalink.recognition.Ink
 import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
