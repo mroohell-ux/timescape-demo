@@ -268,6 +268,10 @@
     <string name="handwriting_text_paste_label">Paste typed text</string>
     <string name="handwriting_text_paste_hint">Paste or type text to place on the canvas</string>
     <string name="handwriting_text_paste_action">Place text block</string>
+    <string name="handwriting_text_recognize_action">Recognize handwriting</string>
+    <string name="handwriting_text_recognize_empty">Write something first, then try recognizing it.</string>
+    <string name="handwriting_text_recognize_failed">Couldnt recognize that handwriting.</string>
+    <string name="handwriting_text_recognize_downloading">Preparing handwriting recognizer…</string>
     <string name="handwriting_text_guide_label">Guide</string>
     <string name="handwriting_text_auto_commit_waiting">Waiting for more writing…</string>
     <string name="handwriting_text_auto_commit_pending">Auto-committing in 2 seconds</string>

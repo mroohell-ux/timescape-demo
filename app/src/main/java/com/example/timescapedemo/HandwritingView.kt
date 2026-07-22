@@ -29,6 +29,7 @@ import com.example.timescapedemo.HandwritingDrawingTool.ERASER
 import com.example.timescapedemo.HandwritingDrawingTool.LASSO
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import com.example.timescapedemo.HandwritingDrawingTool.TEXT
+import com.google.mlkit.vision.digitalink.Ink
 import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
@@ -44,6 +45,7 @@ class HandwritingView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
+    private data class InkStrokePoint(val x: Float, val y: Float, val time: Long)
     data class InsertedHandwritingObject(
         val id: String,
         val type: String = "handwritingText",
@@ -113,6 +115,8 @@ class HandwritingView @JvmOverloads constructor(
     }
     private val pathBounds = RectF()
     private val history = ArrayDeque<StateSnapshot>()
+    private val recognitionStrokes = mutableListOf<List<InkStrokePoint>>()
+    private var activeRecognitionStroke: MutableList<InkStrokePoint>? = null
 
     private var extraBitmap: Bitmap? = null
     private var extraCanvas: Canvas? = null
@@ -324,6 +328,8 @@ class HandwritingView @JvmOverloads constructor(
         pendingHasContent = false
         pendingHasBase = false
         insertedHandwritingObjects.clear()
+        recognitionStrokes.clear()
+        activeRecognitionStroke = null
         selectedBitmap?.recycle()
         selectedBitmap = null
         selectedRect = null
@@ -803,6 +809,27 @@ class HandwritingView @JvmOverloads constructor(
         strokePreviewChangedListener = listener
     }
 
+    fun recognitionInk(): Ink? {
+        val strokes = recognitionStrokes.toList()
+        if (strokes.isEmpty()) return null
+        val inkBuilder = Ink.builder()
+        strokes.forEach { stroke ->
+            if (stroke.isNotEmpty()) {
+                val strokeBuilder = Ink.Stroke.builder()
+                stroke.forEach { point ->
+                    strokeBuilder.addPoint(Ink.Point.create(point.x, point.y, point.time))
+                }
+                inkBuilder.addStroke(strokeBuilder.build())
+            }
+        }
+        return inkBuilder.build()
+    }
+
+    fun clearRecognitionInk() {
+        recognitionStrokes.clear()
+        activeRecognitionStroke = null
+    }
+
     fun setTextInsertionPreview(x: Float, y: Float) {
         insertionMarker = x to y
         invalidate()
@@ -874,6 +901,9 @@ class HandwritingView @JvmOverloads constructor(
         }
         path.reset()
         if (drawingTool == LASSO) commitSelection()
+        if (drawingTool == PEN) {
+            activeRecognitionStroke = mutableListOf(InkStrokePoint(x, y, System.currentTimeMillis()))
+        }
         path.moveTo(x, y)
         currentX = x
         currentY = y
@@ -884,6 +914,9 @@ class HandwritingView @JvmOverloads constructor(
         val dy = abs(y - currentY)
         if (dx >= touchTolerance || dy >= touchTolerance) {
             path.quadTo(currentX, currentY, (x + currentX) / 2, (y + currentY) / 2)
+            if (drawingTool == PEN) {
+                activeRecognitionStroke?.add(InkStrokePoint(x, y, System.currentTimeMillis()))
+            }
             currentX = x
             currentY = y
         }
@@ -891,6 +924,11 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchUp() {
         path.lineTo(currentX, currentY)
+        if (drawingTool == PEN) {
+            activeRecognitionStroke?.add(InkStrokePoint(currentX, currentY, System.currentTimeMillis()))
+            activeRecognitionStroke?.takeIf { it.isNotEmpty() }?.let { recognitionStrokes += it.toList() }
+            activeRecognitionStroke = null
+        }
         commitCurrentPath()
     }
 
@@ -900,6 +938,7 @@ class HandwritingView @JvmOverloads constructor(
         } else {
             path.reset()
         }
+        activeRecognitionStroke = null
     }
 
     private fun notifyStrokePreviewChanged() {

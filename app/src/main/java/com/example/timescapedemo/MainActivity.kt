@@ -140,7 +140,14 @@ import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
 import android.util.Log
 import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.digitalink.DigitalInkRecognition
+import com.google.mlkit.vision.digitalink.DigitalInkRecognitionModel
+import com.google.mlkit.vision.digitalink.DigitalInkRecognitionModelIdentifier
+import com.google.mlkit.vision.digitalink.DigitalInkRecognizerOptions
+import com.google.mlkit.vision.digitalink.Ink
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 class MainActivity : AppCompatActivity() {
@@ -4508,6 +4515,14 @@ class MainActivity : AppCompatActivity() {
                 backgroundTintList = ColorStateList.valueOf(accentColor)
                 cornerRadius = (16 * density).roundToInt()
             }
+            val recognizeTextButton = MaterialButton(this).apply {
+                text = getString(R.string.handwriting_text_recognize_action)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(accentColor)
+                backgroundTintList = ColorStateList.valueOf(ColorUtils.setAlphaComponent(accentColor, 0x18))
+                cornerRadius = (16 * density).roundToInt()
+            }
             val footerActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(cancelTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight))
@@ -4530,6 +4545,9 @@ class MainActivity : AppCompatActivity() {
                     bottomMargin = (8 * density).roundToInt()
                 })
                 addView(pasteTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
+                    bottomMargin = (8 * density).roundToInt()
+                })
+                addView(recognizeTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
                     bottomMargin = (12 * density).roundToInt()
                 })
                 addView(footerActions)
@@ -4633,6 +4651,26 @@ class MainActivity : AppCompatActivity() {
                             ) {
                                 updateHistoryButtons()
                                 dismiss()
+                            }
+                        }
+                        recognizeTextButton.setOnClickListener {
+                            val ink = handwritingView.recognitionInk()
+                            if (ink == null) {
+                                snackbar(getString(R.string.handwriting_text_recognize_empty))
+                                return@setOnClickListener
+                            }
+                            recognizeTextButton.isEnabled = false
+                            recognizeTextButton.text = getString(R.string.handwriting_text_recognize_downloading)
+                            lifecycleScope.launch {
+                                val recognized = recognizeHandwritingInk(ink)
+                                recognizeTextButton.isEnabled = true
+                                recognizeTextButton.text = getString(R.string.handwriting_text_recognize_action)
+                                if (recognized.isNullOrBlank()) {
+                                    snackbar(getString(R.string.handwriting_text_recognize_failed))
+                                } else {
+                                    pasteTextInput.setText(recognized)
+                                    pasteTextInput.setSelection(pasteTextInput.text?.length ?: 0)
+                                }
                             }
                         }
                         saveTextButton.setOnClickListener {
@@ -5097,6 +5135,30 @@ class MainActivity : AppCompatActivity() {
             if (flowSearchQueryNormalized.isNotEmpty()) {
                 updateFlowSearchResults(restoreStateWhenCleared = false)
             }
+        }
+    }
+
+    private suspend fun recognizeHandwritingInk(ink: Ink): String? = withContext(Dispatchers.IO) {
+        val modelIdentifier = DigitalInkRecognitionModelIdentifier.fromLanguageTag("en-US") ?: return@withContext null
+        val model = DigitalInkRecognitionModel.builder(modelIdentifier).build()
+        val remoteModelManager = RemoteModelManager.getInstance()
+        try {
+            val downloaded = Tasks.await(remoteModelManager.isModelDownloaded(model))
+            if (!downloaded) {
+                Tasks.await(remoteModelManager.download(model, DownloadConditions.Builder().build()))
+            }
+            val recognizer = DigitalInkRecognition.getClient(
+                DigitalInkRecognizerOptions.builder(model).build()
+            )
+            try {
+                val result = Tasks.await(recognizer.recognize(ink))
+                result.candidates.firstOrNull()?.text?.trim()?.takeIf { it.isNotEmpty() }
+            } finally {
+                recognizer.close()
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to recognize handwriting ink", e)
+            null
         }
     }
 
