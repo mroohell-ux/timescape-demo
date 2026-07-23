@@ -13,6 +13,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.Context
 
@@ -141,7 +142,14 @@ import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
 import android.util.Log
 import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognition
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModel
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModelIdentifier
+import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOptions
+import com.google.mlkit.vision.digitalink.recognition.Ink
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 class MainActivity : AppCompatActivity() {
@@ -3700,6 +3708,7 @@ class MainActivity : AppCompatActivity() {
         val penButton = dialogView.findViewById<MaterialButton>(R.id.buttonPenOptions)
         val eraserButton = dialogView.findViewById<MaterialButton>(R.id.buttonEraserOptions)
         val textButton = dialogView.findViewById<MaterialButton>(R.id.buttonTextInsert)
+        val lassoButton = dialogView.findViewById<MaterialButton>(R.id.buttonLassoSelect)
         val canvasButton = dialogView.findViewById<MaterialButton>(R.id.buttonCanvasOptions)
         canvasButton.isGone = extras.disableCanvasPalette
         val paletteView = LayoutInflater.from(this).inflate(R.layout.view_handwriting_palette, null, false)
@@ -4125,7 +4134,9 @@ class MainActivity : AppCompatActivity() {
             if (handwritingView.undo()) updateHistoryButtons()
         }
         clearButton.setOnClickListener {
-            handwritingView.clear()
+            if (!handwritingView.deleteLassoSelection()) {
+                handwritingView.clear()
+            }
             updateHistoryButtons()
         }
         insertPictureButton.setOnClickListener {
@@ -4224,13 +4235,18 @@ class MainActivity : AppCompatActivity() {
             styleToolbarButton(penButton, selectedDrawingTool == HandwritingDrawingTool.PEN)
             styleToolbarButton(eraserButton, selectedDrawingTool == HandwritingDrawingTool.ERASER)
             styleToolbarButton(textButton, selectedDrawingTool == HandwritingDrawingTool.TEXT)
+            styleToolbarButton(lassoButton, selectedDrawingTool == HandwritingDrawingTool.LASSO)
             styleToolbarButton(canvasButton, visiblePalette == HandwritingPaletteSection.CANVAS)
             styleToolbarButton(insertPictureButton, handwritingView.isImagePlacementActive())
             val checkedId = when (visiblePalette) {
                 HandwritingPaletteSection.PEN -> penButton.id
                 HandwritingPaletteSection.ERASER -> eraserButton.id
                 HandwritingPaletteSection.CANVAS -> if (extras.disableCanvasPalette) View.NO_ID else canvasButton.id
-                else -> if (selectedDrawingTool == HandwritingDrawingTool.TEXT) textButton.id else View.NO_ID
+                else -> when (selectedDrawingTool) {
+                    HandwritingDrawingTool.TEXT -> textButton.id
+                    HandwritingDrawingTool.LASSO -> lassoButton.id
+                    else -> View.NO_ID
+                }
             }
             if (checkedId == View.NO_ID) {
                 toolToggleGroup.clearChecked()
@@ -4634,6 +4650,20 @@ class MainActivity : AppCompatActivity() {
                 addView(sectionLabel(getString(R.string.handwriting_text_insert_size_label)), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(insertSizeValue)
             }
+            val canvasHint = TextView(this).apply {
+                text = getString(R.string.handwriting_text_canvas_hint)
+                textSize = 14f
+                setTextColor(textSecondaryColor)
+                setPadding(0, (8 * density).roundToInt(), 0, (12 * density).roundToInt())
+            }
+            val backToCanvasButton = MaterialButton(this).apply {
+                text = getString(R.string.handwriting_text_write_on_canvas_action)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(textPrimaryColor)
+                backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F4F2F7"))
+                cornerRadius = (16 * density).roundToInt()
+            }
             val cancelTextButton = MaterialButton(this).apply {
                 text = getString(android.R.string.cancel)
                 isAllCaps = false
@@ -4650,14 +4680,48 @@ class MainActivity : AppCompatActivity() {
                 backgroundTintList = ColorStateList.valueOf(accentColor)
                 cornerRadius = (16 * density).roundToInt()
             }
+            val clipboardText = (getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
+                ?.primaryClip
+                ?.takeIf { clip -> clip.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(this)
+                ?.toString()
+                .orEmpty()
+            val pasteTextInput = EditText(this).apply {
+                setText(clipboardText)
+                hint = getString(R.string.handwriting_text_paste_hint)
+                minLines = 2
+                maxLines = 4
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                setTextColor(textPrimaryColor)
+                setHintTextColor(textSecondaryColor)
+                background = roundedDrawable(Color.WHITE, borderColor, 1f, 14f)
+                setPadding(
+                    (14 * density).roundToInt(),
+                    (10 * density).roundToInt(),
+                    (14 * density).roundToInt(),
+                    (10 * density).roundToInt()
+                )
+            }
+            val pasteTextButton = MaterialButton(this).apply {
+                text = getString(R.string.handwriting_text_paste_action)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                backgroundTintList = ColorStateList.valueOf(accentColor)
+                cornerRadius = (16 * density).roundToInt()
+            }
+            val recognizeTextButton = MaterialButton(this).apply {
+                text = getString(R.string.handwriting_text_recognize_action)
+                isAllCaps = false
+                textSize = 16f
+                setTextColor(accentColor)
+                backgroundTintList = ColorStateList.valueOf(ColorUtils.setAlphaComponent(accentColor, 0x18))
+                cornerRadius = (16 * density).roundToInt()
+            }
             val footerActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(cancelTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                    marginEnd = (8 * density).roundToInt()
-                })
-                addView(saveTextButton, LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                    marginStart = (8 * density).roundToInt()
-                })
+                addView(cancelTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight))
             }
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -4670,15 +4734,22 @@ class MainActivity : AppCompatActivity() {
                 )
                 addView(header)
                 addView(insertionPointLabel)
-                addView(previewLabel)
-                addView(insertionPreview)
-                addView(flowHint)
-                addView(keyboardHint)
-                addView(writeHeader)
-                addView(editorFrame)
-                addView(autoCommitStatus)
+                addView(canvasHint)
+                addView(backToCanvasButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
+                    bottomMargin = (12 * density).roundToInt()
+                })
                 addView(sizeHeader)
                 addView(insertSizeSlider)
+                addView(sectionLabel(getString(R.string.handwriting_text_paste_label)))
+                addView(pasteTextInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = (8 * density).roundToInt()
+                })
+                addView(pasteTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
+                    bottomMargin = (8 * density).roundToInt()
+                })
+                addView(recognizeTextButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, controlHeight).apply {
+                    bottomMargin = (12 * density).roundToInt()
+                })
                 addView(footerActions)
             }
             var commitRunnable: Runnable? = null
@@ -4768,6 +4839,41 @@ class MainActivity : AppCompatActivity() {
                         updateBufferPreview()
                         closeButton.setOnClickListener { dismiss() }
                         cancelTextButton.setOnClickListener { dismiss() }
+                        backToCanvasButton.setOnClickListener { dismiss() }
+                        pasteTextButton.setOnClickListener {
+                            val typedText = pasteTextInput.text?.toString().orEmpty()
+                            if (handwritingView.placeTextBlock(
+                                    text = typedText,
+                                    x = targetX,
+                                    y = targetY,
+                                    color = selectedBrushColor.color,
+                                    textSizePx = insertSizeSlider.value.coerceAtLeast(8f)
+                                )
+                            ) {
+                                updateHistoryButtons()
+                                dismiss()
+                            }
+                        }
+                        recognizeTextButton.setOnClickListener {
+                            val ink = handwritingView.recognitionInk()
+                            if (ink == null) {
+                                snackbar(getString(R.string.handwriting_text_recognize_empty))
+                                return@setOnClickListener
+                            }
+                            recognizeTextButton.isEnabled = false
+                            recognizeTextButton.text = getString(R.string.handwriting_text_recognize_downloading)
+                            lifecycleScope.launch {
+                                val recognized = recognizeHandwritingInk(ink)
+                                recognizeTextButton.isEnabled = true
+                                recognizeTextButton.text = getString(R.string.handwriting_text_recognize_action)
+                                if (recognized.isNullOrBlank()) {
+                                    snackbar(getString(R.string.handwriting_text_recognize_failed))
+                                } else {
+                                    pasteTextInput.setText(recognized)
+                                    pasteTextInput.setSelection(pasteTextInput.text?.length ?: 0)
+                                }
+                            }
+                        }
                         saveTextButton.setOnClickListener {
                             cancelAutoCommit()
                             commitKeyboardStrokes(addTrailingSpace = false)
@@ -4847,6 +4953,11 @@ class MainActivity : AppCompatActivity() {
         textButton.setOnClickListener {
             hidePalette()
             setDrawingTool(HandwritingDrawingTool.TEXT)
+        }
+
+        lassoButton.setOnClickListener {
+            hidePalette()
+            setDrawingTool(HandwritingDrawingTool.LASSO)
         }
 
         if (!extras.disableCanvasPalette) {
@@ -5225,6 +5336,30 @@ class MainActivity : AppCompatActivity() {
             if (flowSearchQueryNormalized.isNotEmpty()) {
                 updateFlowSearchResults(restoreStateWhenCleared = false)
             }
+        }
+    }
+
+    private suspend fun recognizeHandwritingInk(ink: Ink): String? = withContext(Dispatchers.IO) {
+        val modelIdentifier = DigitalInkRecognitionModelIdentifier.fromLanguageTag("en-US") ?: return@withContext null
+        val model = DigitalInkRecognitionModel.builder(modelIdentifier).build()
+        val remoteModelManager = RemoteModelManager.getInstance()
+        try {
+            val downloaded = Tasks.await(remoteModelManager.isModelDownloaded(model))
+            if (!downloaded) {
+                Tasks.await(remoteModelManager.download(model, DownloadConditions.Builder().build()))
+            }
+            val recognizer = DigitalInkRecognition.getClient(
+                DigitalInkRecognizerOptions.builder(model).build()
+            )
+            try {
+                val result = Tasks.await(recognizer.recognize(ink))
+                result.candidates.firstOrNull()?.text?.trim()?.takeIf { it.isNotEmpty() }
+            } finally {
+                recognizer.close()
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to recognize handwriting ink", e)
+            null
         }
     }
 
