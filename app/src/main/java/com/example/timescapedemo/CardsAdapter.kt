@@ -330,7 +330,7 @@ class CardsAdapter(
             }
         })
         v.isClickable = true
-        v.setOnTouchListener { view, event ->
+        val cardGestureTouchListener = View.OnTouchListener listener@ { view, event ->
             if (
                 event.action == MotionEvent.ACTION_UP &&
                 vh.videoInlineView.isVisible &&
@@ -338,7 +338,7 @@ class CardsAdapter(
                 !isTouchInsideView(vh.videoPlaybackControls, event)
             ) {
                 hideVideoControls(vh)
-                return@setOnTouchListener true
+                return@listener true
             }
             val handled = vh.gestureDetector.onTouchEvent(event)
             if (!handled && event.action == MotionEvent.ACTION_UP) {
@@ -346,6 +346,13 @@ class CardsAdapter(
             }
             true
         }
+        // item_card now has a wrapper so the receipt can sit below the original card. Touch events
+        // are dispatched to the child under the finger, not reliably back to that wrapper. Attach
+        // the same detector to both interactive surfaces to preserve tap, double-click, and long
+        // press behavior on the card while also making the receipt area behave like its card.
+        v.setOnTouchListener(cardGestureTouchListener)
+        vh.card.setOnTouchListener(cardGestureTouchListener)
+        vh.receipt.setOnTouchListener(cardGestureTouchListener)
         vh.stickyNotesButton.setOnClickListener {
             val index = vh.bindingAdapterPosition
             if (index != RecyclerView.NO_POSITION) {
