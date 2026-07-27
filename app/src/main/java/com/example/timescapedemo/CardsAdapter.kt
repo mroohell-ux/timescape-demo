@@ -251,7 +251,8 @@ class CardsAdapter(
         }.toSet()
         blockedUris.retainAll(activeUris)
         val flippableIds = copies.filter {
-            it.handwriting != null || it.imageHandwriting != null || !it.backSnippet.isNullOrBlank()
+            it.handwriting != null || it.imageHandwriting != null ||
+                !it.backSnippet.isNullOrBlank() || it.thermalReceipt != null
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
         val currentCardIds = copies.map { it.id }.toSet()
@@ -368,6 +369,9 @@ class CardsAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
+        holder.card.animate().cancel()
+        holder.card.rotationY = 0f
+        holder.card.alpha = 1f
 
         val stickyIconTint = if (item.stickyNotes.isEmpty()) {
             ColorStateList.valueOf(
@@ -976,10 +980,36 @@ class CardsAdapter(
         when {
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
-            hasTextBack || item.thermalReceipt != null -> bindTextCard(holder, item, next)
+            hasTextBack || item.thermalReceipt != null -> {
+                animateTextReceiptFlip(holder, item, next)
+                return next
+            }
         }
         bindReceipt(holder, item)
         return next
+    }
+
+    private fun animateTextReceiptFlip(holder: VH, item: CardItem, toFace: HandwritingFace) {
+        holder.card.animate().cancel()
+        holder.receipt.animate().cancel()
+        holder.card.animate()
+            .rotationY(90f)
+            .alpha(0.72f)
+            .setDuration(HANDWRITING_FLIP_HALF_DURATION)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction {
+                if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@withEndAction
+                bindTextCard(holder, item, toFace)
+                bindReceipt(holder, item)
+                holder.card.rotationY = -90f
+                holder.card.animate()
+                    .rotationY(0f)
+                    .alpha(1f)
+                    .setDuration(HANDWRITING_FLIP_HALF_DURATION)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            .start()
     }
 
     fun currentFaceFor(index: Int): HandwritingFace {
