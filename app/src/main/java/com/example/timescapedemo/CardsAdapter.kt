@@ -525,10 +525,9 @@ class CardsAdapter(
         holder.receipt.isVisible = attachment != null
         HandwritingBitmapLoader.clear(holder.receipt)
         if (attachment == null) return
-        val params = holder.receipt.layoutParams as ViewGroup.MarginLayoutParams
-        params.width = (holder.itemView.resources.displayMetrics.widthPixels *
-            attachment.widthPercent.coerceIn(55, 100) / 100f).roundToInt()
-        holder.receipt.layoutParams = params
+        // Keep the item and card at the exact width assigned by the LayoutManager. Scaling only
+        // the receipt visually prevents a narrow attachment from feeding back into card measure.
+        holder.receipt.scaleX = attachment.widthPercent.coerceIn(55, 100) / 100f
         HandwritingBitmapLoader.load(
             holder.itemView.context,
             attachment.side.path,
