@@ -102,7 +102,9 @@ data class CardItem(
 data class ThermalReceipt(
     var side: HandwritingSide,
     /** Receipt height as a percentage of its card width. The receipt itself is always full-width. */
-    var heightPercent: Int = 125
+    var heightPercent: Int = 125,
+    /** The card face beneath which this receipt is attached. */
+    var face: HandwritingFace = HandwritingFace.FRONT
 )
 
 data class CardImage(
@@ -129,7 +131,7 @@ class CardsAdapter(
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onCollectionClick: ((CardItem, View) -> Unit)? = null,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
-    private val onReceiptClick: ((CardItem) -> Unit)? = null,
+    private val onReceiptClick: ((CardItem, HandwritingFace) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
@@ -357,7 +359,9 @@ class CardsAdapter(
         }
         vh.receiptButton.setOnClickListener {
             val index = vh.bindingAdapterPosition
-            if (index != RecyclerView.NO_POSITION) getItemAt(index)?.let { onReceiptClick?.invoke(it) }
+            if (index != RecyclerView.NO_POSITION) {
+                getItemAt(index)?.let { onReceiptClick?.invoke(it, currentCardFace(it.id)) }
+            }
         }
         return vh
     }
@@ -521,7 +525,7 @@ class CardsAdapter(
     }
 
     private fun bindReceipt(holder: VH, item: CardItem) {
-        val attachment = item.thermalReceipt
+        val attachment = item.thermalReceipt?.takeIf { it.face == currentCardFace(item.id) }
         holder.receipt.isVisible = attachment != null
         HandwritingBitmapLoader.clear(holder.receipt)
         if (attachment == null) {
@@ -958,7 +962,9 @@ class CardsAdapter(
         val hasImageBack = item.imageHandwriting != null
         val hasTextBack = !item.backSnippet.isNullOrBlank()
         val hasHandwriting = handwritingContent != null
-        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack) return null
+        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack && item.thermalReceipt == null) {
+            return null
+        }
         val current = currentCardFace(item.id)
         val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
         handwritingFaces[item.id] = next
@@ -970,8 +976,9 @@ class CardsAdapter(
         when {
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
-            hasTextBack -> bindTextCard(holder, item, next)
+            hasTextBack || item.thermalReceipt != null -> bindTextCard(holder, item, next)
         }
+        bindReceipt(holder, item)
         return next
     }
 
@@ -986,7 +993,7 @@ class CardsAdapter(
         val item = getItemAt(index) ?: return false
         if (item.handwriting != null) return true
         if (item.imageHandwriting != null && item.image != null) return true
-        return !item.backSnippet.isNullOrBlank()
+        return !item.backSnippet.isNullOrBlank() || item.thermalReceipt != null
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
@@ -1219,7 +1226,11 @@ class CardsAdapter(
 
     private fun bindTextCard(holder: VH, item: CardItem, face: HandwritingFace) {
         val backText = item.backSnippet?.takeIf { it.isNotBlank() }
-        val text = if (face == HandwritingFace.BACK && backText != null) backText else item.snippet
+        val text = when {
+            face == HandwritingFace.BACK && backText != null -> backText
+            face == HandwritingFace.BACK && item.thermalReceipt != null -> ""
+            else -> item.snippet
+        }
         setCardMode(holder, CardMode.TEXT, text)
         bindTitle(holder, item)
     }
@@ -1510,7 +1521,7 @@ private fun CardItem.deepCopy(): CardItem = copy(
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
     video = video?.copy(),
     thermalReceipt = thermalReceipt?.let { ThermalReceipt(
-        HandwritingSide(it.side.path, it.side.options.copy()), it.heightPercent
+        HandwritingSide(it.side.path, it.side.options.copy()), it.heightPercent, it.face
     ) },
     relativeTimeText = relativeTimeText,
     stickyNotes = stickyNotes.map { it.copy() }.toMutableList()
