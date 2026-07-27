@@ -101,8 +101,8 @@ data class CardItem(
 /** A handwritten thermal-paper attachment owned by its card. */
 data class ThermalReceipt(
     var side: HandwritingSide,
-    /** Percentage of the card width used when displaying the receipt. */
-    var widthPercent: Int = 85
+    /** Receipt height as a percentage of its card width. The receipt itself is always full-width. */
+    var heightPercent: Int = 125
 )
 
 data class CardImage(
@@ -530,19 +530,15 @@ class CardsAdapter(
             }
             return
         }
-        // The bitmap is decoded asynchronously. Reserve its aspect-ratio height up front; without
+        // The bitmap is decoded asynchronously. Reserve the selected paper height up front; without
         // this, an empty wrap_content ImageView measures to zero and the LayoutManager can cache
         // that zero-height result before the bitmap arrives.
         val itemWidth = holder.itemView.layoutParams.width
             .takeIf { it > 0 }
             ?: holder.itemView.resources.displayMetrics.widthPixels
-        val receiptWidth = (itemWidth * attachment.widthPercent.coerceIn(55, 100) / 100f)
-            .roundToInt()
-            .coerceAtLeast(1)
-        val options = attachment.side.options
         holder.receipt.layoutParams = holder.receipt.layoutParams.apply {
-            width = receiptWidth
-            height = receiptDisplayHeight(receiptWidth, options.canvasWidth, options.canvasHeight)
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = receiptDisplayHeight(itemWidth, attachment.heightPercent)
         }
         HandwritingBitmapLoader.load(
             holder.itemView.context,
@@ -1488,11 +1484,10 @@ private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 5_000L
 private const val VIDEO_PROGRESS_UPDATE_INTERVAL_MS = 1_000L
 private const val VIDEO_PROGRESS_RESUME_MARGIN_MS = 1_000L
 
-internal fun receiptDisplayHeight(itemWidth: Int, canvasWidth: Int, canvasHeight: Int): Int {
+internal fun receiptDisplayHeight(itemWidth: Int, heightPercent: Int): Int {
     val safeItemWidth = itemWidth.coerceAtLeast(1)
-    val safeCanvasWidth = canvasWidth.coerceAtLeast(1)
-    val safeCanvasHeight = canvasHeight.coerceAtLeast(1)
-    return (safeItemWidth.toLong() * safeCanvasHeight / safeCanvasWidth)
+    val safeHeightPercent = heightPercent.coerceIn(50, 200)
+    return (safeItemWidth.toLong() * safeHeightPercent / 100L)
         .coerceIn(1L, Int.MAX_VALUE.toLong())
         .toInt()
 }
@@ -1515,7 +1510,7 @@ private fun CardItem.deepCopy(): CardItem = copy(
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
     video = video?.copy(),
     thermalReceipt = thermalReceipt?.let { ThermalReceipt(
-        HandwritingSide(it.side.path, it.side.options.copy()), it.widthPercent
+        HandwritingSide(it.side.path, it.side.options.copy()), it.heightPercent
     ) },
     relativeTimeText = relativeTimeText,
     stickyNotes = stickyNotes.map { it.copy() }.toMutableList()

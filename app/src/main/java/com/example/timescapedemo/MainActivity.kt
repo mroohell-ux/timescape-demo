@@ -2578,8 +2578,8 @@ class MainActivity : AppCompatActivity() {
         val card = flow.cards.firstOrNull { it.id == adapterCard.id } ?: return
         if (card.handwriting != null) return
         if (card.thermalReceipt == null) {
-            chooseReceiptSize(card.thermalReceipt?.widthPercent ?: 80) { width ->
-                editReceipt(flow, card, width)
+            chooseReceiptHeight(card.thermalReceipt?.heightPercent ?: 125) { height ->
+                editReceipt(flow, card, height)
             }
             return
         }
@@ -2592,9 +2592,9 @@ class MainActivity : AppCompatActivity() {
             .setTitle(R.string.dialog_receipt_title)
             .setItems(actions) { _, which ->
                 when (which) {
-                    0 -> editReceipt(flow, card, card.thermalReceipt?.widthPercent ?: 80)
-                    1 -> chooseReceiptSize(card.thermalReceipt?.widthPercent ?: 80) { width ->
-                        card.thermalReceipt?.widthPercent = width
+                    0 -> editReceipt(flow, card, card.thermalReceipt?.heightPercent ?: 125)
+                    1 -> chooseReceiptHeight(card.thermalReceipt?.heightPercent ?: 125) { height ->
+                        card.thermalReceipt?.heightPercent = height
                         card.updatedAt = System.currentTimeMillis()
                         refreshFlow(flow, scrollToTop = false)
                         saveState()
@@ -2612,31 +2612,31 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun chooseReceiptSize(current: Int, onChosen: (Int) -> Unit) {
-        val widths = intArrayOf(60, 80, 100)
+    private fun chooseReceiptHeight(current: Int, onChosen: (Int) -> Unit) {
+        val heights = intArrayOf(75, 125, 175)
         val labels = arrayOf(
             getString(R.string.receipt_size_narrow),
             getString(R.string.receipt_size_regular),
             getString(R.string.receipt_size_wide)
         )
-        val selected = widths.indexOf(current).takeIf { it >= 0 } ?: 1
+        val selected = heights.indexOf(current).takeIf { it >= 0 } ?: 1
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_receipt_size_title)
             .setSingleChoiceItems(labels, selected) { dialog, which ->
                 dialog.dismiss()
-                onChosen(widths[which])
+                onChosen(heights[which])
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
-    private fun editReceipt(flow: CardFlow, card: CardItem, widthPercent: Int) {
+    private fun editReceipt(flow: CardFlow, card: CardItem, heightPercent: Int) {
         val existing = card.thermalReceipt?.side
         val defaults = defaultHandwritingOptions().copy(
             backgroundColor = Color.rgb(255, 253, 248),
             brushColor = Color.rgb(30, 30, 30),
             canvasWidth = 900,
-            canvasHeight = 1400,
+            canvasHeight = 900 * heightPercent.coerceIn(50, 200) / 100,
             paperStyle = HandwritingPaperStyle.PLAIN,
             format = HandwritingFormat.PNG
         )
@@ -2648,7 +2648,7 @@ class MainActivity : AppCompatActivity() {
             onSave = { saved ->
                 if (saved != null) {
                     if (existing?.path != null && existing.path != saved.path) deleteHandwritingFile(existing.path)
-                    card.thermalReceipt = ThermalReceipt(saved, widthPercent.coerceIn(55, 100))
+                    card.thermalReceipt = ThermalReceipt(saved, heightPercent.coerceIn(50, 200))
                     card.updatedAt = System.currentTimeMillis()
                     refreshFlow(flow, scrollToTop = false)
                     saveState()
@@ -5853,6 +5853,13 @@ class MainActivity : AppCompatActivity() {
         return CardImage(Uri.parse(uriString), mimeType, owned)
     }
 
+    private fun receiptHeightPercent(side: HandwritingSide): Int {
+        val width = side.options.canvasWidth.coerceAtLeast(1)
+        return ((side.options.canvasHeight.toLong() * 100L) / width)
+            .coerceIn(50L, 200L)
+            .toInt()
+    }
+
     private fun parseVideoCardData(obj: JSONObject?): VideoCardData? {
         if (obj == null) return null
         val sourceUri = obj.optString("sourceUri").takeIf { it.isNotBlank() } ?: return null
@@ -6379,7 +6386,7 @@ class MainActivity : AppCompatActivity() {
                     handwritingSideToExportPayload(
                         receipt.side, warnings, "Missing thermal receipt for $cardLabel"
                     )?.let { export ->
-                        export.json.put("widthPercent", receipt.widthPercent)
+                        export.json.put("heightPercent", receipt.heightPercent)
                         writer.name("thermalReceipt")
                         writeJsonValue(writer, export.json)
                     }
@@ -6886,7 +6893,7 @@ class MainActivity : AppCompatActivity() {
                                             decodeHandwritingSideFromExport(
                                                 receiptObj, createdFiles, warnings,
                                                 "$cardLabel (thermal receipt)", isImageBack = false
-                                            )?.let { ThermalReceipt(it, receiptObj.optInt("widthPercent", 80)) }
+                                            )?.let { ThermalReceipt(it, receiptObj.optInt("heightPercent", receiptHeightPercent(it))) }
                                         }
                                         val stickyNotes = parseStickyNotes(cardObj)
                                         val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
@@ -7426,7 +7433,7 @@ class MainActivity : AppCompatActivity() {
                                 collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 },
                                 thermalReceipt = cardObj.optJSONObject("thermalReceipt")?.let { receiptObj ->
                                     parseHandwritingSide(receiptObj, baseHandwritingOptions)?.let {
-                                        ThermalReceipt(it, receiptObj.optInt("widthPercent", 80))
+                                        ThermalReceipt(it, receiptObj.optInt("heightPercent", receiptHeightPercent(it)))
                                     }
                                 }
                             )
@@ -7596,7 +7603,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 card.thermalReceipt?.let { receipt ->
                     obj.put("thermalReceipt", handwritingSideToJson(receipt.side).apply {
-                        put("widthPercent", receipt.widthPercent)
+                        put("heightPercent", receipt.heightPercent)
                     })
                 }
                 card.video?.let { video ->

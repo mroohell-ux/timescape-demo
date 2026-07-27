@@ -5,13 +5,13 @@ import org.junit.Test
 
 class ThermalReceiptSizingTest {
     @Test
-    fun preservesReceiptAspectRatio() {
-        assertEquals(560, receiptDisplayHeight(itemWidth = 360, canvasWidth = 900, canvasHeight = 1400))
+    fun appliesSelectedHeightToFullCardWidth() {
+        assertEquals(450, receiptDisplayHeight(itemWidth = 360, heightPercent = 125))
     }
 
     @Test
-    fun toleratesInvalidPersistedDimensions() {
-        assertEquals(360, receiptDisplayHeight(itemWidth = 360, canvasWidth = 0, canvasHeight = 1))
-        assertEquals(1, receiptDisplayHeight(itemWidth = 0, canvasWidth = 1, canvasHeight = 0))
+    fun clampsInvalidPersistedHeight() {
+        assertEquals(180, receiptDisplayHeight(itemWidth = 360, heightPercent = 0))
+        assertEquals(2, receiptDisplayHeight(itemWidth = 0, heightPercent = 999))
     }
 }
