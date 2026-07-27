@@ -2594,10 +2594,7 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> editReceipt(flow, card, card.thermalReceipt?.heightPercent ?: 125)
                     1 -> chooseReceiptHeight(card.thermalReceipt?.heightPercent ?: 125) { height ->
-                        card.thermalReceipt?.heightPercent = height
-                        card.updatedAt = System.currentTimeMillis()
-                        refreshFlow(flow, scrollToTop = false)
-                        saveState()
+                        editReceipt(flow, card, height)
                     }
                     2 -> {
                         card.thermalReceipt?.side?.path?.let(::deleteHandwritingFile)
@@ -2643,12 +2640,18 @@ class MainActivity : AppCompatActivity() {
         showHandwritingDialog(
             titleRes = R.string.dialog_receipt_title,
             existing = existing,
-            initialOptions = existing?.options ?: defaults,
+            initialOptions = existing?.options?.let { options ->
+                options.copy(
+                    canvasHeight = options.canvasWidth * heightPercent.coerceIn(50, 200) / 100
+                )
+            } ?: defaults,
             face = HandwritingFace.FRONT,
             onSave = { saved ->
                 if (saved != null) {
                     if (existing?.path != null && existing.path != saved.path) deleteHandwritingFile(existing.path)
-                    card.thermalReceipt = ThermalReceipt(saved, heightPercent.coerceIn(50, 200))
+                    // Use the dimensions actually saved by the handwriting editor. This keeps the
+                    // bill below the card pixel-for-pixel consistent with the editor canvas.
+                    card.thermalReceipt = ThermalReceipt(saved, receiptHeightPercent(saved))
                     card.updatedAt = System.currentTimeMillis()
                     refreshFlow(flow, scrollToTop = false)
                     saveState()
@@ -3829,15 +3832,18 @@ class MainActivity : AppCompatActivity() {
             computeSizeForRatio("portrait", R.string.handwriting_size_portrait, 4f / 3f)
         ).distinctBy { it.width to it.height }.toMutableList()
 
-        var selectedSize = sizeOptions.firstOrNull { it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight }?: sizeOptions.first()
-        if (selectedSize == null) {
-            selectedSize = CanvasSizeOption(
-                key = "custom",
-                label = getString(R.string.handwriting_size_custom, initialOptions.canvasWidth, initialOptions.canvasHeight),
-                width = initialOptions.canvasWidth,
-                height = initialOptions.canvasHeight
-            )
-            sizeOptions.add(0, selectedSize)
+        val matchingInitialSize = sizeOptions.firstOrNull {
+            it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight
+        }
+        var selectedSize = matchingInitialSize ?: CanvasSizeOption(
+            key = "custom",
+            label = getString(R.string.handwriting_size_custom, initialOptions.canvasWidth, initialOptions.canvasHeight),
+            width = initialOptions.canvasWidth,
+            height = initialOptions.canvasHeight
+        ).also {
+            // Receipt canvases commonly use tall custom ratios. They must be represented as a
+            // real option or the editor silently falls back to the unrelated full-page size.
+            sizeOptions.add(0, it)
         }
 
         extras.lockedCanvasSize?.let { (lockedWidth, lockedHeight) ->
