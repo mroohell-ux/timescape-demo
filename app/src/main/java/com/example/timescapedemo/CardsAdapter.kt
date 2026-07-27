@@ -524,10 +524,26 @@ class CardsAdapter(
         val attachment = item.thermalReceipt
         holder.receipt.isVisible = attachment != null
         HandwritingBitmapLoader.clear(holder.receipt)
-        if (attachment == null) return
-        // Keep the item and card at the exact width assigned by the LayoutManager. Scaling only
-        // the receipt visually prevents a narrow attachment from feeding back into card measure.
-        holder.receipt.scaleX = attachment.widthPercent.coerceIn(55, 100) / 100f
+        if (attachment == null) {
+            holder.receipt.layoutParams = holder.receipt.layoutParams.apply {
+                height = ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+            return
+        }
+        // The bitmap is decoded asynchronously. Reserve its aspect-ratio height up front; without
+        // this, an empty wrap_content ImageView measures to zero and the LayoutManager can cache
+        // that zero-height result before the bitmap arrives.
+        val itemWidth = holder.itemView.layoutParams.width
+            .takeIf { it > 0 }
+            ?: holder.itemView.resources.displayMetrics.widthPixels
+        val receiptWidth = (itemWidth * attachment.widthPercent.coerceIn(55, 100) / 100f)
+            .roundToInt()
+            .coerceAtLeast(1)
+        val options = attachment.side.options
+        holder.receipt.layoutParams = holder.receipt.layoutParams.apply {
+            width = receiptWidth
+            height = receiptDisplayHeight(receiptWidth, options.canvasWidth, options.canvasHeight)
+        }
         HandwritingBitmapLoader.load(
             holder.itemView.context,
             attachment.side.path,
@@ -1471,6 +1487,15 @@ private const val HANDWRITING_PREFETCH_DISTANCE = 2
 private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 5_000L
 private const val VIDEO_PROGRESS_UPDATE_INTERVAL_MS = 1_000L
 private const val VIDEO_PROGRESS_RESUME_MARGIN_MS = 1_000L
+
+internal fun receiptDisplayHeight(itemWidth: Int, canvasWidth: Int, canvasHeight: Int): Int {
+    val safeItemWidth = itemWidth.coerceAtLeast(1)
+    val safeCanvasWidth = canvasWidth.coerceAtLeast(1)
+    val safeCanvasHeight = canvasHeight.coerceAtLeast(1)
+    return (safeItemWidth.toLong() * safeCanvasHeight / safeCanvasWidth)
+        .coerceIn(1L, Int.MAX_VALUE.toLong())
+        .toInt()
+}
 
 private fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
