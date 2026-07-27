@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.example.timescapedemo.AspectRatioCardView
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:gravity="center_horizontal"
+    android:orientation="vertical">
+
+<com.example.timescapedemo.AspectRatioCardView
     android:id="@+id/card"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
@@ -278,6 +283,20 @@
             app:layout_constraintTop_toTopOf="parent" />
 
         <ImageButton
+            android:id="@+id/buttonReceipt"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginBottom="56dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/card_receipt_action_content_desc"
+            android:padding="8dp"
+            android:src="@drawable/ic_receipt"
+            android:tint="#FFFFFFFF"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <ImageButton
             android:id="@+id/buttonStickyNotes"
             android:layout_width="40dp"
             android:layout_height="40dp"
@@ -292,3 +311,15 @@
             app:layout_constraintEnd_toEndOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
+
+    <ImageView
+        android:id="@+id/thermalReceipt"
+        android:layout_width="280dp"
+        android:layout_height="wrap_content"
+        android:adjustViewBounds="true"
+        android:background="#FFFDF8"
+        android:contentDescription="@string/card_receipt_content_desc"
+        android:elevation="3dp"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+</LinearLayout>

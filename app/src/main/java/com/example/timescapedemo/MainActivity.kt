@@ -2571,6 +2571,89 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showReceiptOptions(card: CardItem) {
+        if (card.handwriting != null) return
+        val flow = flows.firstOrNull { candidate -> candidate.cards.any { it.id == card.id } } ?: return
+        if (card.thermalReceipt == null) {
+            chooseReceiptSize(card.thermalReceipt?.widthPercent ?: 80) { width ->
+                editReceipt(flow, card, width)
+            }
+            return
+        }
+        val actions = arrayOf(
+            getString(R.string.receipt_edit),
+            getString(R.string.receipt_resize),
+            getString(R.string.receipt_remove)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_receipt_title)
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> editReceipt(flow, card, card.thermalReceipt?.widthPercent ?: 80)
+                    1 -> chooseReceiptSize(card.thermalReceipt?.widthPercent ?: 80) { width ->
+                        card.thermalReceipt?.widthPercent = width
+                        card.updatedAt = System.currentTimeMillis()
+                        refreshFlow(flow, scrollToTop = false)
+                        saveState()
+                    }
+                    2 -> {
+                        card.thermalReceipt?.side?.path?.let(::deleteHandwritingFile)
+                        card.thermalReceipt = null
+                        card.updatedAt = System.currentTimeMillis()
+                        refreshFlow(flow, scrollToTop = false)
+                        saveState()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun chooseReceiptSize(current: Int, onChosen: (Int) -> Unit) {
+        val widths = intArrayOf(60, 80, 100)
+        val labels = arrayOf(
+            getString(R.string.receipt_size_narrow),
+            getString(R.string.receipt_size_regular),
+            getString(R.string.receipt_size_wide)
+        )
+        val selected = widths.indexOf(current).takeIf { it >= 0 } ?: 1
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_receipt_size_title)
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dialog.dismiss()
+                onChosen(widths[which])
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun editReceipt(flow: CardFlow, card: CardItem, widthPercent: Int) {
+        val existing = card.thermalReceipt?.side
+        val defaults = defaultHandwritingOptions().copy(
+            backgroundColor = Color.rgb(255, 253, 248),
+            brushColor = Color.rgb(30, 30, 30),
+            canvasWidth = 900,
+            canvasHeight = 1400,
+            paperStyle = HandwritingPaperStyle.PLAIN,
+            format = HandwritingFormat.PNG
+        )
+        showHandwritingDialog(
+            titleRes = R.string.dialog_receipt_title,
+            existing = existing,
+            initialOptions = existing?.options ?: defaults,
+            face = HandwritingFace.FRONT,
+            onSave = { saved ->
+                if (saved != null) {
+                    if (existing?.path != null && existing.path != saved.path) deleteHandwritingFile(existing.path)
+                    card.thermalReceipt = ThermalReceipt(saved, widthPercent.coerceIn(55, 100))
+                    card.updatedAt = System.currentTimeMillis()
+                    refreshFlow(flow, scrollToTop = false)
+                    saveState()
+                }
+            }
+        )
+    }
+
     private fun editImageCard(flow: CardFlow, card: CardItem, face: HandwritingFace) {
         if (face == HandwritingFace.BACK) {
             editImageCardBack(flow, card)
@@ -2684,6 +2767,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun removeImageCardBack(flow: CardFlow, card: CardItem) {
         card.imageHandwriting?.path?.let { deleteHandwritingFile(it) }
+        card.thermalReceipt?.side?.path?.let { deleteHandwritingFile(it) }
         card.imageHandwriting = null
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
@@ -6288,6 +6372,15 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+                card.thermalReceipt?.let { receipt ->
+                    handwritingSideToExportPayload(
+                        receipt.side, warnings, "Missing thermal receipt for $cardLabel"
+                    )?.let { export ->
+                        export.json.put("widthPercent", receipt.widthPercent)
+                        writer.name("thermalReceipt")
+                        writeJsonValue(writer, export.json)
+                    }
+                }
                 if (card.stickyNotes.isNotEmpty()) {
                     writer.name("stickyNotes")
                     writer.beginArray()
@@ -6696,7 +6789,8 @@ class MainActivity : AppCompatActivity() {
                             image = importedCard.image,
                             handwriting = importedCard.handwriting,
                             imageHandwriting = importedCard.imageHandwriting,
-                            stickyNotes = importedCard.stickyNotes.toMutableList()
+                            stickyNotes = importedCard.stickyNotes.toMutableList(),
+                            thermalReceipt = importedCard.thermalReceipt
                         )
                 }.toMutableList()
                 val newFlow = CardFlow(
@@ -6785,6 +6879,12 @@ class MainActivity : AppCompatActivity() {
                                                 duplicateTracker = imageBackPayloads
                                             )
                                         }
+                                        val thermalReceipt = cardObj.optJSONObject("thermalReceipt")?.let { receiptObj ->
+                                            decodeHandwritingSideFromExport(
+                                                receiptObj, createdFiles, warnings,
+                                                "$cardLabel (thermal receipt)", isImageBack = false
+                                            )?.let { ThermalReceipt(it, receiptObj.optInt("widthPercent", 80)) }
+                                        }
                                         val stickyNotes = parseStickyNotes(cardObj)
                                         val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
                                         val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
@@ -6798,7 +6898,8 @@ class MainActivity : AppCompatActivity() {
                                             image,
                                             imageHandwriting,
                                             recognizedText,
-                                            stickyNotes
+                                            stickyNotes,
+                                            thermalReceipt
                                         )
                                         parsedCards++
                                         onCardProgress?.invoke(parsedCards, totalCards)
@@ -7319,7 +7420,12 @@ class MainActivity : AppCompatActivity() {
                                 stickyNotes = stickyNotes,
                                 video = parseVideoCardData(cardObj.optJSONObject("video")),
                                 isCollected = cardObj.optBoolean("isCollected", false),
-                                collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 }
+                                collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 },
+                                thermalReceipt = cardObj.optJSONObject("thermalReceipt")?.let { receiptObj ->
+                                    parseHandwritingSide(receiptObj, baseHandwritingOptions)?.let {
+                                        ThermalReceipt(it, receiptObj.optInt("widthPercent", 80))
+                                    }
+                                }
                             )
                         }
                     }
@@ -7484,6 +7590,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 card.imageHandwriting?.let { back ->
                     obj.put("imageHandwriting", handwritingSideToJson(back))
+                }
+                card.thermalReceipt?.let { receipt ->
+                    obj.put("thermalReceipt", handwritingSideToJson(receipt.side).apply {
+                        put("widthPercent", receipt.widthPercent)
+                    })
                 }
                 card.video?.let { video ->
                     obj.put("video", JSONObject().apply {
@@ -7925,6 +8036,7 @@ class MainActivity : AppCompatActivity() {
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
                     onCollectionClick = { card, cardView -> holder.onCollectionTapped(card, cardView) },
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
+                    onReceiptClick = { card -> showReceiptOptions(card) },
                     onVideoProgressChanged = { cardId, progressMs, durationMs ->
                         updateVideoWatchProgress(cardId, progressMs, durationMs)
                     },
@@ -8401,7 +8513,8 @@ class MainActivity : AppCompatActivity() {
         val image: CardImage?,
         val imageHandwriting: HandwritingSide?,
         val recognizedText: String?,
-        val stickyNotes: List<StickyNote>
+        val stickyNotes: List<StickyNote>,
+        val thermalReceipt: ThermalReceipt?
     )
 
 }

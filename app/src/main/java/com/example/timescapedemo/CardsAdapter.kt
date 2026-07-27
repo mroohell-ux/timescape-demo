@@ -94,7 +94,15 @@ data class CardItem(
     val stickyNotes: MutableList<StickyNote> = mutableListOf(),
     var video: VideoCardData? = null,
     var isCollected: Boolean = false,
-    var collectionOriginalIndex: Int? = null
+    var collectionOriginalIndex: Int? = null,
+    var thermalReceipt: ThermalReceipt? = null
+)
+
+/** A handwritten thermal-paper attachment owned by its card. */
+data class ThermalReceipt(
+    var side: HandwritingSide,
+    /** Percentage of the card width used when displaying the receipt. */
+    var widthPercent: Int = 85
 )
 
 data class CardImage(
@@ -121,6 +129,7 @@ class CardsAdapter(
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onCollectionClick: ((CardItem, View) -> Unit)? = null,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
+    private val onReceiptClick: ((CardItem) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
@@ -142,6 +151,8 @@ class CardsAdapter(
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
         val collectionButton: ImageButton = v.findViewById(R.id.buttonCollectionStar)
+        val receiptButton: ImageButton = v.findViewById(R.id.buttonReceipt)
+        val receipt: ImageView = v.findViewById(R.id.thermalReceipt)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -344,6 +355,10 @@ class CardsAdapter(
                 getItemAt(index)?.let { card -> onCollectionClick?.invoke(card, vh.itemView) }
             }
         }
+        vh.receiptButton.setOnClickListener {
+            val index = vh.bindingAdapterPosition
+            if (index != RecyclerView.NO_POSITION) getItemAt(index)?.let { onReceiptClick?.invoke(it) }
+        }
         return vh
     }
 
@@ -370,6 +385,8 @@ class CardsAdapter(
         holder.collectionButton.contentDescription = holder.itemView.context.getString(
             if (item.isCollected) R.string.card_collection_restore_content_desc else R.string.card_collection_move_front_content_desc
         )
+        holder.receiptButton.isVisible = item.handwriting == null && onReceiptClick != null
+        bindReceipt(holder, item)
 
         // ---- Bind text ----
         holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(
@@ -501,6 +518,22 @@ class CardsAdapter(
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
         addShadow(holder.time, holder.title, holder.snippet)
+    }
+
+    private fun bindReceipt(holder: VH, item: CardItem) {
+        val attachment = item.thermalReceipt
+        holder.receipt.isVisible = attachment != null
+        HandwritingBitmapLoader.clear(holder.receipt)
+        if (attachment == null) return
+        val params = holder.receipt.layoutParams as ViewGroup.MarginLayoutParams
+        params.width = (holder.itemView.resources.displayMetrics.widthPixels *
+            attachment.widthPercent.coerceIn(55, 100) / 100f).roundToInt()
+        holder.receipt.layoutParams = params
+        HandwritingBitmapLoader.load(
+            holder.itemView.context,
+            attachment.side.path,
+            holder.receipt
+        ) { bitmap -> holder.receipt.setImageBitmap(bitmap) }
     }
 
     private fun bindVideoCard(
@@ -1457,6 +1490,9 @@ private fun CardItem.deepCopy(): CardItem = copy(
     },
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
     video = video?.copy(),
+    thermalReceipt = thermalReceipt?.let { ThermalReceipt(
+        HandwritingSide(it.side.path, it.side.options.copy()), it.widthPercent
+    ) },
     relativeTimeText = relativeTimeText,
     stickyNotes = stickyNotes.map { it.copy() }.toMutableList()
 )

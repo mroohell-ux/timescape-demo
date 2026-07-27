@@ -276,6 +276,16 @@
     <string name="handwriting_eraser_type_round">Round</string>
     <string name="handwriting_eraser_type_block">Block</string>
     <string name="card_sticky_notes_content_desc">Open sticky notes</string>
+    <string name="card_receipt_action_content_desc">Attach or edit thermal receipt</string>
+    <string name="card_receipt_content_desc">Handwritten thermal receipt attached to this card</string>
+    <string name="dialog_receipt_size_title">Receipt width</string>
+    <string name="receipt_size_narrow">Narrow (60%%)</string>
+    <string name="receipt_size_regular">Regular (80%%)</string>
+    <string name="receipt_size_wide">Wide (100%%)</string>
+    <string name="dialog_receipt_title">Write receipt</string>
+    <string name="receipt_edit">Edit handwriting</string>
+    <string name="receipt_resize">Change size</string>
+    <string name="receipt_remove">Remove receipt</string>
     <string name="card_collection_move_front_content_desc">Collect card and move it to the front</string>
     <string name="card_collection_restore_content_desc">Uncollect card and restore original position</string>
     <string name="dialog_sticky_notes_title">Card sticky notes</string>
