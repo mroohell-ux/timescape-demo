@@ -2571,9 +2571,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showReceiptOptions(card: CardItem) {
+    private fun showReceiptOptions(adapterCard: CardItem) {
+        val flow = flows.firstOrNull { candidate -> candidate.cards.any { it.id == adapterCard.id } } ?: return
+        // CardsAdapter intentionally exposes defensive copies. Always resolve the flow-owned card
+        // before editing so the attachment survives submitList/refreshFlow.
+        val card = flow.cards.firstOrNull { it.id == adapterCard.id } ?: return
         if (card.handwriting != null) return
-        val flow = flows.firstOrNull { candidate -> candidate.cards.any { it.id == card.id } } ?: return
         if (card.thermalReceipt == null) {
             chooseReceiptSize(card.thermalReceipt?.widthPercent ?: 80) { width ->
                 editReceipt(flow, card, width)
