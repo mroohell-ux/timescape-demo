@@ -332,6 +332,10 @@
     <string name="debug_export_duplicate_image_back">Back handwriting for %1$s is identical to %2$s. The export keeps one copy and reuses it for the match. If those backs should be different, update them before exporting again.</string>
     <string name="debug_export_duplicate_image_back_grouped">Back handwriting for %1$s is identical to these cards. The export keeps one copy and reuses it for the matches. If those backs should be different, update them before exporting again:\n%2$s.</string>
     <string name="flow_library_button">All flows</string>
+    <string name="menu_two_flow_landscape">Show two flows in landscape</string>
+    <string name="flow_inactive_preview">Preview</string>
+    <string name="snackbar_two_flow_landscape_enabled">Two-flow landscape view enabled</string>
+    <string name="snackbar_two_flow_landscape_disabled">Two-flow landscape view disabled</string>
     <string name="flow_library_title">Jump to flow</string>
     <string name="flow_library_current">Current</string>
     <plurals name="flow_library_card_count">

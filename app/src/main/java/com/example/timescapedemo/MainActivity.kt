@@ -20,6 +20,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.BitmapDrawable
@@ -219,6 +220,7 @@ class MainActivity : AppCompatActivity() {
     private var cardFontPath: String? = null
     private var cardFontDisplayName: String? = null
     private var isFlowReorderModeEnabled: Boolean = false
+    private var isTwoFlowLandscapeEnabled: Boolean = false
     private var isFlowLabelsTemporarilyVisible: Boolean = false
     private var isFlowLabelsWidgetInteractionActive: Boolean = false
     private var flowLabelsInteractionStartedAtMs: Long = 0L
@@ -546,6 +548,7 @@ class MainActivity : AppCompatActivity() {
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
         isFlowReorderModeEnabled = prefs.getBoolean(KEY_FLOW_REORDER_MODE_ENABLED, false)
+        isTwoFlowLandscapeEnabled = prefs.getBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, false)
         cardTypeface = cardFontPath?.let { loadCardTypeface(it) }
         if (cardTypeface == null) {
             cardFontPath = null
@@ -816,21 +819,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupFlowPager() {
-        val density = resources.displayMetrics.density
         flowPager.adapter = flowAdapter
         flowPager.offscreenPageLimit = 1
         flowPager.clipToPadding = false
         flowPager.clipChildren = false
         (flowPager.getChildAt(0) as? RecyclerView)?.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
-        val transformer = CompositePageTransformer().apply {
-            addTransformer(MarginPageTransformer((24 * density).roundToInt()))
-            addTransformer { page, position ->
-                val scale = 0.9f + (1 - abs(position)) * 0.1f
-                page.scaleY = scale
-                page.alpha = 0.6f + (1 - abs(position)) * 0.4f
-            }
-        }
-        flowPager.setPageTransformer(transformer)
+        applyFlowPagerPresentation()
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
@@ -839,10 +833,90 @@ class MainActivity : AppCompatActivity() {
                 updateChipSelection(position)
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
+                flowPager.requestTransform()
             }
         })
         flowPager.setOnDragListener { _, event ->
             handleCardMovePagerDrag(event)
+        }
+    }
+
+    private fun applyFlowPagerPresentation() {
+        if (!::flowPager.isInitialized) return
+        val showTwoFlows = isTwoFlowLandscapeEnabled &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (showTwoFlows) {
+            flowPager.offscreenPageLimit = 1
+            flowPager.setPageTransformer { page, position ->
+                page.pivotX = 0f
+                page.pivotY = page.height / 2f
+                page.scaleX = 1f
+                page.scaleY = 1f
+                val showPreviousOnRight = position < -0.5f &&
+                    flowPager.currentItem == flows.lastIndex
+                page.translationX = if (showPreviousOnRight) {
+                    -position * page.width * 1.5f
+                } else {
+                    -position * page.width / 2f
+                }
+                page.alpha = if (kotlin.math.abs(position) < 0.01f) 1f else 0.72f
+                val paneWidth = (page.width / 2).coerceAtLeast(1)
+                page.findViewById<View>(R.id.recyclerFlowCards)?.let { setFlowPaneWidth(it, paneWidth) }
+                page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
+                    setFlowPaneWidth(overlay, paneWidth)
+                    overlay.isVisible = kotlin.math.abs(position) >= 0.01f
+                }
+            }
+        } else {
+            val density = resources.displayMetrics.density
+            val transformer = CompositePageTransformer().apply {
+                addTransformer(MarginPageTransformer((24 * density).roundToInt()))
+                addTransformer { page, position ->
+                    page.pivotX = page.width / 2f
+                    page.pivotY = page.height / 2f
+                    page.scaleX = 1f
+                    page.translationX = 0f
+                    page.scaleY = 0.9f + (1 - abs(position)) * 0.1f
+                    page.alpha = 0.6f + (1 - abs(position)) * 0.4f
+                    page.findViewById<View>(R.id.recyclerFlowCards)?.let {
+                        setFlowPaneWidth(it, ViewGroup.LayoutParams.MATCH_PARENT)
+                    }
+                    page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
+                        setFlowPaneWidth(overlay, ViewGroup.LayoutParams.MATCH_PARENT)
+                        overlay.isVisible = false
+                    }
+                }
+            }
+            flowPager.setPageTransformer(transformer)
+        }
+        flowPager.requestTransform()
+    }
+
+    private fun setFlowPaneWidth(view: View, width: Int) {
+        val params = view.layoutParams
+        if (params.width == width) return
+        params.width = width
+        view.layoutParams = params
+    }
+
+    private fun setTwoFlowLandscapeEnabled(enabled: Boolean) {
+        isTwoFlowLandscapeEnabled = enabled
+        prefs.edit().putBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, enabled).apply()
+        applyFlowPagerPresentation()
+        updateTwoFlowLandscapeMenuState()
+        snackbar(
+            getString(
+                if (enabled) R.string.snackbar_two_flow_landscape_enabled
+                else R.string.snackbar_two_flow_landscape_disabled
+            )
+        )
+    }
+
+    private fun updateTwoFlowLandscapeMenuState() {
+        if (!::toolbar.isInitialized) return
+        toolbar.menu.findItem(R.id.action_two_flow_landscape)?.let { item ->
+            item.isVisible = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            item.isChecked = isTwoFlowLandscapeEnabled
         }
     }
 
@@ -852,10 +926,15 @@ class MainActivity : AppCompatActivity() {
         setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
         updateFlowReorderModeMenuState()
+        updateTwoFlowLandscapeMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
                 R.id.action_export_flow -> { launchExportCurrentFlow(); true }
+                R.id.action_two_flow_landscape -> {
+                    setTwoFlowLandscapeEnabled(!isTwoFlowLandscapeEnabled)
+                    true
+                }
                 R.id.action_add_card -> {
                     if (currentFlow()?.id == VIDEO_FLOW_ID) {
                         snackbar(getString(R.string.snackbar_video_folder_missing))
@@ -7731,6 +7810,7 @@ class MainActivity : AppCompatActivity() {
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
             if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
             putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled)
+            putBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, isTwoFlowLandscapeEnabled)
             remove(KEY_CARDS)
             apply()
         }
@@ -8577,6 +8657,7 @@ private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
 private const val KEY_FLOW_REORDER_MODE_ENABLED = "flow_reorder_mode_enabled"
+private const val KEY_TWO_FLOW_LANDSCAPE_ENABLED = "two_flow_landscape_enabled"
 private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
