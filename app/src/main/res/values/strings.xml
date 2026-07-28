@@ -334,6 +334,7 @@
     <string name="flow_library_button">All flows</string>
     <string name="menu_two_flow_landscape">Show two flows in landscape</string>
     <string name="flow_inactive_preview">Preview</string>
+    <string name="activate_flow_preview">Activate this flow</string>
     <string name="snackbar_two_flow_landscape_enabled">Two-flow landscape view enabled</string>
     <string name="snackbar_two_flow_landscape_disabled">Two-flow landscape view disabled</string>
     <string name="flow_library_title">Jump to flow</string>

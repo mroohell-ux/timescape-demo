@@ -898,6 +898,15 @@ class MainActivity : AppCompatActivity() {
         showFlowLabelsWidgetTemporarily()
     }
 
+    private fun activateFlowPane(targetIndex: Int) {
+        if (flows.isEmpty()) return
+        val target = targetIndex.coerceIn(0, flows.lastIndex)
+        if (target == flowPager.currentItem) return
+        captureVisibleFlowStates()
+        flowPager.setCurrentItem(target, false)
+        showFlowLabelsWidgetTemporarily()
+    }
+
     private fun applyFlowPagerPresentation() {
         if (!::flowPager.isInitialized) return
         val showTwoFlows = isTwoFlowPresentationActive()
@@ -8213,6 +8222,11 @@ class MainActivity : AppCompatActivity() {
             val layoutManager = createLayoutManager(flowPaneViewportWidth())
             recycler.layoutManager = layoutManager
             installTwoFlowSwipeNavigation(recycler)
+            lateinit var holder: FlowVH
+            inactiveOverlay.setOnClickListener {
+                val target = holder.bindingAdapterPosition
+                if (target != RecyclerView.NO_POSITION) activateFlowPane(target)
+            }
             val touchSlop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
             var overlayDownX = 0f
             var overlayDownY = 0f
@@ -8245,7 +8259,6 @@ class MainActivity : AppCompatActivity() {
             }
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
-            lateinit var holder: FlowVH
                 val adapter = CardsAdapter(
                     cardTint,
                     onItemClick = { index -> holder.onCardTapped(index) },
