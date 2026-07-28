@@ -824,7 +824,7 @@ class MainActivity : AppCompatActivity() {
         flowPager.clipToPadding = false
         flowPager.clipChildren = false
         (flowPager.getChildAt(0) as? RecyclerView)?.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
-        installTwoFlowSwipeNavigation()
+        (flowPager.getChildAt(0) as? RecyclerView)?.let(::installTwoFlowSwipeNavigation)
         applyFlowPagerPresentation()
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -842,10 +842,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun installTwoFlowSwipeNavigation() {
-        val pagerRecycler = flowPager.getChildAt(0) as? RecyclerView ?: return
+    private fun installTwoFlowSwipeNavigation(touchSurface: RecyclerView) {
         val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
-        pagerRecycler.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+        touchSurface.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
             private var downX = 0f
             private var downY = 0f
             private var handlingHorizontalSwipe = false
@@ -8210,8 +8209,33 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+            val inactiveOverlay = view.findViewById<View>(R.id.inactiveFlowOverlay)
             val layoutManager = createLayoutManager(flowPaneViewportWidth())
             recycler.layoutManager = layoutManager
+            installTwoFlowSwipeNavigation(recycler)
+            val touchSlop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+            var overlayDownX = 0f
+            var overlayDownY = 0f
+            inactiveOverlay.setOnTouchListener { overlay, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        overlayDownX = event.x
+                        overlayDownY = event.y
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val dx = event.x - overlayDownX
+                        val dy = event.y - overlayDownY
+                        if (kotlin.math.abs(dx) > touchSlop &&
+                            kotlin.math.abs(dx) > kotlin.math.abs(dy)
+                        ) {
+                            navigateTwoFlowSwipe(dx)
+                        } else {
+                            overlay.performClick()
+                        }
+                    }
+                }
+                true
+            }
             recycler.setHasFixedSize(true)
             recycler.itemAnimator = DefaultItemAnimator().apply {
                 moveDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
