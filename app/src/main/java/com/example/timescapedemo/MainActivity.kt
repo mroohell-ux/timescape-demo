@@ -824,6 +824,7 @@ class MainActivity : AppCompatActivity() {
         flowPager.clipToPadding = false
         flowPager.clipChildren = false
         (flowPager.getChildAt(0) as? RecyclerView)?.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+        installTwoFlowSwipeNavigation()
         applyFlowPagerPresentation()
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -841,10 +842,67 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun installTwoFlowSwipeNavigation() {
+        val pagerRecycler = flowPager.getChildAt(0) as? RecyclerView ?: return
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        pagerRecycler.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+            private var downX = 0f
+            private var downY = 0f
+            private var handlingHorizontalSwipe = false
+
+            override fun onInterceptTouchEvent(rv: RecyclerView, event: MotionEvent): Boolean {
+                if (!isTwoFlowPresentationActive()) return false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.x
+                        downY = event.y
+                        handlingHorizontalSwipe = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.x - downX
+                        val dy = event.y - downY
+                        if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                            handlingHorizontalSwipe = true
+                            return true
+                        }
+                    }
+                    MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> handlingHorizontalSwipe = false
+                }
+                return false
+            }
+
+            override fun onTouchEvent(rv: RecyclerView, event: MotionEvent) {
+                if (!handlingHorizontalSwipe) return
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_UP -> {
+                        val dx = event.x - downX
+                        navigateTwoFlowSwipe(dx)
+                        handlingHorizontalSwipe = false
+                    }
+                    MotionEvent.ACTION_CANCEL -> handlingHorizontalSwipe = false
+                }
+            }
+        })
+    }
+
+    private fun isTwoFlowPresentationActive(): Boolean =
+        isTwoFlowLandscapeEnabled &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    private fun navigateTwoFlowSwipe(horizontalDistance: Float) {
+        if (flows.isEmpty() || horizontalDistance == 0f) return
+        val current = flowPager.currentItem.coerceIn(0, flows.lastIndex)
+        val target = twoFlowSwipeTarget(current, flows.size, horizontalDistance)
+        if (target == current) return
+        captureVisibleFlowStates()
+        flowPager.setCurrentItem(target, false)
+        showFlowLabelsWidgetTemporarily()
+    }
+
     private fun applyFlowPagerPresentation() {
         if (!::flowPager.isInitialized) return
-        val showTwoFlows = isTwoFlowLandscapeEnabled &&
-            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val showTwoFlows = isTwoFlowPresentationActive()
+        flowPager.isUserInputEnabled = !showTwoFlows
         if (showTwoFlows) {
             flowPager.offscreenPageLimit = 1
             flowPager.setPageTransformer { page, position ->
@@ -8654,6 +8712,22 @@ class MainActivity : AppCompatActivity() {
         val thermalReceipt: ThermalReceipt?
     )
 
+}
+
+internal fun twoFlowSwipeTarget(
+    currentIndex: Int,
+    itemCount: Int,
+    horizontalDistance: Float
+): Int {
+    if (itemCount <= 0) return 0
+    val current = currentIndex.coerceIn(0, itemCount - 1)
+    // Product direction: swiping right advances; swiping left goes to the previous flow.
+    val delta = when {
+        horizontalDistance > 0f -> 1
+        horizontalDistance < 0f -> -1
+        else -> 0
+    }
+    return (current + delta).coerceIn(0, itemCount - 1)
 }
 
 private const val TAG = "MainActivity"
