@@ -861,7 +861,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 page.alpha = if (kotlin.math.abs(position) < 0.01f) 1f else 0.72f
                 val paneWidth = (page.width / 2).coerceAtLeast(1)
-                page.findViewById<View>(R.id.recyclerFlowCards)?.let { setFlowPaneWidth(it, paneWidth) }
+                page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let { recycler ->
+                    setFlowPaneWidth(recycler, paneWidth)
+                    setFlowPaneTopPadding(recycler, toolbar.height.coerceAtLeast(0))
+                }
                 page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
                     setFlowPaneWidth(overlay, paneWidth)
                     overlay.isVisible = kotlin.math.abs(position) >= 0.01f
@@ -878,8 +881,9 @@ class MainActivity : AppCompatActivity() {
                     page.translationX = 0f
                     page.scaleY = 0.9f + (1 - abs(position)) * 0.1f
                     page.alpha = 0.6f + (1 - abs(position)) * 0.4f
-                    page.findViewById<View>(R.id.recyclerFlowCards)?.let {
+                    page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let {
                         setFlowPaneWidth(it, ViewGroup.LayoutParams.MATCH_PARENT)
+                        setFlowPaneTopPadding(it, 0)
                     }
                     page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
                         setFlowPaneWidth(overlay, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -899,17 +903,23 @@ class MainActivity : AppCompatActivity() {
         view.layoutParams = params
     }
 
+    private fun setFlowPaneTopPadding(recycler: RecyclerView, top: Int) {
+        if (recycler.paddingTop == top) return
+        recycler.updatePadding(top = top)
+    }
+
     private fun setTwoFlowLandscapeEnabled(enabled: Boolean) {
         isTwoFlowLandscapeEnabled = enabled
         prefs.edit().putBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, enabled).apply()
-        applyFlowPagerPresentation()
-        updateTwoFlowLandscapeMenuState()
         snackbar(
             getString(
                 if (enabled) R.string.snackbar_two_flow_landscape_enabled
                 else R.string.snackbar_two_flow_landscape_disabled
             )
         )
+        // Flow layout managers calculate card geometry from their viewport at construction time.
+        // Recreate so both panes receive half-width geometry instead of clipping full-screen cards.
+        toolbar.post { recreate() }
     }
 
     private fun updateTwoFlowLandscapeMenuState() {
@@ -2340,12 +2350,12 @@ class MainActivity : AppCompatActivity() {
         return flowControllers[flow.id]
     }
 
-    private fun createLayoutManager(): RightRailFlowLayoutManager {
+    private fun createLayoutManager(viewportWidthPx: Int = resources.displayMetrics.widthPixels): RightRailFlowLayoutManager {
         val metrics = resources.displayMetrics
         val density = metrics.density
         val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
-        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
+        val minSidePx = (180 * density).roundToInt()
+        val availableWidth = (viewportWidthPx - horizontalInsetPx).coerceAtLeast(minSidePx)
         val baseSide = availableWidth
         val focusSide = availableWidth
         val pitch = (availableWidth * 0.26f).roundToInt()
@@ -2355,6 +2365,13 @@ class MainActivity : AppCompatActivity() {
             itemPitchPx = pitch,
             rightInsetPx = (8 * density).roundToInt()
         )
+    }
+
+    private fun flowPaneViewportWidth(): Int {
+        val fullWidth = resources.displayMetrics.widthPixels
+        val useTwoPanes = isTwoFlowLandscapeEnabled &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        return if (useTwoPanes) (fullWidth / 2).coerceAtLeast(1) else fullWidth
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
@@ -8135,7 +8152,7 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
-            val layoutManager = createLayoutManager()
+            val layoutManager = createLayoutManager(flowPaneViewportWidth())
             recycler.layoutManager = layoutManager
             recycler.setHasFixedSize(true)
             recycler.itemAnimator = DefaultItemAnimator().apply {
