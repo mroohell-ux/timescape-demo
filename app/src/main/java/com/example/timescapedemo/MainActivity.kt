@@ -8773,10 +8773,10 @@ internal fun twoFlowSwipeTarget(
 ): Int {
     if (itemCount <= 0) return 0
     val current = currentIndex.coerceIn(0, itemCount - 1)
-    // Product direction: swiping right advances; swiping left goes to the previous flow.
+    // Follow pager convention: swiping left advances; swiping right returns to the previous flow.
     val delta = when {
-        horizontalDistance > 0f -> 1
-        horizontalDistance < 0f -> -1
+        horizontalDistance > 0f -> -1
+        horizontalDistance < 0f -> 1
         else -> 0
     }
     return (current + delta).coerceIn(0, itemCount - 1)
