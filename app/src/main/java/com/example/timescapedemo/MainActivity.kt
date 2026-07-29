@@ -520,7 +520,7 @@ class MainActivity : AppCompatActivity() {
     private fun handleFlowArrowKey(delta: Int): Boolean {
         if (delta == 0 || !::flowPager.isInitialized || flows.isEmpty()) return false
         if (isKeyboardNavigationSuppressed()) return false
-        val current = flowPager.currentItem.coerceIn(0, flows.lastIndex)
+        val current = selectedFlowIndex.coerceIn(0, flows.lastIndex)
         val target = (current + delta).coerceIn(0, flows.lastIndex)
         captureVisibleFlowStates()
         if (target != current) {
@@ -890,10 +890,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun navigateTwoFlowSwipe(horizontalDistance: Float) {
         if (flows.isEmpty() || horizontalDistance == 0f) return
-        val current = flowPager.currentItem.coerceIn(0, flows.lastIndex)
+        val current = selectedFlowIndex.coerceIn(0, flows.lastIndex)
         val target = twoFlowSwipeTarget(current, flows.size, horizontalDistance)
         if (target == current) return
         captureVisibleFlowStates()
+        selectedFlowIndex = target
+        prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, target).apply()
+        updateChipSelection(target)
+        updateToolbarSubtitle()
+        updateShuffleMenuState()
         flowPager.setCurrentItem(target, true)
         showFlowLabelsWidgetTemporarily()
     }
@@ -901,9 +906,15 @@ class MainActivity : AppCompatActivity() {
     private fun activateFlowPane(targetIndex: Int) {
         if (flows.isEmpty()) return
         val target = targetIndex.coerceIn(0, flows.lastIndex)
-        if (target == flowPager.currentItem) return
+        if (target == selectedFlowIndex) return
         captureVisibleFlowStates()
-        flowPager.setCurrentItem(target, true)
+        // Pane activation only changes which visible flow owns actions. It must not page/swipe.
+        selectedFlowIndex = target
+        prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, target).apply()
+        updateChipSelection(target)
+        updateToolbarSubtitle()
+        updateShuffleMenuState()
+        flowPager.requestTransform()
         showFlowLabelsWidgetTemporarily()
     }
 
@@ -925,7 +936,11 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     -position * page.width / 2f
                 }
-                page.alpha = if (kotlin.math.abs(position) < 0.01f) 1f else 0.72f
+                val pagerRecycler = flowPager.getChildAt(0) as? RecyclerView
+                val pageIndex = pagerRecycler?.getChildAdapterPosition(page)
+                    ?: RecyclerView.NO_POSITION
+                val isActivePane = pageIndex == selectedFlowIndex
+                page.alpha = if (isActivePane) 1f else 0.72f
                 val paneWidth = (page.width / 2).coerceAtLeast(1)
                 page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let { recycler ->
                     setFlowPaneWidth(recycler, paneWidth)
@@ -933,7 +948,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
                     setFlowPaneWidth(overlay, paneWidth)
-                    overlay.isVisible = kotlin.math.abs(position) >= 0.01f
+                    overlay.isVisible = !isActivePane
                 }
             }
         } else {
@@ -1890,7 +1905,7 @@ class MainActivity : AppCompatActivity() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
         val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
-        val currentIndex = flowPager.currentItem
+        val currentIndex = selectedFlowIndex
         val targetIndex = when {
             positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
             positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
@@ -2378,7 +2393,7 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_cannot_delete_last_flow))
             return
         }
-        val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
+        val currentItem = selectedFlowIndex.coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
         updateFlowBarVisibility()
         flowShuffleStates.remove(removed.id)
@@ -2409,7 +2424,7 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_deleted_flow, removed.name))
     }
 
-    private fun currentFlow(): CardFlow? = flows.getOrNull(flowPager.currentItem)
+    private fun currentFlow(): CardFlow? = flows.getOrNull(selectedFlowIndex)
 
     private fun currentController(): FlowPageController? {
         val flow = currentFlow() ?: return null
@@ -7887,7 +7902,7 @@ class MainActivity : AppCompatActivity() {
             else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
-            val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
+            val currentIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
