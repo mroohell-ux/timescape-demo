@@ -216,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
     private var lastStylusButtonEventTime: Long = Long.MIN_VALUE
+    private var samsungSpenRemoteBridge: SamsungSpenRemoteBridge? = null
     private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var cardTypeface: Typeface? = null
@@ -520,9 +521,7 @@ class MainActivity : AppCompatActivity() {
             event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY ||
             event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL
         if (!isStylusButton) return false
-        if (event.eventTime == lastStylusButtonEventTime) return true
-        lastStylusButtonEventTime = event.eventTime
-        return currentController()?.flipCurrentMainCard() == true
+        return dispatchStylusCardFlip(event.eventTime)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
@@ -543,9 +542,13 @@ class MainActivity : AppCompatActivity() {
             event.actionButton == MotionEvent.BUTTON_STYLUS_SECONDARY ||
             event.actionButton == MotionEvent.BUTTON_SECONDARY
         if (!supportedButton) return false
-        // Some Samsung devices dispatch the same S Pen press through both generic and touch paths.
-        if (event.eventTime == lastStylusButtonEventTime) return true
-        lastStylusButtonEventTime = event.eventTime
+        return dispatchStylusCardFlip(event.eventTime)
+    }
+
+    private fun dispatchStylusCardFlip(eventTime: Long): Boolean {
+        // Samsung firmware can report one press through the Remote SDK plus Android input paths.
+        if (eventTime - lastStylusButtonEventTime in 0..STYLUS_BUTTON_DEDUP_WINDOW_MS) return true
+        lastStylusButtonEventTime = eventTime
         return currentController()?.flipCurrentMainCard() == true
     }
 
@@ -605,6 +608,9 @@ class MainActivity : AppCompatActivity() {
         pendingExportFileName = savedInstanceState?.getString(STATE_PENDING_EXPORT_FILE_NAME)
 
         initializeTextToSpeech()
+        samsungSpenRemoteBridge = SamsungSpenRemoteBridge(this) {
+            runOnUiThread { dispatchStylusCardFlip(SystemClock.uptimeMillis()) }
+        }
 
         drawerLayout = findViewById(R.id.drawerLayout)
         val navigationView = findViewById<NavigationView>(R.id.navigationView)
@@ -855,6 +861,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        samsungSpenRemoteBridge?.connect()
         restartStickyNoteNotificationSchedule()
     }
 
@@ -7991,12 +7998,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        samsungSpenRemoteBridge?.disconnect()
         super.onStop()
         videoProgressPersistJob?.cancel()
         saveState()
     }
 
     override fun onDestroy() {
+        samsungSpenRemoteBridge?.disconnect()
+        samsungSpenRemoteBridge = null
         dismissSearchResultsDialog()
         stickyNoteNotificationJob?.cancel()
         stickyNoteNotificationJob = null
@@ -8899,6 +8909,7 @@ private const val EXTRA_TARGET_STICKY_NOTE_ID = "extra/target_sticky_note_id"
 private const val EXTRA_TARGET_STICKY_NOTE_SHOW_BACK = "extra/target_sticky_note_show_back"
 private const val STICKY_NOTE_NOTIFICATION_CHANNEL_ID = "sticky_notes"
 private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
+private const val STYLUS_BUTTON_DEDUP_WINDOW_MS = 250L
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val FLOW_REORDER_DRAG_LABEL = "flow_reorder_drag"
