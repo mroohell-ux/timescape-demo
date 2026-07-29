@@ -894,7 +894,7 @@ class MainActivity : AppCompatActivity() {
         val target = twoFlowSwipeTarget(current, flows.size, horizontalDistance)
         if (target == current) return
         captureVisibleFlowStates()
-        flowPager.setCurrentItem(target, false)
+        flowPager.setCurrentItem(target, true)
         showFlowLabelsWidgetTemporarily()
     }
 
@@ -903,7 +903,7 @@ class MainActivity : AppCompatActivity() {
         val target = targetIndex.coerceIn(0, flows.lastIndex)
         if (target == flowPager.currentItem) return
         captureVisibleFlowStates()
-        flowPager.setCurrentItem(target, false)
+        flowPager.setCurrentItem(target, true)
         showFlowLabelsWidgetTemporarily()
     }
 
