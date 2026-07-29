@@ -8414,22 +8414,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            fun flipCurrentMainCard(): Boolean {
-                if (bindingAdapterPosition == RecyclerView.NO_POSITION || adapter.itemCount == 0) {
-                    return false
-                }
-                val index = layoutManager.currentSelectionIndex()
-                    ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
-                if (!adapter.canFlipCardAt(index)) return false
-                val viewHolder = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
-                    ?: return false
-                val flipped = adapter.toggleCardFace(viewHolder) != null
-                if (flipped) {
-                    viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                }
-                return flipped
-            }
-
             fun onCardDoubleTapped(card: CardItem, index: Int) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
                 val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
@@ -8623,6 +8607,20 @@ class MainActivity : AppCompatActivity() {
             updateCardCounter(target)
             maybeAutoPlayCenteredVideo(target)
             return true
+        }
+
+        fun flipCurrentMainCard(): Boolean {
+            if (adapter.itemCount == 0) return false
+            val index = layoutManager.currentSelectionIndex()
+                ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            if (!adapter.canFlipCardAt(index)) return false
+            val viewHolder = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                ?: return false
+            val flipped = adapter.toggleCardFace(viewHolder) != null
+            if (flipped) {
+                viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            }
+            return flipped
         }
 
         fun dispose() {
