@@ -43,6 +43,7 @@ import android.view.DragEvent
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -214,6 +215,7 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+    private var lastStylusButtonEventTime: Long = Long.MIN_VALUE
     private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var cardTypeface: Typeface? = null
@@ -498,6 +500,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (handleStylusButtonKeyEvent(event)) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
@@ -507,6 +510,43 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun handleStylusButtonKeyEvent(event: KeyEvent): Boolean {
+        if (!::flowPager.isInitialized) return false
+        if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return false
+        val isStylusButton = event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY ||
+            event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY ||
+            event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY ||
+            event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL
+        if (!isStylusButton) return false
+        if (event.eventTime == lastStylusButtonEventTime) return true
+        lastStylusButtonEventTime = event.eventTime
+        return currentController()?.flipCurrentMainCard() == true
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (handleStylusButtonEvent(event)) return true
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (handleStylusButtonEvent(event)) return true
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun handleStylusButtonEvent(event: MotionEvent): Boolean {
+        if (!::flowPager.isInitialized) return false
+        if (!event.isFromSource(InputDevice.SOURCE_STYLUS)) return false
+        if (event.actionMasked != MotionEvent.ACTION_BUTTON_PRESS) return false
+        val supportedButton = event.actionButton == MotionEvent.BUTTON_STYLUS_PRIMARY ||
+            event.actionButton == MotionEvent.BUTTON_STYLUS_SECONDARY ||
+            event.actionButton == MotionEvent.BUTTON_SECONDARY
+        if (!supportedButton) return false
+        // Some Samsung devices dispatch the same S Pen press through both generic and touch paths.
+        if (event.eventTime == lastStylusButtonEventTime) return true
+        lastStylusButtonEventTime = event.eventTime
+        return currentController()?.flipCurrentMainCard() == true
     }
 
     private fun handleCardArrowKey(delta: Int): Boolean {
@@ -8362,6 +8402,22 @@ class MainActivity : AppCompatActivity() {
                         recycler.smoothScrollBy(0, delta)
                     }
                 }
+            }
+
+            fun flipCurrentMainCard(): Boolean {
+                if (bindingAdapterPosition == RecyclerView.NO_POSITION || adapter.itemCount == 0) {
+                    return false
+                }
+                val index = layoutManager.currentSelectionIndex()
+                    ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+                if (!adapter.canFlipCardAt(index)) return false
+                val viewHolder = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                    ?: return false
+                val flipped = adapter.toggleCardFace(viewHolder) != null
+                if (flipped) {
+                    viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                }
+                return flipped
             }
 
             fun onCardDoubleTapped(card: CardItem, index: Int) {
