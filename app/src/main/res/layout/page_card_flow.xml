@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -27,5 +28,55 @@
         android:textSize="14sp"
         android:textStyle="bold"
         android:visibility="gone"/>
+
+    <LinearLayout
+        android:id="@+id/videoFolderTagsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="86dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_card_count_indicator"
+        android:elevation="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp"
+        android:visibility="gone">
+
+        <HorizontalScrollView
+            android:id="@+id/videoFolderTagsScroll"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/videoFolderTags"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:chipSpacingHorizontal="8dp"
+                app:chipSpacingVertical="6dp"
+                app:singleLine="true"
+                app:singleSelection="true" />
+        </HorizontalScrollView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonAddVideoFolderTag"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/menu_pick_video_folder"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:backgroundTint="#66FFFFFF"
+            app:icon="@drawable/ic_add"
+            app:iconTint="@android:color/white"
+            app:rippleColor="#22FFFFFF" />
+    </LinearLayout>
 
 </FrameLayout>
