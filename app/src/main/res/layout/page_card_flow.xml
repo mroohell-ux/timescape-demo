@@ -32,7 +32,6 @@
         android:id="@+id/inactiveFlowOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#08000000"
         android:clickable="true"
         android:contentDescription="@string/activate_flow_preview"
         android:focusable="true"
