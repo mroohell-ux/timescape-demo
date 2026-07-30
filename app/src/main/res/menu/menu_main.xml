@@ -19,6 +19,13 @@
         app:showAsAction="ifRoom"/>
 
     <item
+        android:id="@+id/action_bubble_mode"
+        android:title="@string/menu_bubble_mode"
+        android:icon="@drawable/ic_bubble_mode"
+        android:orderInCategory="25"
+        app:showAsAction="ifRoom"/>
+
+    <item
         android:id="@+id/action_add_content"
         android:title="@string/menu_add_content"
         android:icon="@drawable/ic_add"
