@@ -987,7 +987,8 @@ class MainActivity : AppCompatActivity() {
                 val pageIndex = pagerRecycler?.getChildAdapterPosition(page)
                     ?: RecyclerView.NO_POSITION
                 val isActivePane = pageIndex == selectedFlowIndex
-                page.alpha = if (isActivePane) 1f else 0.72f
+                // Keep both panes visually identical; the Preview badge alone marks inactivity.
+                page.alpha = 1f
                 val paneWidth = (page.width / 2).coerceAtLeast(1)
                 page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let { recycler ->
                     setFlowPaneWidth(recycler, paneWidth)
