@@ -504,6 +504,7 @@ class MainActivity : AppCompatActivity() {
         if (handleStylusButtonKeyEvent(event)) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
+                KeyEvent.KEYCODE_SPACE -> if (event.repeatCount == 0 && handleCardFlipKey()) return true
                 KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
                 KeyEvent.KEYCODE_DPAD_DOWN -> if (handleCardArrowKey(delta = 1)) return true
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (handleFlowArrowKey(delta = -1)) return true
@@ -558,6 +559,11 @@ class MainActivity : AppCompatActivity() {
         val flow = currentFlow() ?: return false
         val controller = flowControllers[flow.id] ?: return false
         return controller.moveSelectionBy(delta, flow)
+    }
+
+    private fun handleCardFlipKey(): Boolean {
+        if (!::flowPager.isInitialized || isKeyboardNavigationSuppressed()) return false
+        return currentController()?.flipCurrentMainCard() == true
     }
 
     private fun handleFlowArrowKey(delta: Int): Boolean {
