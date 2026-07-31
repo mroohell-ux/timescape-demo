@@ -138,6 +138,7 @@ class CardsAdapter(
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val card: AspectRatioCardView = v.findViewById(R.id.card)
+        val restingCardElevation: Float = card.cardElevation
         val time: TextView = v.findViewById(R.id.time)
         val titleContainer: View = v.findViewById(R.id.titleContainer)
         val title: TextView = v.findViewById(R.id.title)
@@ -379,6 +380,7 @@ class CardsAdapter(
         holder.card.rotationY = 0f
         holder.card.scaleX = 1f
         holder.card.alpha = 1f
+        holder.card.cardElevation = holder.restingCardElevation
 
         val stickyIconTint = if (item.stickyNotes.isEmpty()) {
             ColorStateList.valueOf(
@@ -1001,6 +1003,10 @@ class CardsAdapter(
     private fun animateTextReceiptFlip(holder: VH, item: CardItem, toFace: HandwritingFace) {
         holder.card.animate().cancel()
         holder.receipt.animate().cancel()
+        // MaterialCardView's elevated outline becomes a large grey shape while the view is
+        // edge-on. Suppress that outline only for the flip; the normal resting shadow returns
+        // as soon as the new face is fully visible.
+        holder.card.cardElevation = 0f
         holder.card.animate()
             .rotationY(90f)
             .scaleX(CARD_FLIP_MIDPOINT_SCALE)
@@ -1016,6 +1022,9 @@ class CardsAdapter(
                     .scaleX(1f)
                     .setDuration(CARD_FLIP_HALF_DURATION)
                     .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        holder.card.cardElevation = holder.restingCardElevation
+                    }
                     .start()
             }
             .start()
@@ -1046,6 +1055,7 @@ class CardsAdapter(
     ) {
         val container = holder.handwritingContainer
         cancelOngoingFlip(container)
+        holder.card.cardElevation = 0f
         val fold = AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).apply {
@@ -1088,6 +1098,7 @@ class CardsAdapter(
                 container.scaleX = 1f
                 container.scaleY = 1f
                 container.alpha = 1f
+                holder.card.cardElevation = holder.restingCardElevation
                 container.setTag(R.id.tag_handwriting_flip_animator, null)
             }
         })
