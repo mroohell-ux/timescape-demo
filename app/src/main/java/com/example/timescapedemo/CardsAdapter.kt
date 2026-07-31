@@ -42,7 +42,6 @@ import android.util.TypedValue
 import androidx.core.view.isVisible
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
 import androidx.core.net.toUri
 import kotlin.math.abs
 import kotlin.math.max
@@ -378,6 +377,7 @@ class CardsAdapter(
         val item = getItem(position)
         holder.card.animate().cancel()
         holder.card.rotationY = 0f
+        holder.card.scaleX = 1f
         holder.card.alpha = 1f
 
         val stickyIconTint = if (item.stickyNotes.isEmpty()) {
@@ -430,6 +430,8 @@ class CardsAdapter(
         holder.videoInlineView.isVisible = false
         holder.videoPlaybackControls.isVisible = false
         holder.handwritingContainer.cameraDistance =
+            holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
+        holder.card.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
@@ -1001,8 +1003,8 @@ class CardsAdapter(
         holder.receipt.animate().cancel()
         holder.card.animate()
             .rotationY(90f)
-            .alpha(0.72f)
-            .setDuration(HANDWRITING_FLIP_HALF_DURATION)
+            .scaleX(CARD_FLIP_MIDPOINT_SCALE)
+            .setDuration(CARD_FLIP_HALF_DURATION)
             .setInterpolator(AccelerateInterpolator())
             .withEndAction {
                 if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@withEndAction
@@ -1011,8 +1013,8 @@ class CardsAdapter(
                 holder.card.rotationY = -90f
                 holder.card.animate()
                     .rotationY(0f)
-                    .alpha(1f)
-                    .setDuration(HANDWRITING_FLIP_HALF_DURATION)
+                    .scaleX(1f)
+                    .setDuration(CARD_FLIP_HALF_DURATION)
                     .setInterpolator(DecelerateInterpolator())
                     .start()
             }
@@ -1047,19 +1049,11 @@ class CardsAdapter(
         val fold = AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = AccelerateInterpolator()
                 },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 1f, 0.88f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_Y, 1f, 0.94f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.ALPHA, 1f, 0.75f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                ObjectAnimator.ofFloat(container, View.SCALE_X, 1f, CARD_FLIP_MIDPOINT_SCALE).apply {
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = AccelerateInterpolator()
                 }
             )
@@ -1067,19 +1061,11 @@ class CardsAdapter(
         val unfold = AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = DecelerateInterpolator()
                 },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 0.88f, 1.04f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = OvershootInterpolator(1.1f)
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_Y, 0.94f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = OvershootInterpolator(0.9f)
-                },
-                ObjectAnimator.ofFloat(container, View.ALPHA, 0.75f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                ObjectAnimator.ofFloat(container, View.SCALE_X, CARD_FLIP_MIDPOINT_SCALE, 1f).apply {
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = DecelerateInterpolator()
                 }
             )
@@ -1500,7 +1486,8 @@ class CardsAdapter(
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
-        private const val HANDWRITING_FLIP_HALF_DURATION = 140L
+        private const val CARD_FLIP_HALF_DURATION = 110L
+        private const val CARD_FLIP_MIDPOINT_SCALE = 0.98f
         private const val HANDWRITING_CAMERA_DISTANCE = 8000f
 
         private const val DUOTONE_SHADER = """
