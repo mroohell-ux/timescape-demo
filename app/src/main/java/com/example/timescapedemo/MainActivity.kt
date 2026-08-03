@@ -216,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
     private var lastStylusButtonEventTime: Long = Long.MIN_VALUE
+    private var spaceFlipKeyActive: Boolean = false
     private var samsungSpenRemoteBridge: SamsungSpenRemoteBridge? = null
     private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
@@ -502,9 +503,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (handleStylusButtonKeyEvent(event)) return true
+        if (handleSpaceFlipKeyEvent(event)) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_SPACE -> if (event.repeatCount == 0 && handleCardFlipKey()) return true
                 KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
                 KeyEvent.KEYCODE_DPAD_DOWN -> if (handleCardArrowKey(delta = 1)) return true
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (handleFlowArrowKey(delta = -1)) return true
@@ -512,6 +513,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun handleSpaceFlipKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_SPACE) return false
+
+        if (event.action == KeyEvent.ACTION_UP && spaceFlipKeyActive) {
+            spaceFlipKeyActive = false
+            return true
+        }
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (spaceFlipKeyActive) return true
+        if (!::flowPager.isInitialized || isKeyboardNavigationSuppressed()) return false
+
+        // Consume the complete key sequence. Passing only ACTION_UP to the focused Android view
+        // can leave its pressed/ripple overlay drawn as a grey veil after the card has flipped.
+        spaceFlipKeyActive = true
+        if (event.repeatCount == 0) handleCardFlipKey()
+        return true
     }
 
     private fun handleStylusButtonKeyEvent(event: KeyEvent): Boolean {
