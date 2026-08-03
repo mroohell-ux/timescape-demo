@@ -2885,12 +2885,13 @@ class MainActivity : AppCompatActivity() {
         heightPercent: Int
     ) {
         val existing = card.thermalReceipt?.takeIf { it.face == face }?.side
+        // The handwriting dialog persists the last selected pen, colors, brush size, and paper
+        // style. Keep those defaults for a new receipt and override only the receipt geometry;
+        // forcing thermal colors and PLAIN paper here made every new receipt appear to forget the
+        // user's most recently saved editor settings.
         val defaults = defaultHandwritingOptions().copy(
-            backgroundColor = Color.rgb(255, 253, 248),
-            brushColor = Color.rgb(30, 30, 30),
             canvasWidth = 900,
             canvasHeight = 900 * heightPercent.coerceIn(50, 200) / 100,
-            paperStyle = HandwritingPaperStyle.PLAIN,
             format = HandwritingFormat.PNG
         )
         showHandwritingDialog(
