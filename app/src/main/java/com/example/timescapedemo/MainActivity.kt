@@ -722,6 +722,7 @@ class MainActivity : AppCompatActivity() {
 
         toolbar.navigationIcon = AppCompatResources.getDrawable(this, R.drawable.ic_menu_drawer)
         toolbar.setNavigationOnClickListener { drawerLayout.openDrawer(GravityCompat.START) }
+        toolbar.setOnClickListener { scrollActiveFlowToFirstCard() }
 
         setupToolbarActions()
         flowAdapter = FlowPagerAdapter()
@@ -2507,6 +2508,11 @@ class MainActivity : AppCompatActivity() {
     private fun currentController(): FlowPageController? {
         val flow = currentFlow() ?: return null
         return flowControllers[flow.id]
+    }
+
+    private fun scrollActiveFlowToFirstCard(): Boolean {
+        val flow = currentFlow() ?: return false
+        return currentController()?.scrollToFirstCard(flow) == true
     }
 
     private fun createLayoutManager(viewportWidthPx: Int = resources.displayMetrics.widthPixels): RightRailFlowLayoutManager {
@@ -8653,6 +8659,24 @@ class MainActivity : AppCompatActivity() {
                 viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             }
             return flipped
+        }
+
+        fun scrollToFirstCard(flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            recycler.stopScroll()
+            pendingKeyboardSelectionIndex = 0
+            val scrollDelta = layoutManager.offsetTo(0)
+            layoutManager.clearFocus(immediate = true)
+            if (abs(scrollDelta) > 1) {
+                recycler.smoothScrollBy(0, scrollDelta)
+            } else {
+                pendingKeyboardSelectionIndex = null
+                layoutManager.restoreState(0, focus = true)
+                captureState(flow)
+            }
+            updateCardCounter(0)
+            maybeAutoPlayCenteredVideo(0)
+            return true
         }
 
         fun dispose() {
