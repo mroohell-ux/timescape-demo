@@ -28,6 +28,18 @@
         android:textStyle="bold"
         android:visibility="gone"/>
 
+    <ImageButton
+        android:id="@+id/buttonFlowBookmark"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="16dp"
+        android:background="@drawable/bg_card_count_indicator"
+        android:contentDescription="@string/flow_bookmark_save_content_desc"
+        android:padding="12dp"
+        android:src="@drawable/ic_bookmark"
+        android:visibility="gone" />
+
     <FrameLayout
         android:id="@+id/inactiveFlowOverlay"
         android:layout_width="match_parent"

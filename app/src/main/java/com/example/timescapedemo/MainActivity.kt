@@ -55,6 +55,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -7737,6 +7738,12 @@ class MainActivity : AppCompatActivity() {
                     val savedIndex = obj.optInt("lastViewedCardIndex", 0)
                     flow.lastViewedCardIndex = savedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
                     flow.lastViewedCardFocused = obj.optBoolean("lastViewedCardFocused", false)
+                    val hasBookmarkId = obj.has("bookmarkedCardId") && !obj.isNull("bookmarkedCardId")
+                    flow.bookmarkedCardId = if (hasBookmarkId) {
+                        obj.optLong("bookmarkedCardId", -1L).takeIf { it >= 0 }
+                    } else null
+                    val bookmarkedIndex = obj.optInt("bookmarkedCardIndex", 0)
+                    flow.bookmarkedCardIndex = bookmarkedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
                     flows += flow
                 }
             } catch (_: Exception) {
@@ -7942,6 +7949,12 @@ class MainActivity : AppCompatActivity() {
             }
             flowObj.put("lastViewedCardIndex", flow.lastViewedCardIndex)
             flowObj.put("lastViewedCardFocused", flow.lastViewedCardFocused)
+            if (flow.bookmarkedCardId != null) {
+                flowObj.put("bookmarkedCardId", flow.bookmarkedCardId)
+            } else {
+                flowObj.put("bookmarkedCardId", JSONObject.NULL)
+            }
+            flowObj.put("bookmarkedCardIndex", flow.bookmarkedCardIndex)
             flowsArray.put(flowObj)
         }
 
@@ -8321,6 +8334,7 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
+            val bookmarkButton = view.findViewById<ImageButton>(R.id.buttonFlowBookmark)
             val inactiveOverlay = view.findViewById<View>(R.id.inactiveFlowOverlay)
             val layoutManager = createLayoutManager(flowPaneViewportWidth())
             recycler.layoutManager = layoutManager
@@ -8382,7 +8396,7 @@ class MainActivity : AppCompatActivity() {
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView, bookmarkButton)
             return holder
         }
 
@@ -8406,7 +8420,8 @@ class MainActivity : AppCompatActivity() {
             val recycler: RecyclerView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter,
-            val cardCountView: TextView
+            val cardCountView: TextView,
+            val bookmarkButton: ImageButton
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
 
@@ -8416,7 +8431,7 @@ class MainActivity : AppCompatActivity() {
                     flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
-                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView)
+                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView, bookmarkButton)
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
@@ -8492,7 +8507,8 @@ class MainActivity : AppCompatActivity() {
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
         val adapter: CardsAdapter,
-        val cardCountView: TextView
+        val cardCountView: TextView,
+        val bookmarkButton: ImageButton
     ) {
         private var pendingActiveVideoCardId: Long? = null
         private var pendingVideoCardUpdateAttempts: Int = 0
@@ -8564,6 +8580,20 @@ class MainActivity : AppCompatActivity() {
             recycler.addOnItemTouchListener(emptyAreaTouchListener)
             layoutManager.selectionListener = selectionCallback
             cardCountView.isVisible = false
+            bookmarkButton.isVisible = false
+            bookmarkButton.setOnClickListener {
+                val flow = owningFlow() ?: return@setOnClickListener
+                if (flow.bookmarkedCardId == null) {
+                    bookmarkCurrentCard(flow)
+                } else {
+                    scrollToBookmarkedCard(flow)
+                }
+            }
+            bookmarkButton.setOnLongClickListener {
+                val flow = owningFlow() ?: return@setOnLongClickListener false
+                bookmarkCurrentCard(flow)
+                true
+            }
         }
 
         fun updateDisplayedCards(
@@ -8663,20 +8693,63 @@ class MainActivity : AppCompatActivity() {
 
         fun scrollToFirstCard(flow: CardFlow): Boolean {
             if (adapter.itemCount == 0) return false
-            recycler.stopScroll()
-            pendingKeyboardSelectionIndex = 0
-            val scrollDelta = layoutManager.offsetTo(0)
-            layoutManager.clearFocus(immediate = true)
-            if (abs(scrollDelta) > 1) {
-                recycler.smoothScrollBy(0, scrollDelta)
-            } else {
-                pendingKeyboardSelectionIndex = null
-                layoutManager.restoreState(0, focus = true)
-                captureState(flow)
+            return scrollToCardIndex(0, flow)
+        }
+
+        fun scrollToBookmarkedCard(flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val target = flow.bookmarkedCardId?.let { id ->
+                (0 until adapter.itemCount).firstOrNull { index -> adapter.getItemAt(index)?.id == id }
+            } ?: flow.bookmarkedCardIndex.takeIf { it in 0 until adapter.itemCount }
+            if (target == null) {
+                val bookmarkStillExists = flow.bookmarkedCardId?.let { id ->
+                    flow.cards.any { it.id == id }
+                } == true
+                snackbar(
+                    getString(
+                        if (bookmarkStillExists) {
+                            R.string.snackbar_flow_bookmark_hidden_by_search
+                        } else {
+                            R.string.snackbar_flow_bookmark_missing
+                        }
+                    )
+                )
+                if (bookmarkStillExists) return false
+                flow.bookmarkedCardId = null
+                flow.bookmarkedCardIndex = 0
+                updateBookmarkButton(flow)
+                saveState()
+                return false
             }
-            updateCardCounter(0)
-            maybeAutoPlayCenteredVideo(0)
+            return scrollToCardIndex(target, flow)
+        }
+
+        fun bookmarkCurrentCard(flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val index = layoutManager.currentSelectionIndex()
+                ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            val card = adapter.getItemAt(index) ?: return false
+            flow.bookmarkedCardId = card.id
+            flow.bookmarkedCardIndex = index
+            updateBookmarkButton(flow)
+            saveState()
+            snackbar(getString(R.string.snackbar_flow_bookmark_saved))
             return true
+        }
+
+        private fun updateBookmarkButton(flow: CardFlow) {
+            val hasCards = adapter.itemCount > 0
+            val hasBookmark = flow.bookmarkedCardId != null
+            bookmarkButton.isVisible = hasCards
+            bookmarkButton.isSelected = hasBookmark
+            bookmarkButton.alpha = if (hasBookmark) 1f else 0.62f
+            bookmarkButton.contentDescription = getString(
+                if (hasBookmark) {
+                    R.string.flow_bookmark_go_content_desc
+                } else {
+                    R.string.flow_bookmark_save_content_desc
+                }
+            )
         }
 
         fun dispose() {
@@ -8686,6 +8759,25 @@ class MainActivity : AppCompatActivity() {
             if (layoutManager.selectionListener === selectionCallback) {
                 layoutManager.selectionListener = null
             }
+        }
+
+        private fun scrollToCardIndex(index: Int, flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val target = index.coerceIn(0, adapter.itemCount - 1)
+            recycler.stopScroll()
+            pendingKeyboardSelectionIndex = target
+            val scrollDelta = layoutManager.offsetTo(target)
+            layoutManager.clearFocus(immediate = true)
+            if (abs(scrollDelta) > 1) {
+                recycler.smoothScrollBy(0, scrollDelta)
+            } else {
+                pendingKeyboardSelectionIndex = null
+                layoutManager.restoreState(target, focus = true)
+                captureState(flow)
+            }
+            updateCardCounter(target)
+            maybeAutoPlayCenteredVideo(target)
+            return true
         }
 
         private fun onEmptyAreaTapped() {
@@ -8703,8 +8795,10 @@ class MainActivity : AppCompatActivity() {
                 layoutManager.restoreState(0, false)
                 cardCountView.isVisible = false
                 cardCountView.text = ""
+                updateBookmarkButton(flow)
                 return
             }
+            updateBookmarkButton(flow)
             if (activeQuery.isBlank()) {
                 when {
                     shouldRestoreState -> restoreState(flow)

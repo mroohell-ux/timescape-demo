@@ -335,6 +335,11 @@
     <string name="menu_two_flow_landscape">Show two flows in landscape</string>
     <string name="flow_inactive_preview">Preview</string>
     <string name="activate_flow_preview">Activate this flow</string>
+    <string name="flow_bookmark_save_content_desc">Bookmark the current card</string>
+    <string name="flow_bookmark_go_content_desc">Go to bookmarked card. Long press to update bookmark.</string>
+    <string name="snackbar_flow_bookmark_saved">Bookmark saved for this flow.</string>
+    <string name="snackbar_flow_bookmark_missing">The bookmarked card is no longer in this flow.</string>
+    <string name="snackbar_flow_bookmark_hidden_by_search">The bookmarked card is hidden by the current search.</string>
     <string name="snackbar_two_flow_landscape_enabled">Two-flow landscape view enabled</string>
     <string name="snackbar_two_flow_landscape_disabled">Two-flow landscape view disabled</string>
     <string name="flow_library_title">Jump to flow</string>
