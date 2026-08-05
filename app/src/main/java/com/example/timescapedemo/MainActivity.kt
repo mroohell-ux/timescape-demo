@@ -2011,6 +2011,11 @@ class MainActivity : AppCompatActivity() {
         if (sourceId == targetId) return
         val cardsToMove = sourceFlow.cards.toList()
         targetFlow.cards.addAll(cardsToMove)
+        targetFlow.cards.apply {
+            val promotedCards = collectedCardsFirst(this)
+            clear()
+            addAll(promotedCards)
+        }
         applyCardBackgrounds(targetFlow)
         flowShuffleStates.remove(sourceId)
         flowShuffleStates.remove(targetId)
@@ -8871,6 +8876,11 @@ internal fun twoFlowSwipeTarget(
         else -> 0
     }
     return (current + delta).coerceIn(0, itemCount - 1)
+}
+
+internal fun collectedCardsFirst(cards: List<CardItem>): List<CardItem> {
+    if (cards.none { it.isCollected }) return cards.toList()
+    return cards.filter { it.isCollected } + cards.filterNot { it.isCollected }
 }
 
 private const val TAG = "MainActivity"
