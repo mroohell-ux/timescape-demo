@@ -269,46 +269,50 @@
                 android:scaleType="fitCenter"/>
         </FrameLayout>
 
-        <ImageButton
-            android:id="@+id/buttonCollectionStar"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="12dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/card_collection_move_front_content_desc"
-            android:padding="8dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_collection_star"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
-
-        <ImageButton
-            android:id="@+id/buttonReceipt"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+        <LinearLayout
+            android:id="@+id/cardActionIcons"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:layout_marginEnd="12dp"
-            android:layout_marginBottom="56dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/card_receipt_action_content_desc"
-            android:padding="8dp"
-            android:src="@drawable/ic_receipt"
-            android:tint="#FFFFFFFF"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
 
-        <ImageButton
-            android:id="@+id/buttonStickyNotes"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="12dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/card_sticky_notes_content_desc"
-            android:padding="8dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_sticky_note_colored"
-            android:tint="@color/sticky_note_icon_empty_tint"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            <ImageButton
+                android:id="@+id/buttonCollectionStar"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/card_collection_move_front_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_collection_star" />
+
+            <ImageButton
+                android:id="@+id/buttonReceipt"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/card_receipt_action_content_desc"
+                android:padding="8dp"
+                android:src="@drawable/ic_receipt"
+                android:tint="#FFFFFFFF" />
+
+            <ImageButton
+                android:id="@+id/buttonStickyNotes"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/card_sticky_notes_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_sticky_note_colored"
+                android:tint="@color/sticky_note_icon_empty_tint" />
+        </LinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
 
