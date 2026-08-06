@@ -8594,6 +8594,67 @@ class MainActivity : AppCompatActivity() {
                 bookmarkCurrentCard(flow)
                 true
             }
+            makeBookmarkButtonMovable()
+        }
+
+        private fun makeBookmarkButtonMovable() {
+            val touchSlop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+            var downRawX = 0f
+            var downRawY = 0f
+            var startX = 0f
+            var startY = 0f
+            var moved = false
+            var longPressed = false
+            val longPressDetector = GestureDetectorCompat(
+                this@MainActivity,
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(event: MotionEvent): Boolean = true
+
+                    override fun onLongPress(event: MotionEvent) {
+                        if (!moved) {
+                            longPressed = bookmarkButton.performLongClick()
+                        }
+                    }
+                }
+            )
+            bookmarkButton.setOnTouchListener { button, event ->
+                longPressDetector.onTouchEvent(event)
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downRawX = event.rawX
+                        downRawY = event.rawY
+                        startX = button.x
+                        startY = button.y
+                        moved = false
+                        longPressed = false
+                        button.parent?.requestDisallowInterceptTouchEvent(true)
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val deltaX = event.rawX - downRawX
+                        val deltaY = event.rawY - downRawY
+                        if (!moved && (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop)) {
+                            moved = true
+                        }
+                        if (moved) {
+                            val parent = button.parent as? View ?: return@setOnTouchListener true
+                            button.x = (startX + deltaX).coerceIn(0f, (parent.width - button.width).coerceAtLeast(0).toFloat())
+                            button.y = (startY + deltaY).coerceIn(0f, (parent.height - button.height).coerceAtLeast(0).toFloat())
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        button.parent?.requestDisallowInterceptTouchEvent(false)
+                        if (!moved && !longPressed) button.performClick()
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        button.parent?.requestDisallowInterceptTouchEvent(false)
+                        true
+                    }
+                    else -> true
+                }
+            }
         }
 
         fun updateDisplayedCards(
