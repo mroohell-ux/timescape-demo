@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.example.timescapedemo.AspectRatioCardView
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/card"
     android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:gravity="center_horizontal"
+    android:orientation="vertical">
+
+<com.example.timescapedemo.AspectRatioCardView
+    android:id="@+id/card"
+    android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:clipToOutline="true"
     app:cardUseCompatPadding="false"
@@ -264,31 +269,60 @@
                 android:scaleType="fitCenter"/>
         </FrameLayout>
 
-        <ImageButton
-            android:id="@+id/buttonCollectionStar"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="12dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/card_collection_move_front_content_desc"
-            android:padding="8dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_collection_star"
+        <LinearLayout
+            android:id="@+id/cardActionIcons"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
+            app:layout_constraintTop_toTopOf="parent">
 
-        <ImageButton
-            android:id="@+id/buttonStickyNotes"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="12dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/card_sticky_notes_content_desc"
-            android:padding="8dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_sticky_note_colored"
-            android:tint="@color/sticky_note_icon_empty_tint"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
+            <ImageButton
+                android:id="@+id/buttonCollectionStar"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/card_collection_move_front_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_collection_star" />
+
+            <ImageButton
+                android:id="@+id/buttonReceipt"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/card_receipt_action_content_desc"
+                android:padding="8dp"
+                android:src="@drawable/ic_receipt"
+                android:tint="#FFFFFFFF" />
+
+            <ImageButton
+                android:id="@+id/buttonStickyNotes"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/card_sticky_notes_content_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_sticky_note_colored"
+                android:tint="@color/sticky_note_icon_empty_tint" />
+        </LinearLayout>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.example.timescapedemo.AspectRatioCardView>
+
+    <com.example.timescapedemo.ThermalReceiptImageView
+        android:id="@+id/thermalReceipt"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:adjustViewBounds="true"
+        android:contentDescription="@string/card_receipt_content_desc"
+        android:elevation="3dp"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+</LinearLayout>

@@ -42,7 +42,6 @@ import android.util.TypedValue
 import androidx.core.view.isVisible
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.OvershootInterpolator
 import androidx.core.net.toUri
 import kotlin.math.abs
 import kotlin.math.max
@@ -94,7 +93,17 @@ data class CardItem(
     val stickyNotes: MutableList<StickyNote> = mutableListOf(),
     var video: VideoCardData? = null,
     var isCollected: Boolean = false,
-    var collectionOriginalIndex: Int? = null
+    var collectionOriginalIndex: Int? = null,
+    var thermalReceipt: ThermalReceipt? = null
+)
+
+/** A handwritten thermal-paper attachment owned by its card. */
+data class ThermalReceipt(
+    var side: HandwritingSide,
+    /** Receipt height as a percentage of its card width. The receipt itself is always full-width. */
+    var heightPercent: Int = 125,
+    /** The card face beneath which this receipt is attached. */
+    var face: HandwritingFace = HandwritingFace.FRONT
 )
 
 data class CardImage(
@@ -121,6 +130,7 @@ class CardsAdapter(
     private val onStickyNotesClick: (CardItem) -> Unit,
     private val onCollectionClick: ((CardItem, View) -> Unit)? = null,
     private val onTitleSpeakClick: ((CardItem) -> Unit)? = null,
+    private val onReceiptClick: ((CardItem, HandwritingFace) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
@@ -128,6 +138,7 @@ class CardsAdapter(
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val card: AspectRatioCardView = v.findViewById(R.id.card)
+        val restingCardElevation: Float = card.cardElevation
         val time: TextView = v.findViewById(R.id.time)
         val titleContainer: View = v.findViewById(R.id.titleContainer)
         val title: TextView = v.findViewById(R.id.title)
@@ -142,6 +153,8 @@ class CardsAdapter(
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
         val collectionButton: ImageButton = v.findViewById(R.id.buttonCollectionStar)
+        val receiptButton: ImageButton = v.findViewById(R.id.buttonReceipt)
+        val receipt: ImageView = v.findViewById(R.id.thermalReceipt)
         val playOverlay: View = v.findViewById(R.id.videoPlayOverlay)
         val durationBadge: TextView = v.findViewById(R.id.videoDurationBadge)
         val progressBar: ProgressBar = v.findViewById(R.id.videoProgressBar)
@@ -238,7 +251,8 @@ class CardsAdapter(
         }.toSet()
         blockedUris.retainAll(activeUris)
         val flippableIds = copies.filter {
-            it.handwriting != null || it.imageHandwriting != null || !it.backSnippet.isNullOrBlank()
+            it.handwriting != null || it.imageHandwriting != null ||
+                !it.backSnippet.isNullOrBlank() || it.thermalReceipt != null
         }.map { it.id }.toSet()
         handwritingFaces.keys.retainAll(flippableIds)
         val currentCardIds = copies.map { it.id }.toSet()
@@ -316,7 +330,7 @@ class CardsAdapter(
             }
         })
         v.isClickable = true
-        v.setOnTouchListener { view, event ->
+        val cardGestureTouchListener = View.OnTouchListener listener@ { view, event ->
             if (
                 event.action == MotionEvent.ACTION_UP &&
                 vh.videoInlineView.isVisible &&
@@ -324,7 +338,7 @@ class CardsAdapter(
                 !isTouchInsideView(vh.videoPlaybackControls, event)
             ) {
                 hideVideoControls(vh)
-                return@setOnTouchListener true
+                return@listener true
             }
             val handled = vh.gestureDetector.onTouchEvent(event)
             if (!handled && event.action == MotionEvent.ACTION_UP) {
@@ -332,6 +346,13 @@ class CardsAdapter(
             }
             true
         }
+        // item_card now has a wrapper so the receipt can sit below the original card. Touch events
+        // are dispatched to the child under the finger, not reliably back to that wrapper. Attach
+        // the same detector to both interactive surfaces to preserve tap, double-click, and long
+        // press behavior on the card while also making the receipt area behave like its card.
+        v.setOnTouchListener(cardGestureTouchListener)
+        vh.card.setOnTouchListener(cardGestureTouchListener)
+        vh.receipt.setOnTouchListener(cardGestureTouchListener)
         vh.stickyNotesButton.setOnClickListener {
             val index = vh.bindingAdapterPosition
             if (index != RecyclerView.NO_POSITION) {
@@ -344,11 +365,22 @@ class CardsAdapter(
                 getItemAt(index)?.let { card -> onCollectionClick?.invoke(card, vh.itemView) }
             }
         }
+        vh.receiptButton.setOnClickListener {
+            val index = vh.bindingAdapterPosition
+            if (index != RecyclerView.NO_POSITION) {
+                getItemAt(index)?.let { onReceiptClick?.invoke(it, currentCardFace(it.id)) }
+            }
+        }
         return vh
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
+        holder.card.animate().cancel()
+        holder.card.rotationY = 0f
+        holder.card.scaleX = 1f
+        holder.card.alpha = 1f
+        holder.card.cardElevation = holder.restingCardElevation
 
         val stickyIconTint = if (item.stickyNotes.isEmpty()) {
             ColorStateList.valueOf(
@@ -370,6 +402,8 @@ class CardsAdapter(
         holder.collectionButton.contentDescription = holder.itemView.context.getString(
             if (item.isCollected) R.string.card_collection_restore_content_desc else R.string.card_collection_move_front_content_desc
         )
+        holder.receiptButton.isVisible = item.handwriting == null && onReceiptClick != null
+        bindReceipt(holder, item)
 
         // ---- Bind text ----
         holder.time.text = item.relativeTimeText ?: DateUtils.getRelativeTimeSpanString(
@@ -398,6 +432,8 @@ class CardsAdapter(
         holder.videoInlineView.isVisible = false
         holder.videoPlaybackControls.isVisible = false
         holder.handwritingContainer.cameraDistance =
+            holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
+        holder.card.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         val face = currentCardFace(item.id)
         if (handwritingContent != null) {
@@ -501,6 +537,33 @@ class CardsAdapter(
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
         addShadow(holder.time, holder.title, holder.snippet)
+    }
+
+    private fun bindReceipt(holder: VH, item: CardItem) {
+        val attachment = item.thermalReceipt?.takeIf { it.face == currentCardFace(item.id) }
+        holder.receipt.isVisible = attachment != null
+        HandwritingBitmapLoader.clear(holder.receipt)
+        if (attachment == null) {
+            holder.receipt.layoutParams = holder.receipt.layoutParams.apply {
+                height = ViewGroup.LayoutParams.WRAP_CONTENT
+            }
+            return
+        }
+        // The bitmap is decoded asynchronously. Reserve the selected paper height up front; without
+        // this, an empty wrap_content ImageView measures to zero and the LayoutManager can cache
+        // that zero-height result before the bitmap arrives.
+        val itemWidth = holder.itemView.layoutParams.width
+            .takeIf { it > 0 }
+            ?: holder.itemView.resources.displayMetrics.widthPixels
+        holder.receipt.layoutParams = holder.receipt.layoutParams.apply {
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = receiptDisplayHeight(itemWidth, attachment.heightPercent)
+        }
+        HandwritingBitmapLoader.load(
+            holder.itemView.context,
+            attachment.side.path,
+            holder.receipt
+        ) { bitmap -> holder.receipt.setImageBitmap(bitmap) }
     }
 
     private fun bindVideoCard(
@@ -914,7 +977,9 @@ class CardsAdapter(
         val hasImageBack = item.imageHandwriting != null
         val hasTextBack = !item.backSnippet.isNullOrBlank()
         val hasHandwriting = handwritingContent != null
-        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack) return null
+        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack && item.thermalReceipt == null) {
+            return null
+        }
         val current = currentCardFace(item.id)
         val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
         handwritingFaces[item.id] = next
@@ -926,9 +991,43 @@ class CardsAdapter(
         when {
             handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
             hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
-            hasTextBack -> bindTextCard(holder, item, next)
+            hasTextBack || item.thermalReceipt != null -> {
+                animateTextReceiptFlip(holder, item, next)
+                return next
+            }
         }
+        bindReceipt(holder, item)
         return next
+    }
+
+    private fun animateTextReceiptFlip(holder: VH, item: CardItem, toFace: HandwritingFace) {
+        holder.card.animate().cancel()
+        holder.receipt.animate().cancel()
+        // MaterialCardView's elevated outline becomes a large grey shape while the view is
+        // edge-on. Suppress that outline only for the flip; the normal resting shadow returns
+        // as soon as the new face is fully visible.
+        holder.card.cardElevation = 0f
+        holder.card.animate()
+            .rotationY(90f)
+            .scaleX(CARD_FLIP_MIDPOINT_SCALE)
+            .setDuration(CARD_FLIP_HALF_DURATION)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction {
+                if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@withEndAction
+                bindTextCard(holder, item, toFace)
+                bindReceipt(holder, item)
+                holder.card.rotationY = -90f
+                holder.card.animate()
+                    .rotationY(0f)
+                    .scaleX(1f)
+                    .setDuration(CARD_FLIP_HALF_DURATION)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        holder.card.cardElevation = holder.restingCardElevation
+                    }
+                    .start()
+            }
+            .start()
     }
 
     fun currentFaceFor(index: Int): HandwritingFace {
@@ -942,7 +1041,7 @@ class CardsAdapter(
         val item = getItemAt(index) ?: return false
         if (item.handwriting != null) return true
         if (item.imageHandwriting != null && item.image != null) return true
-        return !item.backSnippet.isNullOrBlank()
+        return !item.backSnippet.isNullOrBlank() || item.thermalReceipt != null
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
@@ -956,22 +1055,15 @@ class CardsAdapter(
     ) {
         val container = holder.handwritingContainer
         cancelOngoingFlip(container)
+        holder.card.cardElevation = 0f
         val fold = AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = AccelerateInterpolator()
                 },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 1f, 0.88f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_Y, 1f, 0.94f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.ALPHA, 1f, 0.75f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                ObjectAnimator.ofFloat(container, View.SCALE_X, 1f, CARD_FLIP_MIDPOINT_SCALE).apply {
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = AccelerateInterpolator()
                 }
             )
@@ -979,19 +1071,11 @@ class CardsAdapter(
         val unfold = AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = DecelerateInterpolator()
                 },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 0.88f, 1.04f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = OvershootInterpolator(1.1f)
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_Y, 0.94f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
-                    interpolator = OvershootInterpolator(0.9f)
-                },
-                ObjectAnimator.ofFloat(container, View.ALPHA, 0.75f, 1f).apply {
-                    duration = HANDWRITING_FLIP_HALF_DURATION
+                ObjectAnimator.ofFloat(container, View.SCALE_X, CARD_FLIP_MIDPOINT_SCALE, 1f).apply {
+                    duration = CARD_FLIP_HALF_DURATION
                     interpolator = DecelerateInterpolator()
                 }
             )
@@ -1014,6 +1098,7 @@ class CardsAdapter(
                 container.scaleX = 1f
                 container.scaleY = 1f
                 container.alpha = 1f
+                holder.card.cardElevation = holder.restingCardElevation
                 container.setTag(R.id.tag_handwriting_flip_animator, null)
             }
         })
@@ -1175,7 +1260,11 @@ class CardsAdapter(
 
     private fun bindTextCard(holder: VH, item: CardItem, face: HandwritingFace) {
         val backText = item.backSnippet?.takeIf { it.isNotBlank() }
-        val text = if (face == HandwritingFace.BACK && backText != null) backText else item.snippet
+        val text = when {
+            face == HandwritingFace.BACK && backText != null -> backText
+            face == HandwritingFace.BACK && item.thermalReceipt != null -> ""
+            else -> item.snippet
+        }
         setCardMode(holder, CardMode.TEXT, text)
         bindTitle(holder, item)
     }
@@ -1408,7 +1497,8 @@ class CardsAdapter(
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
-        private const val HANDWRITING_FLIP_HALF_DURATION = 140L
+        private const val CARD_FLIP_HALF_DURATION = 110L
+        private const val CARD_FLIP_MIDPOINT_SCALE = 0.98f
         private const val HANDWRITING_CAMERA_DISTANCE = 8000f
 
         private const val DUOTONE_SHADER = """
@@ -1440,6 +1530,14 @@ private const val VIDEO_CONTROLS_AUTO_HIDE_MS = 5_000L
 private const val VIDEO_PROGRESS_UPDATE_INTERVAL_MS = 1_000L
 private const val VIDEO_PROGRESS_RESUME_MARGIN_MS = 1_000L
 
+internal fun receiptDisplayHeight(itemWidth: Int, heightPercent: Int): Int {
+    val safeItemWidth = itemWidth.coerceAtLeast(1)
+    val safeHeightPercent = heightPercent.coerceIn(50, 200)
+    return (safeItemWidth.toLong() * safeHeightPercent / 100L)
+        .coerceIn(1L, Int.MAX_VALUE.toLong())
+        .toInt()
+}
+
 private fun CardItem.deepCopy(): CardItem = copy(
     bg = when (val background = bg) {
         is BgImage.Res -> background.copy()
@@ -1457,6 +1555,9 @@ private fun CardItem.deepCopy(): CardItem = copy(
     },
     imageHandwriting = imageHandwriting?.let { HandwritingSide(it.path, it.options.copy()) },
     video = video?.copy(),
+    thermalReceipt = thermalReceipt?.let { ThermalReceipt(
+        HandwritingSide(it.side.path, it.side.options.copy()), it.heightPercent, it.face
+    ) },
     relativeTimeText = relativeTimeText,
     stickyNotes = stickyNotes.map { it.copy() }.toMutableList()
 )

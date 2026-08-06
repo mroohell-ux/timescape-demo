@@ -6,5 +6,7 @@ data class CardFlow(
     val cards: MutableList<CardItem> = mutableListOf(),
     var lastViewedCardId: Long? = null,
     var lastViewedCardIndex: Int = 0,
-    var lastViewedCardFocused: Boolean = false
+    var lastViewedCardFocused: Boolean = false,
+    var bookmarkedCardId: Long? = null,
+    var bookmarkedCardIndex: Int = 0
 )
