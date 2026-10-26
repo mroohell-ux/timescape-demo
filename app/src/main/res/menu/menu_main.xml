@@ -66,6 +66,13 @@
         app:showAsAction="ifRoom"/>
 
     <item
+        android:id="@+id/action_two_flow_landscape"
+        android:title="@string/menu_two_flow_landscape"
+        android:checkable="true"
+        android:orderInCategory="45"
+        app:showAsAction="never"/>
+
+    <item
         android:id="@+id/action_pick_video_folder"
         android:title="@string/menu_pick_video_folder"
         android:icon="@drawable/ic_folder_open"

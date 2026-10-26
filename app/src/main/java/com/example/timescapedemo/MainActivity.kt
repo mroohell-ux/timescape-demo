@@ -20,6 +20,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.BitmapDrawable
@@ -42,6 +43,7 @@ import android.view.DragEvent
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -53,6 +55,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -213,12 +216,16 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+    private var lastStylusButtonEventTime: Long = Long.MIN_VALUE
+    private var spaceFlipKeyActive: Boolean = false
+    private var samsungSpenRemoteBridge: SamsungSpenRemoteBridge? = null
     private var notificationFrequencyPerHour: Int = DEFAULT_NOTIFICATION_FREQUENCY_PER_HOUR
     private var cardFontSizeSp: Float = DEFAULT_CARD_FONT_SIZE_SP
     private var cardTypeface: Typeface? = null
     private var cardFontPath: String? = null
     private var cardFontDisplayName: String? = null
     private var isFlowReorderModeEnabled: Boolean = false
+    private var isTwoFlowLandscapeEnabled: Boolean = false
     private var isFlowLabelsTemporarilyVisible: Boolean = false
     private var isFlowLabelsWidgetInteractionActive: Boolean = false
     private var flowLabelsInteractionStartedAtMs: Long = 0L
@@ -496,6 +503,8 @@ class MainActivity : AppCompatActivity() {
         }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (handleStylusButtonKeyEvent(event)) return true
+        if (handleSpaceFlipKeyEvent(event)) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
@@ -507,6 +516,63 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    private fun handleSpaceFlipKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_SPACE) return false
+
+        if (event.action == KeyEvent.ACTION_UP && spaceFlipKeyActive) {
+            spaceFlipKeyActive = false
+            return true
+        }
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (spaceFlipKeyActive) return true
+        if (!::flowPager.isInitialized || isKeyboardNavigationSuppressed()) return false
+
+        // Consume the complete key sequence. Passing only ACTION_UP to the focused Android view
+        // can leave its pressed/ripple overlay drawn as a grey veil after the card has flipped.
+        spaceFlipKeyActive = true
+        if (event.repeatCount == 0) handleCardFlipKey()
+        return true
+    }
+
+    private fun handleStylusButtonKeyEvent(event: KeyEvent): Boolean {
+        if (!::flowPager.isInitialized) return false
+        if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return false
+        val isStylusButton = event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY ||
+            event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY ||
+            event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY ||
+            event.keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL
+        if (!isStylusButton) return false
+        return dispatchStylusCardFlip(event.eventTime)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (handleStylusButtonEvent(event)) return true
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (handleStylusButtonEvent(event)) return true
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun handleStylusButtonEvent(event: MotionEvent): Boolean {
+        if (!::flowPager.isInitialized) return false
+        if (!event.isFromSource(InputDevice.SOURCE_STYLUS)) return false
+        if (event.actionMasked != MotionEvent.ACTION_BUTTON_PRESS) return false
+        val supportedButton = event.actionButton == MotionEvent.BUTTON_STYLUS_PRIMARY ||
+            event.actionButton == MotionEvent.BUTTON_STYLUS_SECONDARY ||
+            event.actionButton == MotionEvent.BUTTON_SECONDARY
+        if (!supportedButton) return false
+        return dispatchStylusCardFlip(event.eventTime)
+    }
+
+    private fun dispatchStylusCardFlip(eventTime: Long): Boolean {
+        // Samsung firmware can report one press through the Remote SDK plus Android input paths.
+        if (eventTime - lastStylusButtonEventTime in 0..STYLUS_BUTTON_DEDUP_WINDOW_MS) return true
+        lastStylusButtonEventTime = eventTime
+        return currentController()?.flipCurrentMainCard() == true
+    }
+
     private fun handleCardArrowKey(delta: Int): Boolean {
         if (delta == 0 || !::flowPager.isInitialized) return false
         if (isKeyboardNavigationSuppressed()) return false
@@ -515,10 +581,15 @@ class MainActivity : AppCompatActivity() {
         return controller.moveSelectionBy(delta, flow)
     }
 
+    private fun handleCardFlipKey(): Boolean {
+        if (!::flowPager.isInitialized || isKeyboardNavigationSuppressed()) return false
+        return currentController()?.flipCurrentMainCard() == true
+    }
+
     private fun handleFlowArrowKey(delta: Int): Boolean {
         if (delta == 0 || !::flowPager.isInitialized || flows.isEmpty()) return false
         if (isKeyboardNavigationSuppressed()) return false
-        val current = flowPager.currentItem.coerceIn(0, flows.lastIndex)
+        val current = selectedFlowIndex.coerceIn(0, flows.lastIndex)
         val target = (current + delta).coerceIn(0, flows.lastIndex)
         captureVisibleFlowStates()
         if (target != current) {
@@ -546,6 +617,7 @@ class MainActivity : AppCompatActivity() {
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
         isFlowReorderModeEnabled = prefs.getBoolean(KEY_FLOW_REORDER_MODE_ENABLED, false)
+        isTwoFlowLandscapeEnabled = prefs.getBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, false)
         cardTypeface = cardFontPath?.let { loadCardTypeface(it) }
         if (cardTypeface == null) {
             cardFontPath = null
@@ -562,6 +634,9 @@ class MainActivity : AppCompatActivity() {
         pendingExportFileName = savedInstanceState?.getString(STATE_PENDING_EXPORT_FILE_NAME)
 
         initializeTextToSpeech()
+        samsungSpenRemoteBridge = SamsungSpenRemoteBridge(this) {
+            runOnUiThread { dispatchStylusCardFlip(SystemClock.uptimeMillis()) }
+        }
 
         drawerLayout = findViewById(R.id.drawerLayout)
         val navigationView = findViewById<NavigationView>(R.id.navigationView)
@@ -648,6 +723,7 @@ class MainActivity : AppCompatActivity() {
 
         toolbar.navigationIcon = AppCompatResources.getDrawable(this, R.drawable.ic_menu_drawer)
         toolbar.setNavigationOnClickListener { drawerLayout.openDrawer(GravityCompat.START) }
+        toolbar.setOnClickListener { scrollActiveFlowToFirstCard() }
 
         setupToolbarActions()
         flowAdapter = FlowPagerAdapter()
@@ -812,25 +888,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        samsungSpenRemoteBridge?.connect()
         restartStickyNoteNotificationSchedule()
     }
 
     private fun setupFlowPager() {
-        val density = resources.displayMetrics.density
         flowPager.adapter = flowAdapter
         flowPager.offscreenPageLimit = 1
         flowPager.clipToPadding = false
         flowPager.clipChildren = false
         (flowPager.getChildAt(0) as? RecyclerView)?.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
-        val transformer = CompositePageTransformer().apply {
-            addTransformer(MarginPageTransformer((24 * density).roundToInt()))
-            addTransformer { page, position ->
-                val scale = 0.9f + (1 - abs(position)) * 0.1f
-                page.scaleY = scale
-                page.alpha = 0.6f + (1 - abs(position)) * 0.4f
-            }
-        }
-        flowPager.setPageTransformer(transformer)
+        (flowPager.getChildAt(0) as? RecyclerView)?.let(::installTwoFlowSwipeNavigation)
+        applyFlowPagerPresentation()
         flowPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
@@ -839,10 +908,181 @@ class MainActivity : AppCompatActivity() {
                 updateChipSelection(position)
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
+                flowPager.requestTransform()
             }
         })
         flowPager.setOnDragListener { _, event ->
             handleCardMovePagerDrag(event)
+        }
+    }
+
+    private fun installTwoFlowSwipeNavigation(touchSurface: RecyclerView) {
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        touchSurface.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+            private var downX = 0f
+            private var downY = 0f
+            private var handlingHorizontalSwipe = false
+
+            override fun onInterceptTouchEvent(rv: RecyclerView, event: MotionEvent): Boolean {
+                if (!isTwoFlowPresentationActive()) return false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.x
+                        downY = event.y
+                        handlingHorizontalSwipe = false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.x - downX
+                        val dy = event.y - downY
+                        if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                            handlingHorizontalSwipe = true
+                            return true
+                        }
+                    }
+                    MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> handlingHorizontalSwipe = false
+                }
+                return false
+            }
+
+            override fun onTouchEvent(rv: RecyclerView, event: MotionEvent) {
+                if (!handlingHorizontalSwipe) return
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_UP -> {
+                        val dx = event.x - downX
+                        navigateTwoFlowSwipe(dx)
+                        handlingHorizontalSwipe = false
+                    }
+                    MotionEvent.ACTION_CANCEL -> handlingHorizontalSwipe = false
+                }
+            }
+        })
+    }
+
+    private fun isTwoFlowPresentationActive(): Boolean =
+        isTwoFlowLandscapeEnabled &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    private fun navigateTwoFlowSwipe(horizontalDistance: Float) {
+        if (flows.isEmpty() || horizontalDistance == 0f) return
+        val current = selectedFlowIndex.coerceIn(0, flows.lastIndex)
+        val target = twoFlowSwipeTarget(current, flows.size, horizontalDistance)
+        if (target == current) return
+        captureVisibleFlowStates()
+        selectedFlowIndex = target
+        prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, target).apply()
+        updateChipSelection(target)
+        updateToolbarSubtitle()
+        updateShuffleMenuState()
+        flowPager.setCurrentItem(target, true)
+        showFlowLabelsWidgetTemporarily()
+    }
+
+    private fun activateFlowPane(targetIndex: Int) {
+        if (flows.isEmpty()) return
+        val target = targetIndex.coerceIn(0, flows.lastIndex)
+        if (target == selectedFlowIndex) return
+        captureVisibleFlowStates()
+        // Pane activation only changes which visible flow owns actions. It must not page/swipe.
+        selectedFlowIndex = target
+        prefs.edit().putInt(KEY_SELECTED_FLOW_INDEX, target).apply()
+        updateChipSelection(target)
+        updateToolbarSubtitle()
+        updateShuffleMenuState()
+        flowPager.requestTransform()
+        showFlowLabelsWidgetTemporarily()
+    }
+
+    private fun applyFlowPagerPresentation() {
+        if (!::flowPager.isInitialized) return
+        val showTwoFlows = isTwoFlowPresentationActive()
+        flowPager.isUserInputEnabled = !showTwoFlows
+        if (showTwoFlows) {
+            flowPager.offscreenPageLimit = 1
+            flowPager.setPageTransformer { page, position ->
+                page.pivotX = 0f
+                page.pivotY = page.height / 2f
+                page.scaleX = 1f
+                page.scaleY = 1f
+                val showPreviousOnRight = position < -0.5f &&
+                    flowPager.currentItem == flows.lastIndex
+                page.translationX = if (showPreviousOnRight) {
+                    -position * page.width * 1.5f
+                } else {
+                    -position * page.width / 2f
+                }
+                val pagerRecycler = flowPager.getChildAt(0) as? RecyclerView
+                val pageIndex = pagerRecycler?.getChildAdapterPosition(page)
+                    ?: RecyclerView.NO_POSITION
+                val isActivePane = pageIndex == selectedFlowIndex
+                // Keep both panes visually identical; the Preview badge alone marks inactivity.
+                page.alpha = 1f
+                val paneWidth = (page.width / 2).coerceAtLeast(1)
+                page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let { recycler ->
+                    setFlowPaneWidth(recycler, paneWidth)
+                    setFlowPaneTopPadding(recycler, toolbar.height.coerceAtLeast(0))
+                }
+                page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
+                    setFlowPaneWidth(overlay, paneWidth)
+                    overlay.isVisible = !isActivePane
+                }
+            }
+        } else {
+            val density = resources.displayMetrics.density
+            val transformer = CompositePageTransformer().apply {
+                addTransformer(MarginPageTransformer((24 * density).roundToInt()))
+                addTransformer { page, position ->
+                    page.pivotX = page.width / 2f
+                    page.pivotY = page.height / 2f
+                    page.scaleX = 1f
+                    page.translationX = 0f
+                    page.scaleY = 0.9f + (1 - abs(position)) * 0.1f
+                    page.alpha = 0.6f + (1 - abs(position)) * 0.4f
+                    page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let {
+                        setFlowPaneWidth(it, ViewGroup.LayoutParams.MATCH_PARENT)
+                        setFlowPaneTopPadding(it, 0)
+                    }
+                    page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
+                        setFlowPaneWidth(overlay, ViewGroup.LayoutParams.MATCH_PARENT)
+                        overlay.isVisible = false
+                    }
+                }
+            }
+            flowPager.setPageTransformer(transformer)
+        }
+        flowPager.requestTransform()
+    }
+
+    private fun setFlowPaneWidth(view: View, width: Int) {
+        val params = view.layoutParams
+        if (params.width == width) return
+        params.width = width
+        view.layoutParams = params
+    }
+
+    private fun setFlowPaneTopPadding(recycler: RecyclerView, top: Int) {
+        if (recycler.paddingTop == top) return
+        recycler.updatePadding(top = top)
+    }
+
+    private fun setTwoFlowLandscapeEnabled(enabled: Boolean) {
+        isTwoFlowLandscapeEnabled = enabled
+        prefs.edit().putBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, enabled).apply()
+        snackbar(
+            getString(
+                if (enabled) R.string.snackbar_two_flow_landscape_enabled
+                else R.string.snackbar_two_flow_landscape_disabled
+            )
+        )
+        // Flow layout managers calculate card geometry from their viewport at construction time.
+        // Recreate so both panes receive half-width geometry instead of clipping full-screen cards.
+        toolbar.post { recreate() }
+    }
+
+    private fun updateTwoFlowLandscapeMenuState() {
+        if (!::toolbar.isInitialized) return
+        toolbar.menu.findItem(R.id.action_two_flow_landscape)?.let { item ->
+            item.isVisible = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            item.isChecked = isTwoFlowLandscapeEnabled
         }
     }
 
@@ -852,10 +1092,15 @@ class MainActivity : AppCompatActivity() {
         setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
         updateFlowReorderModeMenuState()
+        updateTwoFlowLandscapeMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
                 R.id.action_shuffle_cards -> { toggleShuffleCards(); true }
                 R.id.action_export_flow -> { launchExportCurrentFlow(); true }
+                R.id.action_two_flow_landscape -> {
+                    setTwoFlowLandscapeEnabled(!isTwoFlowLandscapeEnabled)
+                    true
+                }
                 R.id.action_add_card -> {
                     if (currentFlow()?.id == VIDEO_FLOW_ID) {
                         snackbar(getString(R.string.snackbar_video_folder_missing))
@@ -1735,7 +1980,7 @@ class MainActivity : AppCompatActivity() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastCardMovePagerSwitchTime < CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS) return
         val edgeThreshold = width * CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION
-        val currentIndex = flowPager.currentItem
+        val currentIndex = selectedFlowIndex
         val targetIndex = when {
             positionX > width - edgeThreshold && currentIndex < flows.lastIndex -> currentIndex + 1
             positionX < edgeThreshold && currentIndex > 0 -> currentIndex - 1
@@ -1768,6 +2013,11 @@ class MainActivity : AppCompatActivity() {
         if (sourceId == targetId) return
         val cardsToMove = sourceFlow.cards.toList()
         targetFlow.cards.addAll(cardsToMove)
+        targetFlow.cards.apply {
+            val promotedCards = collectedCardsFirst(this)
+            clear()
+            addAll(promotedCards)
+        }
         applyCardBackgrounds(targetFlow)
         flowShuffleStates.remove(sourceId)
         flowShuffleStates.remove(targetId)
@@ -2223,7 +2473,7 @@ class MainActivity : AppCompatActivity() {
             snackbar(getString(R.string.snackbar_cannot_delete_last_flow))
             return
         }
-        val currentItem = flowPager.currentItem.coerceIn(0, max(0, flows.lastIndex))
+        val currentItem = selectedFlowIndex.coerceIn(0, max(0, flows.lastIndex))
         val removed = flows.removeAt(index)
         updateFlowBarVisibility()
         flowShuffleStates.remove(removed.id)
@@ -2254,19 +2504,24 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.snackbar_deleted_flow, removed.name))
     }
 
-    private fun currentFlow(): CardFlow? = flows.getOrNull(flowPager.currentItem)
+    private fun currentFlow(): CardFlow? = flows.getOrNull(selectedFlowIndex)
 
     private fun currentController(): FlowPageController? {
         val flow = currentFlow() ?: return null
         return flowControllers[flow.id]
     }
 
-    private fun createLayoutManager(): RightRailFlowLayoutManager {
+    private fun scrollActiveFlowToFirstCard(): Boolean {
+        val flow = currentFlow() ?: return false
+        return currentController()?.scrollToFirstCard(flow) == true
+    }
+
+    private fun createLayoutManager(viewportWidthPx: Int = resources.displayMetrics.widthPixels): RightRailFlowLayoutManager {
         val metrics = resources.displayMetrics
         val density = metrics.density
         val horizontalInsetPx = (32 * density).roundToInt()
-        val minSidePx = (320 * density).roundToInt()
-        val availableWidth = (metrics.widthPixels - horizontalInsetPx).coerceAtLeast(minSidePx)
+        val minSidePx = (180 * density).roundToInt()
+        val availableWidth = (viewportWidthPx - horizontalInsetPx).coerceAtLeast(minSidePx)
         val baseSide = availableWidth
         val focusSide = availableWidth
         val pitch = (availableWidth * 0.26f).roundToInt()
@@ -2276,6 +2531,13 @@ class MainActivity : AppCompatActivity() {
             itemPitchPx = pitch,
             rightInsetPx = (8 * density).roundToInt()
         )
+    }
+
+    private fun flowPaneViewportWidth(): Int {
+        val fullWidth = resources.displayMetrics.widthPixels
+        val useTwoPanes = isTwoFlowLandscapeEnabled &&
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        return if (useTwoPanes) (fullWidth / 2).coerceAtLeast(1) else fullWidth
     }
 
     private fun prepareFlowCards(flow: CardFlow) {
@@ -2571,6 +2833,104 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showReceiptOptions(adapterCard: CardItem, face: HandwritingFace) {
+        val flow = flows.firstOrNull { candidate -> candidate.cards.any { it.id == adapterCard.id } } ?: return
+        // CardsAdapter intentionally exposes defensive copies. Always resolve the flow-owned card
+        // before editing so the attachment survives submitList/refreshFlow.
+        val card = flow.cards.firstOrNull { it.id == adapterCard.id } ?: return
+        if (card.handwriting != null) return
+        val receiptOnFace = card.thermalReceipt?.takeIf { it.face == face }
+        if (receiptOnFace == null) {
+            chooseReceiptHeight(card.thermalReceipt?.heightPercent ?: 125) { height ->
+                editReceipt(flow, card, face, height)
+            }
+            return
+        }
+        val actions = arrayOf(
+            getString(R.string.receipt_edit),
+            getString(R.string.receipt_resize),
+            getString(R.string.receipt_remove)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_receipt_title)
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> editReceipt(flow, card, face, receiptOnFace.heightPercent)
+                    1 -> chooseReceiptHeight(card.thermalReceipt?.heightPercent ?: 125) { height ->
+                        editReceipt(flow, card, face, height)
+                    }
+                    2 -> {
+                        card.thermalReceipt?.side?.path?.let(::deleteHandwritingFile)
+                        card.thermalReceipt = null
+                        card.updatedAt = System.currentTimeMillis()
+                        refreshFlow(flow, scrollToTop = false)
+                        saveState()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun chooseReceiptHeight(current: Int, onChosen: (Int) -> Unit) {
+        val heights = intArrayOf(75, 125, 175)
+        val labels = arrayOf(
+            getString(R.string.receipt_size_narrow),
+            getString(R.string.receipt_size_regular),
+            getString(R.string.receipt_size_wide)
+        )
+        val selected = heights.indexOf(current).takeIf { it >= 0 } ?: 1
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_receipt_size_title)
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                dialog.dismiss()
+                onChosen(heights[which])
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun editReceipt(
+        flow: CardFlow,
+        card: CardItem,
+        face: HandwritingFace,
+        heightPercent: Int
+    ) {
+        val existing = card.thermalReceipt?.takeIf { it.face == face }?.side
+        // The handwriting dialog persists the last selected pen, colors, brush size, and paper
+        // style. Keep those defaults for a new receipt and override only the receipt geometry;
+        // forcing thermal colors and PLAIN paper here made every new receipt appear to forget the
+        // user's most recently saved editor settings.
+        val defaults = defaultHandwritingOptions().copy(
+            canvasWidth = 900,
+            canvasHeight = 900 * heightPercent.coerceIn(50, 200) / 100,
+            format = HandwritingFormat.PNG
+        )
+        showHandwritingDialog(
+            titleRes = R.string.dialog_receipt_title,
+            existing = existing,
+            initialOptions = existing?.options?.let { options ->
+                options.copy(
+                    canvasHeight = options.canvasWidth * heightPercent.coerceIn(50, 200) / 100
+                )
+            } ?: defaults,
+            face = HandwritingFace.FRONT,
+            onSave = { saved ->
+                if (saved != null) {
+                    card.thermalReceipt?.side?.path
+                        ?.takeIf { it != saved.path }
+                        ?.let(::deleteHandwritingFile)
+                    // Use the dimensions actually saved by the handwriting editor. This keeps the
+                    // bill below the card pixel-for-pixel consistent with the editor canvas.
+                    card.thermalReceipt = ThermalReceipt(saved, receiptHeightPercent(saved), face)
+                    card.updatedAt = System.currentTimeMillis()
+                    refreshFlow(flow, scrollToTop = false)
+                    saveState()
+                }
+            }
+        )
+    }
+
     private fun editImageCard(flow: CardFlow, card: CardItem, face: HandwritingFace) {
         if (face == HandwritingFace.BACK) {
             editImageCardBack(flow, card)
@@ -2684,6 +3044,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun removeImageCardBack(flow: CardFlow, card: CardItem) {
         card.imageHandwriting?.path?.let { deleteHandwritingFile(it) }
+        card.thermalReceipt?.side?.path?.let { deleteHandwritingFile(it) }
         card.imageHandwriting = null
         card.updatedAt = System.currentTimeMillis()
         refreshFlow(flow, scrollToTop = false)
@@ -3742,15 +4103,18 @@ class MainActivity : AppCompatActivity() {
             computeSizeForRatio("portrait", R.string.handwriting_size_portrait, 4f / 3f)
         ).distinctBy { it.width to it.height }.toMutableList()
 
-        var selectedSize = sizeOptions.firstOrNull { it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight }?: sizeOptions.first()
-        if (selectedSize == null) {
-            selectedSize = CanvasSizeOption(
-                key = "custom",
-                label = getString(R.string.handwriting_size_custom, initialOptions.canvasWidth, initialOptions.canvasHeight),
-                width = initialOptions.canvasWidth,
-                height = initialOptions.canvasHeight
-            )
-            sizeOptions.add(0, selectedSize)
+        val matchingInitialSize = sizeOptions.firstOrNull {
+            it.width == initialOptions.canvasWidth && it.height == initialOptions.canvasHeight
+        }
+        var selectedSize = matchingInitialSize ?: CanvasSizeOption(
+            key = "custom",
+            label = getString(R.string.handwriting_size_custom, initialOptions.canvasWidth, initialOptions.canvasHeight),
+            width = initialOptions.canvasWidth,
+            height = initialOptions.canvasHeight
+        ).also {
+            // Receipt canvases commonly use tall custom ratios. They must be represented as a
+            // real option or the editor silently falls back to the unrelated full-page size.
+            sizeOptions.add(0, it)
         }
 
         extras.lockedCanvasSize?.let { (lockedWidth, lockedHeight) ->
@@ -5766,6 +6130,17 @@ class MainActivity : AppCompatActivity() {
         return CardImage(Uri.parse(uriString), mimeType, owned)
     }
 
+    private fun receiptHeightPercent(side: HandwritingSide): Int {
+        val width = side.options.canvasWidth.coerceAtLeast(1)
+        return ((side.options.canvasHeight.toLong() * 100L) / width)
+            .coerceIn(50L, 200L)
+            .toInt()
+    }
+
+    private fun parseReceiptFace(obj: JSONObject): HandwritingFace =
+        runCatching { HandwritingFace.valueOf(obj.optString("face", HandwritingFace.FRONT.name)) }
+            .getOrDefault(HandwritingFace.FRONT)
+
     private fun parseVideoCardData(obj: JSONObject?): VideoCardData? {
         if (obj == null) return null
         val sourceUri = obj.optString("sourceUri").takeIf { it.isNotBlank() } ?: return null
@@ -6288,6 +6663,16 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+                card.thermalReceipt?.let { receipt ->
+                    handwritingSideToExportPayload(
+                        receipt.side, warnings, "Missing thermal receipt for $cardLabel"
+                    )?.let { export ->
+                        export.json.put("heightPercent", receipt.heightPercent)
+                        export.json.put("face", receipt.face.name)
+                        writer.name("thermalReceipt")
+                        writeJsonValue(writer, export.json)
+                    }
+                }
                 if (card.stickyNotes.isNotEmpty()) {
                     writer.name("stickyNotes")
                     writer.beginArray()
@@ -6696,7 +7081,8 @@ class MainActivity : AppCompatActivity() {
                             image = importedCard.image,
                             handwriting = importedCard.handwriting,
                             imageHandwriting = importedCard.imageHandwriting,
-                            stickyNotes = importedCard.stickyNotes.toMutableList()
+                            stickyNotes = importedCard.stickyNotes.toMutableList(),
+                            thermalReceipt = importedCard.thermalReceipt
                         )
                 }.toMutableList()
                 val newFlow = CardFlow(
@@ -6785,6 +7171,18 @@ class MainActivity : AppCompatActivity() {
                                                 duplicateTracker = imageBackPayloads
                                             )
                                         }
+                                        val thermalReceipt = cardObj.optJSONObject("thermalReceipt")?.let { receiptObj ->
+                                            decodeHandwritingSideFromExport(
+                                                receiptObj, createdFiles, warnings,
+                                                "$cardLabel (thermal receipt)", isImageBack = false
+                                            )?.let {
+                                                ThermalReceipt(
+                                                    it,
+                                                    receiptObj.optInt("heightPercent", receiptHeightPercent(it)),
+                                                    parseReceiptFace(receiptObj)
+                                                )
+                                            }
+                                        }
                                         val stickyNotes = parseStickyNotes(cardObj)
                                         val recognizedText = cardObj.optString("recognizedText").takeIf { it.isNotBlank() }
                                         val backSnippet = cardObj.optString("backSnippet").takeIf { it.isNotBlank() }
@@ -6798,7 +7196,8 @@ class MainActivity : AppCompatActivity() {
                                             image,
                                             imageHandwriting,
                                             recognizedText,
-                                            stickyNotes
+                                            stickyNotes,
+                                            thermalReceipt
                                         )
                                         parsedCards++
                                         onCardProgress?.invoke(parsedCards, totalCards)
@@ -7319,7 +7718,16 @@ class MainActivity : AppCompatActivity() {
                                 stickyNotes = stickyNotes,
                                 video = parseVideoCardData(cardObj.optJSONObject("video")),
                                 isCollected = cardObj.optBoolean("isCollected", false),
-                                collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 }
+                                collectionOriginalIndex = cardObj.optInt("collectionOriginalIndex", -1).takeIf { it >= 0 },
+                                thermalReceipt = cardObj.optJSONObject("thermalReceipt")?.let { receiptObj ->
+                                    parseHandwritingSide(receiptObj, baseHandwritingOptions)?.let {
+                                        ThermalReceipt(
+                                            it,
+                                            receiptObj.optInt("heightPercent", receiptHeightPercent(it)),
+                                            parseReceiptFace(receiptObj)
+                                        )
+                                    }
+                                }
                             )
                         }
                     }
@@ -7330,6 +7738,12 @@ class MainActivity : AppCompatActivity() {
                     val savedIndex = obj.optInt("lastViewedCardIndex", 0)
                     flow.lastViewedCardIndex = savedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
                     flow.lastViewedCardFocused = obj.optBoolean("lastViewedCardFocused", false)
+                    val hasBookmarkId = obj.has("bookmarkedCardId") && !obj.isNull("bookmarkedCardId")
+                    flow.bookmarkedCardId = if (hasBookmarkId) {
+                        obj.optLong("bookmarkedCardId", -1L).takeIf { it >= 0 }
+                    } else null
+                    val bookmarkedIndex = obj.optInt("bookmarkedCardIndex", 0)
+                    flow.bookmarkedCardIndex = bookmarkedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
                     flows += flow
                 }
             } catch (_: Exception) {
@@ -7485,6 +7899,12 @@ class MainActivity : AppCompatActivity() {
                 card.imageHandwriting?.let { back ->
                     obj.put("imageHandwriting", handwritingSideToJson(back))
                 }
+                card.thermalReceipt?.let { receipt ->
+                    obj.put("thermalReceipt", handwritingSideToJson(receipt.side).apply {
+                        put("heightPercent", receipt.heightPercent)
+                        put("face", receipt.face.name)
+                    })
+                }
                 card.video?.let { video ->
                     obj.put("video", JSONObject().apply {
                         put("sourceUri", video.sourceUri)
@@ -7529,6 +7949,12 @@ class MainActivity : AppCompatActivity() {
             }
             flowObj.put("lastViewedCardIndex", flow.lastViewedCardIndex)
             flowObj.put("lastViewedCardFocused", flow.lastViewedCardFocused)
+            if (flow.bookmarkedCardId != null) {
+                flowObj.put("bookmarkedCardId", flow.bookmarkedCardId)
+            } else {
+                flowObj.put("bookmarkedCardId", JSONObject.NULL)
+            }
+            flowObj.put("bookmarkedCardIndex", flow.bookmarkedCardIndex)
             flowsArray.put(flowObj)
         }
 
@@ -7574,12 +8000,13 @@ class MainActivity : AppCompatActivity() {
             else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
-            val currentIndex = if (flows.isEmpty()) 0 else flowPager.currentItem.coerceIn(0, flows.lastIndex)
+            val currentIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
             if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
             putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled)
+            putBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, isTwoFlowLandscapeEnabled)
             remove(KEY_CARDS)
             apply()
         }
@@ -7622,12 +8049,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        samsungSpenRemoteBridge?.disconnect()
         super.onStop()
         videoProgressPersistJob?.cancel()
         saveState()
     }
 
     override fun onDestroy() {
+        samsungSpenRemoteBridge?.disconnect()
+        samsungSpenRemoteBridge = null
         dismissSearchResultsDialog()
         stickyNoteNotificationJob?.cancel()
         stickyNoteNotificationJob = null
@@ -7904,8 +8334,39 @@ class MainActivity : AppCompatActivity() {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.page_card_flow, parent, false)
             val recycler = view.findViewById<RecyclerView>(R.id.recyclerFlowCards)
             val cardCountView = view.findViewById<TextView>(R.id.cardCountIndicator)
-            val layoutManager = createLayoutManager()
+            val bookmarkButton = view.findViewById<ImageButton>(R.id.buttonFlowBookmark)
+            val inactiveOverlay = view.findViewById<View>(R.id.inactiveFlowOverlay)
+            val layoutManager = createLayoutManager(flowPaneViewportWidth())
             recycler.layoutManager = layoutManager
+            installTwoFlowSwipeNavigation(recycler)
+            lateinit var holder: FlowVH
+            inactiveOverlay.setOnClickListener {
+                val target = holder.bindingAdapterPosition
+                if (target != RecyclerView.NO_POSITION) activateFlowPane(target)
+            }
+            val touchSlop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+            var overlayDownX = 0f
+            var overlayDownY = 0f
+            inactiveOverlay.setOnTouchListener { overlay, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        overlayDownX = event.x
+                        overlayDownY = event.y
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val dx = event.x - overlayDownX
+                        val dy = event.y - overlayDownY
+                        if (kotlin.math.abs(dx) > touchSlop &&
+                            kotlin.math.abs(dx) > kotlin.math.abs(dy)
+                        ) {
+                            navigateTwoFlowSwipe(dx)
+                        } else {
+                            overlay.performClick()
+                        }
+                    }
+                }
+                true
+            }
             recycler.setHasFixedSize(true)
             recycler.itemAnimator = DefaultItemAnimator().apply {
                 moveDuration = CARD_COLLECTION_MOVE_ANIMATION_MS
@@ -7915,7 +8376,6 @@ class MainActivity : AppCompatActivity() {
             }
             recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
 
-            lateinit var holder: FlowVH
                 val adapter = CardsAdapter(
                     cardTint,
                     onItemClick = { index -> holder.onCardTapped(index) },
@@ -7925,6 +8385,7 @@ class MainActivity : AppCompatActivity() {
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
                     onCollectionClick = { card, cardView -> holder.onCollectionTapped(card, cardView) },
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
+                    onReceiptClick = { card, face -> showReceiptOptions(card, face) },
                     onVideoProgressChanged = { cardId, progressMs, durationMs ->
                         updateVideoWatchProgress(cardId, progressMs, durationMs)
                     },
@@ -7935,7 +8396,7 @@ class MainActivity : AppCompatActivity() {
             adapter.setBodyTextSize(cardFontSizeSp)
             adapter.setBodyTypeface(cardTypeface)
             recycler.adapter = adapter
-            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView)
+            holder = FlowVH(view, recycler, layoutManager, adapter, cardCountView, bookmarkButton)
             return holder
         }
 
@@ -7959,7 +8420,8 @@ class MainActivity : AppCompatActivity() {
             val recycler: RecyclerView,
             val layoutManager: RightRailFlowLayoutManager,
             val adapter: CardsAdapter,
-            val cardCountView: TextView
+            val cardCountView: TextView,
+            val bookmarkButton: ImageButton
         ) : RecyclerView.ViewHolder(view) {
             var boundFlowId: Long? = null
 
@@ -7969,7 +8431,7 @@ class MainActivity : AppCompatActivity() {
                     flowControllers.remove(it)?.dispose()
                 }
                 boundFlowId = flow.id
-                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView)
+                val controller = FlowPageController(flow.id, recycler, layoutManager, adapter, cardCountView, bookmarkButton)
                 flowControllers[flow.id] = controller
                 adapter.setBodyTextSize(cardFontSizeSp)
                 adapter.setBodyTypeface(cardTypeface)
@@ -8045,7 +8507,8 @@ class MainActivity : AppCompatActivity() {
         val recycler: RecyclerView,
         val layoutManager: RightRailFlowLayoutManager,
         val adapter: CardsAdapter,
-        val cardCountView: TextView
+        val cardCountView: TextView,
+        val bookmarkButton: ImageButton
     ) {
         private var pendingActiveVideoCardId: Long? = null
         private var pendingVideoCardUpdateAttempts: Int = 0
@@ -8117,6 +8580,81 @@ class MainActivity : AppCompatActivity() {
             recycler.addOnItemTouchListener(emptyAreaTouchListener)
             layoutManager.selectionListener = selectionCallback
             cardCountView.isVisible = false
+            bookmarkButton.isVisible = false
+            bookmarkButton.setOnClickListener {
+                val flow = owningFlow() ?: return@setOnClickListener
+                if (flow.bookmarkedCardId == null) {
+                    bookmarkCurrentCard(flow)
+                } else {
+                    scrollToBookmarkedCard(flow)
+                }
+            }
+            bookmarkButton.setOnLongClickListener {
+                val flow = owningFlow() ?: return@setOnLongClickListener false
+                bookmarkCurrentCard(flow)
+                true
+            }
+            makeBookmarkButtonMovable()
+        }
+
+        private fun makeBookmarkButtonMovable() {
+            val touchSlop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+            var downRawX = 0f
+            var downRawY = 0f
+            var startX = 0f
+            var startY = 0f
+            var moved = false
+            var longPressed = false
+            val longPressDetector = GestureDetectorCompat(
+                this@MainActivity,
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(event: MotionEvent): Boolean = true
+
+                    override fun onLongPress(event: MotionEvent) {
+                        if (!moved) {
+                            longPressed = bookmarkButton.performLongClick()
+                        }
+                    }
+                }
+            )
+            bookmarkButton.setOnTouchListener { button, event ->
+                longPressDetector.onTouchEvent(event)
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downRawX = event.rawX
+                        downRawY = event.rawY
+                        startX = button.x
+                        startY = button.y
+                        moved = false
+                        longPressed = false
+                        button.parent?.requestDisallowInterceptTouchEvent(true)
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val deltaX = event.rawX - downRawX
+                        val deltaY = event.rawY - downRawY
+                        if (!moved && (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop)) {
+                            moved = true
+                        }
+                        if (moved) {
+                            val parent = button.parent as? View ?: return@setOnTouchListener true
+                            button.x = (startX + deltaX).coerceIn(0f, (parent.width - button.width).coerceAtLeast(0).toFloat())
+                            button.y = (startY + deltaY).coerceIn(0f, (parent.height - button.height).coerceAtLeast(0).toFloat())
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        button.parent?.requestDisallowInterceptTouchEvent(false)
+                        if (!moved && !longPressed) button.performClick()
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        button.parent?.requestDisallowInterceptTouchEvent(false)
+                        true
+                    }
+                    else -> true
+                }
+            }
         }
 
         fun updateDisplayedCards(
@@ -8200,6 +8738,81 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
+        fun flipCurrentMainCard(): Boolean {
+            if (adapter.itemCount == 0) return false
+            val index = layoutManager.currentSelectionIndex()
+                ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            if (!adapter.canFlipCardAt(index)) return false
+            val viewHolder = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                ?: return false
+            val flipped = adapter.toggleCardFace(viewHolder) != null
+            if (flipped) {
+                viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            }
+            return flipped
+        }
+
+        fun scrollToFirstCard(flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            return scrollToCardIndex(0, flow)
+        }
+
+        fun scrollToBookmarkedCard(flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val target = flow.bookmarkedCardId?.let { id ->
+                (0 until adapter.itemCount).firstOrNull { index -> adapter.getItemAt(index)?.id == id }
+            } ?: flow.bookmarkedCardIndex.takeIf { it in 0 until adapter.itemCount }
+            if (target == null) {
+                val bookmarkStillExists = flow.bookmarkedCardId?.let { id ->
+                    flow.cards.any { it.id == id }
+                } == true
+                snackbar(
+                    getString(
+                        if (bookmarkStillExists) {
+                            R.string.snackbar_flow_bookmark_hidden_by_search
+                        } else {
+                            R.string.snackbar_flow_bookmark_missing
+                        }
+                    )
+                )
+                if (bookmarkStillExists) return false
+                flow.bookmarkedCardId = null
+                flow.bookmarkedCardIndex = 0
+                updateBookmarkButton(flow)
+                saveState()
+                return false
+            }
+            return scrollToCardIndex(target, flow)
+        }
+
+        fun bookmarkCurrentCard(flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val index = layoutManager.currentSelectionIndex()
+                ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            val card = adapter.getItemAt(index) ?: return false
+            flow.bookmarkedCardId = card.id
+            flow.bookmarkedCardIndex = index
+            updateBookmarkButton(flow)
+            saveState()
+            snackbar(getString(R.string.snackbar_flow_bookmark_saved))
+            return true
+        }
+
+        private fun updateBookmarkButton(flow: CardFlow) {
+            val hasCards = adapter.itemCount > 0
+            val hasBookmark = flow.bookmarkedCardId != null
+            bookmarkButton.isVisible = hasCards
+            bookmarkButton.isSelected = hasBookmark
+            bookmarkButton.alpha = if (hasBookmark) 1f else 0.62f
+            bookmarkButton.contentDescription = getString(
+                if (hasBookmark) {
+                    R.string.flow_bookmark_go_content_desc
+                } else {
+                    R.string.flow_bookmark_save_content_desc
+                }
+            )
+        }
+
         fun dispose() {
             recycler.removeOnScrollListener(scrollListener)
             recycler.removeOnItemTouchListener(emptyAreaTouchListener)
@@ -8207,6 +8820,25 @@ class MainActivity : AppCompatActivity() {
             if (layoutManager.selectionListener === selectionCallback) {
                 layoutManager.selectionListener = null
             }
+        }
+
+        private fun scrollToCardIndex(index: Int, flow: CardFlow): Boolean {
+            if (adapter.itemCount == 0) return false
+            val target = index.coerceIn(0, adapter.itemCount - 1)
+            recycler.stopScroll()
+            pendingKeyboardSelectionIndex = target
+            val scrollDelta = layoutManager.offsetTo(target)
+            layoutManager.clearFocus(immediate = true)
+            if (abs(scrollDelta) > 1) {
+                recycler.smoothScrollBy(0, scrollDelta)
+            } else {
+                pendingKeyboardSelectionIndex = null
+                layoutManager.restoreState(target, focus = true)
+                captureState(flow)
+            }
+            updateCardCounter(target)
+            maybeAutoPlayCenteredVideo(target)
+            return true
         }
 
         private fun onEmptyAreaTapped() {
@@ -8224,8 +8856,10 @@ class MainActivity : AppCompatActivity() {
                 layoutManager.restoreState(0, false)
                 cardCountView.isVisible = false
                 cardCountView.text = ""
+                updateBookmarkButton(flow)
                 return
             }
+            updateBookmarkButton(flow)
             if (activeQuery.isBlank()) {
                 when {
                     shouldRestoreState -> restoreState(flow)
@@ -8401,9 +9035,31 @@ class MainActivity : AppCompatActivity() {
         val image: CardImage?,
         val imageHandwriting: HandwritingSide?,
         val recognizedText: String?,
-        val stickyNotes: List<StickyNote>
+        val stickyNotes: List<StickyNote>,
+        val thermalReceipt: ThermalReceipt?
     )
 
+}
+
+internal fun twoFlowSwipeTarget(
+    currentIndex: Int,
+    itemCount: Int,
+    horizontalDistance: Float
+): Int {
+    if (itemCount <= 0) return 0
+    val current = currentIndex.coerceIn(0, itemCount - 1)
+    // Follow pager convention: swiping left advances; swiping right returns to the previous flow.
+    val delta = when {
+        horizontalDistance > 0f -> -1
+        horizontalDistance < 0f -> 1
+        else -> 0
+    }
+    return (current + delta).coerceIn(0, itemCount - 1)
+}
+
+internal fun collectedCardsFirst(cards: List<CardItem>): List<CardItem> {
+    if (cards.none { it.isCollected }) return cards.toList()
+    return cards.filter { it.isCollected } + cards.filterNot { it.isCollected }
 }
 
 private const val TAG = "MainActivity"
@@ -8424,6 +9080,7 @@ private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
 private const val KEY_FLOW_REORDER_MODE_ENABLED = "flow_reorder_mode_enabled"
+private const val KEY_TWO_FLOW_LANDSCAPE_ENABLED = "two_flow_landscape_enabled"
 private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH_SIZE_DP = "handwriting/default_brush_size_dp"
@@ -8466,6 +9123,7 @@ private const val EXTRA_TARGET_STICKY_NOTE_ID = "extra/target_sticky_note_id"
 private const val EXTRA_TARGET_STICKY_NOTE_SHOW_BACK = "extra/target_sticky_note_show_back"
 private const val STICKY_NOTE_NOTIFICATION_CHANNEL_ID = "sticky_notes"
 private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
+private const val STYLUS_BUTTON_DEDUP_WINDOW_MS = 250L
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
 private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
 private const val FLOW_REORDER_DRAG_LABEL = "flow_reorder_drag"
