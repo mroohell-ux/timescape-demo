@@ -39,7 +39,11 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import android.util.TypedValue
+import android.util.Log
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.view.isVisible
+import com.google.android.material.card.MaterialCardView
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import androidx.core.net.toUri
@@ -48,14 +52,10 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-// Default sizing limits used when callers do not provide their own
-// `BackgroundSizingConfig`. The adapter will never decode a background bitmap with a
-// long edge greater than `DEFAULT_MAX_BG_LONG_EDGE_PX`, but it will also avoid shrinking
-// extremely small cards below `DEFAULT_MIN_BG_LONG_EDGE_PX`. When the on-screen size
-// is still unknown, it estimates the desired width as a fraction of the device width;
-// `DEFAULT_BG_WIDTH_FRACTION` represents that fallback fraction. To prevent impossible
-// values, `MIN_BG_WIDTH_FRACTION` defines the lowest fraction the config will accept.
+// Legacy sizing for auxiliary backgrounds. Photographic text faces and previews instead
+// request viewport-sized images (up to 1280px) so their subjects remain recognizable.
 private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 80
+private val PREVIEW_WHITESPACE = Regex("\\s+")
 private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 30
 private const val DEFAULT_BG_WIDTH_FRACTION = 0.25f
 private const val MIN_BG_WIDTH_FRACTION = 0.1f
@@ -133,17 +133,29 @@ class CardsAdapter(
     private val onReceiptClick: ((CardItem, HandwritingFace) -> Unit)? = null,
     private val onVideoProgressChanged: ((cardId: Long, progressMs: Long, durationMs: Long) -> Unit)? = null,
     private val onVideoPlaybackStateChanged: ((cardId: Long, isPlaying: Boolean) -> Unit)? = null,
+    private val onItemCollapse: ((index: Int) -> Unit)? = null,
     backgroundSizing: BackgroundSizingConfig = BackgroundSizingConfig()
 ) : ListAdapter<CardItem, CardsAdapter.VH>(DIFF_CALLBACK) {
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
+        val presentation = v as TimescapeCardLayout
+        val previewSurface: View = v.findViewById(R.id.cardPreviewSurface)
+        val preview: MaterialCardView = v.findViewById(R.id.cardPreview)
+        val previewImage: ImageView = v.findViewById(R.id.previewImage)
+        val previewScrim: View = v.findViewById(R.id.previewScrim)
+        val previewText: View = v.findViewById(R.id.previewText)
+        val previewTitle: TextView = v.findViewById(R.id.previewTitle)
+        val previewSnippet: TextView = v.findViewById(R.id.previewSnippet)
+        val previewTime: TextView = v.findViewById(R.id.previewTime)
+        val previewTypeIcon: ImageView = v.findViewById(R.id.previewTypeIcon)
+        val collapseButton: ImageButton = v.findViewById(R.id.buttonCollapseCard)
         val card: AspectRatioCardView = v.findViewById(R.id.card)
         val restingCardElevation: Float = card.cardElevation
-        val time: TextView = v.findViewById(R.id.time)
+        val time: TimescapeTextView = v.findViewById(R.id.time)
         val titleContainer: View = v.findViewById(R.id.titleContainer)
-        val title: TextView = v.findViewById(R.id.title)
+        val title: TimescapeTextView = v.findViewById(R.id.title)
         val titleSpeakButton: ImageButton = v.findViewById(R.id.buttonSpeakTitle)
-        val snippet: TextView = v.findViewById(R.id.snippet)
+        val snippet: TimescapeTextView = v.findViewById(R.id.snippet)
         val bg: ImageView = v.findViewById(R.id.bgImage)
         val textScrim: View = v.findViewById(R.id.textScrim)
         val imageCardContainer: View = v.findViewById(R.id.imageCardContainer)
@@ -353,6 +365,23 @@ class CardsAdapter(
         v.setOnTouchListener(cardGestureTouchListener)
         vh.card.setOnTouchListener(cardGestureTouchListener)
         vh.receipt.setOnTouchListener(cardGestureTouchListener)
+        vh.preview.setOnTouchListener(cardGestureTouchListener)
+        vh.previewSurface.setOnTouchListener(cardGestureTouchListener)
+        ViewCompat.replaceAccessibilityAction(
+            vh.previewSurface, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
+            parent.context.getString(R.string.card_expand)
+        ) { _, _ ->
+            val index = vh.bindingAdapterPosition
+            if (index == RecyclerView.NO_POSITION) false else {
+                onItemClick(index)
+                true
+            }
+        }
+        vh.collapseButton.isVisible = onItemCollapse != null
+        vh.collapseButton.setOnClickListener {
+            val index = vh.bindingAdapterPosition
+            if (index != RecyclerView.NO_POSITION) onItemCollapse?.invoke(index)
+        }
         vh.stickyNotesButton.setOnClickListener {
             val index = vh.bindingAdapterPosition
             if (index != RecyclerView.NO_POSITION) {
@@ -426,6 +455,7 @@ class CardsAdapter(
             else -> item.snippet
         }
         holder.itemView.setTag(R.id.tag_card_id, item.id)
+        bindPreview(holder, item)
         holder.playOverlay.isVisible = false
         holder.durationBadge.isVisible = false
         holder.progressBar.isVisible = false
@@ -488,7 +518,10 @@ class CardsAdapter(
                         false
                     } else {
                         holder.bg.setImageResource(PLACEHOLDER_RES_ID)
-                        val (targetWidth, targetHeight) = estimateBackgroundSize(holder)
+                        val (targetWidth, targetHeight) = if (item.video == null) {
+                            val side = holder.itemView.resources.displayMetrics.widthPixels.coerceAtMost(1280)
+                            side to side
+                        } else estimateBackgroundSize(holder)
                         BackgroundImageLoader.load(
                             context = holder.itemView.context,
                             imageView = holder.bg,
@@ -537,6 +570,114 @@ class CardsAdapter(
         // ---- Consistent readability styling ----
         holder.textScrim.alpha = 0.45f
         addShadow(holder.time, holder.title, holder.snippet)
+        val photoText = item.bg != null && item.image == null && item.handwriting == null && item.video == null
+        for (text in listOf(holder.time, holder.title, holder.snippet)) {
+            text.depthAmount = if (photoText) 0.55f else 0f
+        }
+        val density = holder.itemView.resources.displayMetrics.density
+        holder.card.radius = (if (photoText) 2f else 20f) * density
+        holder.card.cardElevation = if (photoText) 0f else holder.restingCardElevation
+        holder.card.foreground = if (photoText) {
+            ContextCompat.getDrawable(holder.itemView.context, R.drawable.timescape_photo_edge)
+        } else null
+        holder.textScrim.setBackgroundResource(if (photoText) R.drawable.timescape_photo_scrim else R.drawable.text_scrim)
+        holder.textScrim.alpha = if (photoText) 1f else 0.45f
+        holder.cardContent.setPadding((20 * density).roundToInt(),
+            ((if (photoText) 58 else 20) * density).roundToInt(),
+            (20 * density).roundToInt(), (20 * density).roundToInt())
+        holder.title.textSize = if (photoText) 28f else 20f
+        holder.bg.alpha = if (photoText) 0.90f else 1f
+        if (photoText) {
+            stylePhotograph(holder.bg)
+            holder.title.typeface = bodyTypeface ?: Typeface.create("sans-serif-light", Typeface.NORMAL)
+        }
+    }
+
+    private fun stylePhotograph(image: ImageView) {
+        image.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0.65f) })
+        val radius = 0.65f * image.resources.displayMetrics.density
+        image.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP))
+    }
+
+    private fun bindPreview(holder: VH, item: CardItem) {
+        val context = holder.itemView.context
+        val density = context.resources.displayMetrics.density
+        val media = item.image != null || item.handwriting != null || item.video != null
+        holder.presentation.configurePreview(media, item.video?.aspectRatio ?: 1.5f)
+        holder.preview.radius = (if (media) 20f else 2f) * density
+        holder.preview.foreground = if (media) null else {
+            ContextCompat.getDrawable(context, R.drawable.timescape_photo_edge)
+        }
+        holder.preview.setCardBackgroundColor(if (media) Color.TRANSPARENT else 0xB51B4668.toInt())
+        holder.previewText.isVisible = !media
+        holder.previewScrim.isVisible = !media
+        holder.previewTypeIcon.isVisible = !media || item.video != null
+        holder.previewTypeIcon.setImageResource(
+            if (item.video != null) android.R.drawable.ic_media_play else R.drawable.ic_sticky_note
+        )
+        holder.previewTitle.text = item.title
+        holder.previewTitle.isVisible = item.title.isNotBlank()
+        holder.previewSnippet.text = item.snippet.replace(PREVIEW_WHITESPACE, " ").trim()
+        holder.previewTime.text = holder.time.text
+        holder.previewTitle.typeface = bodyTypeface ?: Typeface.create("sans-serif-light", Typeface.NORMAL)
+        holder.previewSnippet.typeface = bodyTypeface ?: if (item.title.isBlank()) {
+            Typeface.create("sans-serif-light", Typeface.NORMAL)
+        } else null
+        holder.previewTime.typeface = boldTypeface ?: Typeface.DEFAULT_BOLD
+        val previewBodySize = (bodyTextSizeSp - 2f).coerceIn(14f, 22f)
+        holder.previewTitle.textSize = (previewBodySize * 1.25f).coerceIn(18f, 24f)
+        holder.previewSnippet.textSize = previewBodySize
+        holder.previewSurface.contentDescription = if (media) item.title.ifBlank {
+            context.getString(if (item.handwriting != null) R.string.handwriting_card_content_desc else R.string.image_card_content_desc)
+        } else null
+        val image = holder.previewImage
+        BackgroundImageLoader.clear(image)
+        HandwritingBitmapLoader.clear(image)
+        image.colorFilter = null
+        image.setRenderEffect(null)
+        image.alpha = if (media) 1f else 0.9f
+        image.scaleType = if (media) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
+        if (!media) stylePhotograph(image)
+        val side = context.resources.displayMetrics.widthPixels.coerceAtMost(1280)
+        fun applyBitmap(bitmap: Bitmap) {
+            image.setImageBitmap(bitmap)
+            if (media) holder.presentation.configurePreview(true, bitmap.width.toFloat() / bitmap.height)
+        }
+        val handwriting = item.handwriting
+        if (handwriting != null) {
+            HandwritingBitmapLoader.load(context, handwriting.path, image, side, side) { bitmap ->
+                if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
+                if (bitmap != null) applyBitmap(bitmap)
+                else {
+                    image.setImageResource(PLACEHOLDER_RES_ID)
+                    Log.w("TimescapePreview", "Handwriting preview unavailable for card ${item.id}")
+                }
+            }
+            return
+        }
+        val source = if (media) {
+            item.image?.uri?.let { BgImage.UriRef(it) }
+                ?: item.video?.coverImagePath?.let { BgImage.UriRef(java.io.File(it).toUri()) }
+        } else item.bg
+        when (source) {
+            is BgImage.Res -> image.setImageResource(source.id)
+            is BgImage.UriRef -> {
+                image.setImageResource(PLACEHOLDER_RES_ID)
+                BackgroundImageLoader.load(context, image, source.uri, side, side) { result ->
+                    if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
+                    when (result) {
+                        is BackgroundImageLoader.Result.Success -> applyBitmap(result.bitmap)
+                        is BackgroundImageLoader.Result.PermissionDenied ->
+                            Log.w("TimescapePreview", "Preview permission denied for card ${item.id}", result.exception)
+                        is BackgroundImageLoader.Result.Error ->
+                            Log.w("TimescapePreview", "Preview unavailable for card ${item.id}", result.throwable)
+                        BackgroundImageLoader.Result.NotFound ->
+                            Log.w("TimescapePreview", "Preview not found for card ${item.id}")
+                    }
+                }
+            }
+            null -> image.setImageDrawable(null)
+        }
     }
 
     private fun bindReceipt(holder: VH, item: CardItem) {
@@ -760,6 +901,9 @@ class CardsAdapter(
     override fun getItemId(position: Int): Long = getItem(position).id
 
     override fun onViewRecycled(holder: VH) {
+        holder.presentation.setExpansion(0f)
+        BackgroundImageLoader.clear(holder.previewImage)
+        HandwritingBitmapLoader.clear(holder.previewImage)
         HandwritingBitmapLoader.clear(holder.handwriting)
         BackgroundImageLoader.clear(holder.bg)
         BackgroundImageLoader.clear(holder.imageCard)

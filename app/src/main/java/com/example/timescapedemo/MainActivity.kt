@@ -871,8 +871,8 @@ class MainActivity : AppCompatActivity() {
                 return@addCallback
             }
             val controller = currentController()
-            val nearest = controller?.layoutManager?.nearestIndex() ?: RecyclerView.NO_POSITION
-            if (controller != null && nearest != RecyclerView.NO_POSITION && controller.layoutManager.isFocused(nearest)) {
+            if (controller != null && controller.layoutManager.hasSelection()) {
+                controller.recycler.stopScroll()
                 controller.layoutManager.clearFocus()
             } else {
                 remove()
@@ -2524,7 +2524,8 @@ class MainActivity : AppCompatActivity() {
         val availableWidth = (viewportWidthPx - horizontalInsetPx).coerceAtLeast(minSidePx)
         val baseSide = availableWidth
         val focusSide = availableWidth
-        val pitch = (availableWidth * 0.26f).roundToInt()
+        val pitch = (availableWidth * 0.34f).coerceIn(108 * density, 148 * density)
+            .times(resources.configuration.fontScale.coerceAtLeast(1f)).roundToInt()
         return RightRailFlowLayoutManager(
             baseSidePx = baseSide,
             focusSidePx = focusSide,
@@ -7737,7 +7738,8 @@ class MainActivity : AppCompatActivity() {
                     } else null
                     val savedIndex = obj.optInt("lastViewedCardIndex", 0)
                     flow.lastViewedCardIndex = savedIndex.coerceIn(0, max(0, flow.cards.lastIndex))
-                    flow.lastViewedCardFocused = obj.optBoolean("lastViewedCardFocused", false)
+                    flow.lastViewedCardFocused = obj.optInt("timescapeRibbonVersion", 0) >= 1 &&
+                        obj.optBoolean("lastViewedCardFocused", false)
                     val hasBookmarkId = obj.has("bookmarkedCardId") && !obj.isNull("bookmarkedCardId")
                     flow.bookmarkedCardId = if (hasBookmarkId) {
                         obj.optLong("bookmarkedCardId", -1L).takeIf { it >= 0 }
@@ -7864,6 +7866,7 @@ class MainActivity : AppCompatActivity() {
             val flowObj = JSONObject()
             flowObj.put("id", flow.id)
             flowObj.put("name", flow.name)
+            flowObj.put("timescapeRibbonVersion", 1)
             val cardsArray = JSONArray()
             val shuffleState = flowShuffleStates[flow.id]?.also { it.syncWith(flow) }
             val cardsForPersistence = shuffleState?.let { cardsInOriginalOrder(flow, it) } ?: flow.cards
@@ -8382,6 +8385,9 @@ class MainActivity : AppCompatActivity() {
                     onItemDoubleClick = { card, index -> Log.d("DoubleClick", "onItemDoubleClick: index=$index, card=$card")
                         holder.onCardDoubleTapped(card, index) },
                     onItemLongPress = { index, view -> holder.onCardLongPressed(index, view) },
+                    onItemCollapse = { index ->
+                        if (layoutManager.currentSelectionIndex() == index) layoutManager.clearFocus()
+                    },
                     onStickyNotesClick = { card -> holder.onStickyNotesTapped(card) },
                     onCollectionClick = { card, cardView -> holder.onCollectionTapped(card, cardView) },
                     onTitleSpeakClick = { card -> speakCardTitle(card) },
@@ -8458,12 +8464,8 @@ class MainActivity : AppCompatActivity() {
                     }
                     layoutManager.clearFocus()
                 } else {
-                    val delta = layoutManager.offsetTo(index)
-                    if (delta == 0) {
-                        layoutManager.focus(index)
-                    } else {
-                        recycler.smoothScrollBy(0, delta)
-                    }
+                    val flow = flows.getOrNull(bindingAdapterPosition) ?: return
+                    flowControllers[flow.id]?.expandCard(index)
                 }
             }
 
@@ -8535,6 +8537,7 @@ class MainActivity : AppCompatActivity() {
         private var indicatorTotal: Int = 0
         private var lastHapticSelection: Int? = null
         private var pendingKeyboardSelectionIndex: Int? = null
+        private var pendingSelectionFocus = false
         private val selectionCallback: (Int?) -> Unit = { index ->
             vibrateOnCardChange(index)
             updateCardCounter(index)
@@ -8542,6 +8545,10 @@ class MainActivity : AppCompatActivity() {
         }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
+                    pendingKeyboardSelectionIndex = null
+                    pendingSelectionFocus = false
+                }
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     layoutManager.settleScrollIfNeeded {
                         val pendingTarget = pendingKeyboardSelectionIndex
@@ -8549,11 +8556,18 @@ class MainActivity : AppCompatActivity() {
                         val flow = owningFlow()
                         if (pendingTarget != null && flow != null && adapter.itemCount > 0) {
                             val target = pendingTarget.coerceIn(0, adapter.itemCount - 1)
-                            layoutManager.restoreState(target, focus = true)
+                            if (pendingSelectionFocus && layoutManager.hasSelection()) {
+                                layoutManager.restoreState(target, focus = true)
+                            } else {
+                                layoutManager.restoreState(target, focus = false)
+                                if (pendingSelectionFocus) layoutManager.focus(target)
+                            }
                             captureState(flow)
                         } else {
-                            flow?.let { ensureMainCard(it) }
+                            flow?.let { captureState(it) }
                         }
+                        updateCardCounter(layoutManager.currentSelectionIndex())
+                        maybeAutoPlayCenteredVideo(layoutManager.currentSelectionIndex())
                     }
                 }
             }
@@ -8722,19 +8736,22 @@ class MainActivity : AppCompatActivity() {
                 ?: layoutManager.currentSelectionIndex()
                 ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
             val target = (current + delta).coerceIn(0, adapter.itemCount - 1)
+            val expand = if (pendingKeyboardSelectionIndex != null) pendingSelectionFocus else layoutManager.hasSelection()
+            pendingKeyboardSelectionIndex = null
             recycler.stopScroll()
             pendingKeyboardSelectionIndex = target
+            pendingSelectionFocus = expand
             val scrollDelta = layoutManager.offsetTo(target)
-            layoutManager.clearFocus(immediate = true)
+            if (!expand) layoutManager.clearFocus(immediate = true)
             if (abs(scrollDelta) > 1) {
                 recycler.smoothScrollBy(0, scrollDelta)
             } else {
                 pendingKeyboardSelectionIndex = null
-                layoutManager.restoreState(target, focus = true)
+                layoutManager.restoreState(target, focus = expand)
                 captureState(flow)
             }
             updateCardCounter(target)
-            maybeAutoPlayCenteredVideo(target)
+            maybeAutoPlayCenteredVideo(layoutManager.currentSelectionIndex())
             return true
         }
 
@@ -8742,6 +8759,8 @@ class MainActivity : AppCompatActivity() {
             if (adapter.itemCount == 0) return false
             val index = layoutManager.currentSelectionIndex()
                 ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
+            if (!layoutManager.hasSelection()) return expandCard(index)
+            if (!layoutManager.isFocused(index)) return false
             if (!adapter.canFlipCardAt(index)) return false
             val viewHolder = recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
                 ?: return false
@@ -8754,7 +8773,7 @@ class MainActivity : AppCompatActivity() {
 
         fun scrollToFirstCard(flow: CardFlow): Boolean {
             if (adapter.itemCount == 0) return false
-            return scrollToCardIndex(0, flow)
+            return scrollToCardIndex(0, flow, expand = false)
         }
 
         fun scrollToBookmarkedCard(flow: CardFlow): Boolean {
@@ -8822,22 +8841,29 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        private fun scrollToCardIndex(index: Int, flow: CardFlow): Boolean {
+        fun expandCard(index: Int): Boolean {
+            val flow = owningFlow() ?: return false
+            return scrollToCardIndex(index, flow)
+        }
+
+        private fun scrollToCardIndex(index: Int, flow: CardFlow, expand: Boolean = true): Boolean {
             if (adapter.itemCount == 0) return false
             val target = index.coerceIn(0, adapter.itemCount - 1)
+            pendingKeyboardSelectionIndex = null
             recycler.stopScroll()
             pendingKeyboardSelectionIndex = target
+            pendingSelectionFocus = expand
             val scrollDelta = layoutManager.offsetTo(target)
-            layoutManager.clearFocus(immediate = true)
+            if (!expand) layoutManager.clearFocus(immediate = true)
             if (abs(scrollDelta) > 1) {
                 recycler.smoothScrollBy(0, scrollDelta)
             } else {
                 pendingKeyboardSelectionIndex = null
-                layoutManager.restoreState(target, focus = true)
+                if (expand) layoutManager.focus(target) else layoutManager.restoreState(target, focus = false)
                 captureState(flow)
             }
             updateCardCounter(target)
-            maybeAutoPlayCenteredVideo(target)
+            maybeAutoPlayCenteredVideo(layoutManager.currentSelectionIndex())
             return true
         }
 
@@ -8874,18 +8900,10 @@ class MainActivity : AppCompatActivity() {
                     layoutManager.restoreState(0, false)
                 }
             }
-            ensureMainCard(flow)
+            captureState(flow)
             val selection = layoutManager.currentSelectionIndex()
             updateCardCounter(selection)
             maybeAutoPlayCenteredVideo(selection)
-        }
-
-        private fun ensureMainCard(flow: CardFlow) {
-            if (adapter.itemCount == 0) return
-            val selection = layoutManager.currentSelectionIndex()?.coerceIn(0, adapter.itemCount - 1)
-            val target = selection ?: layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
-            layoutManager.focus(target)
-            captureState(flow)
         }
 
         private fun owningFlow(): CardFlow? = flows.firstOrNull { it.id == flowId }
@@ -8914,11 +8932,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun maybeAutoPlayCenteredVideo(selectionIndex: Int?) {
-            if (flowId != VIDEO_FLOW_ID) {
+            if (flowId != VIDEO_FLOW_ID || selectionIndex == null || !layoutManager.isFocused(selectionIndex)) {
                 setActiveVideoCardIdSafely(null)
                 return
             }
-            val index = (selectionIndex ?: layoutManager.nearestIndex()).takeIf { it >= 0 } ?: run {
+            val index = selectionIndex.takeIf { it >= 0 } ?: run {
                 setActiveVideoCardIdSafely(null)
                 return
             }

@@ -11,15 +11,10 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
- * Timescape-like vertical flow with variable-height cards:
- *  - Height grows with text (wrap-content), capped at 2/3 of the screen.
- *  - Width still follows center "gain" + focus animation.
- *  - Only near neighbors overlap slightly (itemPitchPx).
- *  - Cards remain STRAIGHT (no rotation).
+ * A perspective ribbon with compact browsing and scroll-linked continuous reading.
  */
 class RightRailFlowLayoutManager(
     private val baseSidePx: Int,          // width near center (non-focused)
@@ -27,29 +22,15 @@ class RightRailFlowLayoutManager(
     private val itemPitchPx: Int,         // visual spacing (center-to-center)
     private val rightInsetPx: Int,
     private val topInsetPx: Int = 0,
-    private val bottomInsetPx: Int = 0,
-
-    // Visual tuning
-    private val minEdgeScale: Float = 0.72f,
-    private val edgeAlphaMin: Float = 0.30f,
-    private val depthScaleDrop: Float = 0.05f,
-
-    // Horizontal rail shaping (controls inflow/outflow direction)
-    private val edgeRightShiftPx: Int = 48,     // far cards to the RIGHT by this many px
-    private val centerLeftShiftPx: Int = 0,     // center card stays centered on the rail
-    private val railCurvePow: Float = 1.1f,     // curvature; 1 = linear, >1 stronger S-curve
-
-    // S-curve styling
-    private val curveRotationRadiusItems: Float = 4.5f,
-    private val curveRotationPow: Float = 1.12f,
-    private val curveMaxRotationDeg: Float = 9f,
-    private val curveExtraRightShiftPx: Int = 32
+    private val bottomInsetPx: Int = 0
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
 
     // focus animation state
     private var selectedIndex: Int? = null
     private var focusProgress: Float = 0f
     private var focusAnimator: ValueAnimator? = null
+    private var readingMode = false
+    private var readingScrollActive = false
     private val interp = FastOutSlowInInterpolator()
 
     init {
@@ -60,6 +41,7 @@ class RightRailFlowLayoutManager(
     private var scrollYPx = 0f
     private var pendingRestore: PendingRestore? = null
     private var settleAnimator: ValueAnimator? = null
+    private var lastViewportHeight = 0
 
     var selectionListener: ((Int?) -> Unit)? = null
         set(value) {
@@ -68,22 +50,9 @@ class RightRailFlowLayoutManager(
         }
 
     // Precomputed helpers to reduce per-frame work
-    private val gainLookup = GainLookup(itemPitchPx * 0.95f)
     private val widthQuantizer = IntQuantizer()
     private val heightQuantizer = IntQuantizer(stepPx = 12)
-    private val scatterCalculator = ScatterCalculator()
     private val layoutOverscan = 2
-
-    private data class CurvePlacement(
-        val extraX: Float,
-        val rotationDeg: Float
-    )
-
-    private data class ScatterOffsets(
-        val shiftX: Float,
-        val shiftY: Float,
-        val rotationDeg: Float
-    )
 
     private data class PendingRestore(
         val index: Int,
@@ -97,79 +66,123 @@ class RightRailFlowLayoutManager(
         RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
 
     // ---- Public helpers ----
-    fun isFocused(index: Int) = selectedIndex == index && focusProgress >= 0.999f
+    fun isFocused(index: Int) = readingMode && selectedIndex == index && focusProgress >= 0.999f &&
+        !readingScrollActive
+
+    private fun scrollForIndex(index: Int) = yTop() + index * itemPitchPx - screenCenter()
+
+    private fun readingPosition(): Float =
+        ((scrollYPx + screenCenter() - yTop()) / itemPitchPx).coerceIn(0f, max(0, itemCount - 1).toFloat())
+
+    private fun expansionFor(index: Int): Float {
+        val selected = selectedIndex ?: return 0f
+        val position = if (readingScrollActive) readingPosition() else selected.toFloat()
+        val weight = (1f - abs(index - position)).coerceIn(0f, 1f)
+        // Complementary smoothstep weights let neighbors exchange expansion without a midpoint jump.
+        return focusProgress * weight * weight * (3f - 2f * weight)
+    }
+
+    private fun updateReadingSelection() {
+        if (!readingScrollActive || selectedIndex == null) return
+        val nearest = nearestIndex()
+        if (selectedIndex != nearest) {
+            selectedIndex = nearest
+            notifySelectionChanged()
+        }
+    }
 
     /** Center index given current scroll (rounded to nearest). */
     fun nearestIndex(): Int {
+        pendingRestore?.let { return it.index.coerceIn(0, max(0, itemCount - 1)) }
         val idx = ((scrollYPx + screenCenter() - yTop()) / itemPitchPx).roundToInt()
         return idx.coerceIn(0, max(0, itemCount - 1))
     }
 
-    /** Pixel delta required to move `index` to vertical screen center. */
+    /** Pixel delta required to move `index` to the ribbon's active position. */
     fun offsetTo(index: Int): Int {
         val desiredScroll = yTop() + index * itemPitchPx - screenCenter()
         return (desiredScroll - scrollYPx).toInt()
     }
 
     fun currentSelectionIndex(): Int? {
-        val sel = selectedIndex ?: return null
+        val sel = pendingRestore?.takeIf { it.focus }?.index ?: selectedIndex ?: return null
         if (itemCount == 0) return null
         return sel.coerceIn(0, itemCount - 1)
     }
 
-    fun hasSelection(): Boolean = selectedIndex != null
+    fun hasSelection(): Boolean = pendingRestore?.focus ?: (selectedIndex != null)
 
     fun focus(index: Int) {
         if (itemCount == 0) return
         val clamped = index.coerceIn(0, max(0, itemCount - 1))
-        if (selectedIndex == clamped && focusProgress >= 0.999f) return
+        if (isFocused(clamped) && readingMode) return
+        cancelSettleAnimation()
+        readingMode = true
+        readingScrollActive = false
+        scrollYPx = scrollForIndex(clamped)
         val changed = selectedIndex != clamped
+        if (changed) {
+            cancelFocusAnimation()
+            focusProgress = 0f
+        }
         selectedIndex = clamped
         if (changed) notifySelectionChanged()
         animateFocus(1f)
     }
     fun clearFocus(immediate: Boolean = false) {
+        readingMode = false
+        cancelSettleAnimation()
+        pendingRestore = pendingRestore?.copy(focus = false)
         if (selectedIndex == null && focusProgress == 0f) return
         if (immediate) {
             val hadSelection = selectedIndex != null
-            focusAnimator?.cancel()
-            focusAnimator = null
+            cancelFocusAnimation()
             focusProgress = 0f
             selectedIndex = null
+            readingScrollActive = false
             requestLayout()
             if (hadSelection) notifySelectionChanged()
         } else {
             animateFocus(0f) {
                 val hadSelection = selectedIndex != null
                 selectedIndex = null
+                readingScrollActive = false
                 if (hadSelection) notifySelectionChanged()
             }
         }
     }
 
     private fun animateFocus(to: Float, end: (() -> Unit)? = null) {
-        focusAnimator?.cancel()
+        cancelFocusAnimation()
         val from = focusProgress
-        focusAnimator = ValueAnimator.ofFloat(from, to).apply {
+        val animator = ValueAnimator.ofFloat(from, to).apply {
             duration = if (to > from) 280 else 220
             interpolator = interp
             addUpdateListener { focusProgress = it.animatedValue as Float; requestLayout() }
-            if (end != null) {
-                addListener(object : android.animation.AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: android.animation.Animator) {
-                        if (focusProgress <= 0.001f) end()
-                    }
-                })
-            }
-            start()
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (focusAnimator !== animation) return
+                    focusAnimator = null
+                    if (focusProgress <= 0.001f) end?.invoke()
+                    else notifySelectionChanged()
+                }
+            })
         }
+        focusAnimator = animator
+        animator.start()
+    }
+
+    private fun cancelFocusAnimation() {
+        val animator = focusAnimator
+        focusAnimator = null
+        animator?.cancel()
     }
 
     // ---- Rail geometry ----
-    private fun screenCenter() = height / 2f
-    private fun yTop() = paddingTop + topInsetPx + baseSidePx / 2f
-    private fun yBottom() = height - paddingBottom - bottomInsetPx - baseSidePx / 2f
-    private fun railX() = width - paddingRight - rightInsetPx - baseSidePx / 2f
+    private fun screenCenter() = height * 0.25f
+    private fun yTop() = paddingTop + topInsetPx + itemPitchPx / 2f
+    private fun yBottom() = height - paddingBottom - bottomInsetPx - itemPitchPx / 2f
+    private fun railX() = paddingLeft + (width - paddingLeft - paddingRight - rightInsetPx) / 2f
 
     /** Allow first/last items to be centered without dead space. */
     private fun minScroll() = yTop() - screenCenter()
@@ -183,6 +196,10 @@ class RightRailFlowLayoutManager(
     override fun onLayoutChildren(recycler: RecyclerView.Recycler, state: RecyclerView.State) {
         detachAndScrapAttachedViews(recycler)
         if (itemCount == 0 || width == 0 || height == 0) return
+        if (lastViewportHeight != 0 && lastViewportHeight != height && pendingRestore == null) {
+            scrollYPx += (lastViewportHeight - height) * 0.25f
+        }
+        lastViewportHeight = height
         pendingRestore?.let {
             if (applyRestore(it.index, it.focus)) pendingRestore = null
         }
@@ -227,46 +244,14 @@ class RightRailFlowLayoutManager(
         cache.lastQuantizedSide = widthPx
     }
 
-    private fun applyTextByGain(
-        cache: ChildCache,
-        gain: Float,
-        focused: Boolean
-    ): Boolean {
-        val snippet = cache.snippet ?: return false
-        val targetBand = gainBandFor(gain, focused)
-        if (cache.lastGainBand == targetBand) return false
-
-        val desiredLines = snippetLinesFor(targetBand)
-        if (snippet.maxLines != desiredLines) {
-            snippet.maxLines = desiredLines
-        }
-        cache.lastSnippetMaxLines = desiredLines
-        cache.lastGainBand = targetBand
-        return true
-    }
-
-    private fun gainBandFor(gain: Float, focused: Boolean): GainBand {
-        if (focused) return GainBand.FOCUSED
-        return when {
-            gain >= 0.78f -> GainBand.PRIMARY
-            gain >= 0.55f -> GainBand.SECONDARY
-            else -> GainBand.TERTIARY
-        }
-    }
-
-    private fun snippetLinesFor(band: GainBand): Int = when (band) {
-        GainBand.FOCUSED -> Integer.MAX_VALUE
-        GainBand.PRIMARY -> 8
-        GainBand.SECONDARY -> 5
-        GainBand.TERTIARY -> 3
-    }
-
     private fun ensureCache(child: View): ChildCache {
         val existing = child.getTag(R.id.tag_card_cache) as? ChildCache
         if (existing != null) return existing
         val cache = ChildCache(
             container = child.findViewById(R.id.card_content),
-            snippet = child.findViewById(R.id.snippet)
+            snippet = child.findViewById(R.id.snippet),
+            card = child.findViewById(R.id.card),
+            presentation = child as? TimescapeCardLayout
         )
         child.setTag(R.id.tag_card_cache, cache)
         return cache
@@ -275,22 +260,23 @@ class RightRailFlowLayoutManager(
     private data class ChildCache(
         val container: MaxHeightLinearLayout?,
         val snippet: TextView?,
+        val card: AspectRatioCardView?,
+        val presentation: TimescapeCardLayout?,
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
-        var lastSnippetMaxLines: Int = -1,
         var lastQuantizedSide: Int = -1,
-        var lastGainBand: GainBand? = null
+        var extraHeight: Float = 0f
     )
 
     private fun layoutWindow(scroll: Float): IntRange {
-        val yT = yTop(); val yB = yBottom()
+        val yT = yTop()
         val firstIdx = max(
             0,
             floor(((scroll + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
         )
         val lastIdx = min(
             itemCount - 1,
-            ceil(((scroll + (yB - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
+            ceil(((scroll + (yBottom() - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
         )
         return firstIdx..lastIdx
     }
@@ -298,7 +284,7 @@ class RightRailFlowLayoutManager(
     private fun layoutAll(recycler: RecyclerView.Recycler) {
         val cy = screenCenter()
         val baseX = railX()
-        val yT = yTop(); val yB = yBottom()
+        val yT = yTop()
 
         val layoutWindow = layoutWindow(scrollYPx)
         val firstIdx = layoutWindow.first
@@ -315,8 +301,7 @@ class RightRailFlowLayoutManager(
         // Size growth radius (how quickly a card "blooms" near center)
         val heightCap = (height * 2f / 3f).roundToInt()
 
-        val nearest = nearestIndex()
-        val nearestY = yT + nearest * itemPitchPx - scrollYPx
+        var totalExtraHeight = 0f
 
         for (i in firstIdx..lastIdx) {
             val child = findViewByPosition(i) ?: recycler.getViewForPosition(i).also { addView(it) }
@@ -324,56 +309,60 @@ class RightRailFlowLayoutManager(
 
             // Y position of item center for index i
             val py = yT + i * itemPitchPx - scrollYPx
-            val dist = abs(py - cy)
-
-            // Gain ~ 1 at center, ~ 0 at edges
-            val gain = gainLookup.gainFor(dist)
-
-            // ---- X rail shaping: edges right, center left (S-curve) ----
-            val toRight = (1f - gain).pow(railCurvePow) * edgeRightShiftPx
-            val toLeft  = gain * centerLeftShiftPx
-            val curve = computeCurvePlacement(py, cy)
-            val px = baseX + toRight - toLeft + curve.extraX
-
-            val isSelected = (selectedIndex == i)
-
-            // Width: far small -> base -> (if selected) focused
-            val edgeSide = (baseSidePx * minEdgeScale).roundToInt()
-            val easedGain = interp.getInterpolation(gain)
-            var side = (edgeSide + (baseSidePx - edgeSide) * easedGain).roundToInt()
-            if (isSelected) side = (side + (focusSidePx - side) * focusProgress).roundToInt()
+            val depth = (py - cy) / itemPitchPx
+            val opening = expansionFor(i)
+            val perspectiveScale = (1f - max(0f, depth) * 0.10f - max(0f, -depth) * 0.025f).coerceIn(0.52f, 1f)
+            var side = (baseSidePx * 0.84f * perspectiveScale).roundToInt()
+            side = (side + (focusSidePx - side) * opening).roundToInt()
             side = widthQuantizer.snap(side)
-
-            // Text size influences measurement, so adjust before measuring
-            val textChanged = applyTextByGain(cache, gain, isSelected && focusProgress > 0.5f)
-
-            // Measure: fixed width, wrap-content height, capped to 2/3 screen
+            cache.presentation?.setExpansion(opening)
+            cache.presentation?.setViewportCap(heightCap)
+            cache.card?.setHeightCap(heightCap)
+            val textChanged = cache.snippet?.let {
+                if (it.maxLines == Int.MAX_VALUE) false else {
+                    it.maxLines = Int.MAX_VALUE
+                    true
+                }
+            } ?: false
             measureCardWithWidthAndCap(child, side, heightCap, cache, textChanged)
+            cache.extraHeight = (child.measuredHeight - (cache.presentation?.previewHeight ?: child.measuredHeight))
+                .toFloat().coerceAtLeast(0f)
+            totalExtraHeight += cache.extraHeight
+        }
 
+        var precedingExtraHeight = 0f
+        for (i in firstIdx..lastIdx) {
+            val child = findViewByPosition(i) ?: continue
+            val baseY = yT + i * itemPitchPx - scrollYPx
+            val depth = (baseY - cy) / itemPitchPx
+            val opening = expansionFor(i)
+            val extraHeight = ensureCache(child).extraHeight
+            // Accumulate both opening cards' growth instead of displacing around a discrete selection.
+            val push = precedingExtraHeight + extraHeight / 2f - totalExtraHeight / 2f
+            precedingExtraHeight += extraHeight
+            val readingShift = if (selectedIndex != null) height * 0.25f * focusProgress else 0f
+            val py = baseY + push + readingShift
+            val px = baseX - kotlin.math.sin(depth * 0.72f) * width * 0.11f * (1f - opening)
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
             val l = (px - w / 2f).toInt()
             val t = (py - h / 2f).toInt()
             layoutDecoratedWithMargins(child, l, t, l + w, t + h)
 
-            // Alpha / depth (z-order so nearer items render above)
-            child.alpha = 0.92f + 0.08f * gain
-            val dIdx = abs(nearestY - py) / itemPitchPx
-            val depthS = max(0.94f, 1f - depthScaleDrop * dIdx)
-            child.scaleX = depthS
-            child.scaleY = depthS
-            val scatter = scatterCalculator.compute(
-                index = i,
-                gain = gain,
-                normalizedScroll = scrollYPx / itemPitchPx,
-                isSelected = isSelected,
-                focusProgress = focusProgress
-            )
-            child.translationX = scatter.shiftX
-            child.translationY = scatter.shiftY
-            child.rotation = curve.rotationDeg + scatter.rotationDeg
-            val z = if (isSelected) 6000f else (1000f - dist / 10f)
-            child.translationZ = z; child.elevation = z
+            val density = child.resources.displayMetrics.density
+            child.alpha = 1f - (max(0f, depth) * 0.055f).coerceAtMost(0.28f) * (1f - opening)
+            child.scaleX = 1f
+            child.scaleY = 1f
+            child.translationX = 0f
+            child.translationY = 0f
+            child.cameraDistance = 1500f * density
+            child.rotationX = (8f + min(abs(depth), 4f) * 0.5f) * (1f - opening)
+            child.rotationY = (3f - depth.coerceIn(-3f, 3f) * 0.5f) * (1f - opening)
+            child.rotation = (-kotlin.math.sin(depth * 0.65f) * 0.6f) * (1f - opening)
+            (child as? TimescapeCardLayout)?.setDepth(depth)
+            child.elevation = 0f
+            val ribbonZ = (14f - depth * 2f).coerceIn(1f, 24f)
+            child.translationZ = (ribbonZ + (32f - ribbonZ) * opening) * density
         }
     }
 
@@ -420,15 +409,21 @@ class RightRailFlowLayoutManager(
 
     override fun scrollVerticallyBy(dy: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
         if (itemCount == 0 || height == 0) return 0
-        if (dy != 0 && selectedIndex != null && focusProgress > 0f) {
-            clearFocus(immediate = true)
+        if (dy != 0) {
+            cancelSettleAnimation()
+            if (readingMode && selectedIndex != null && !readingScrollActive) {
+                readingScrollActive = true
+                notifySelectionChanged()
+            } else if (!readingMode && selectedIndex != null) {
+                clearFocus(immediate = true)
+            }
         }
-        if (dy != 0) cancelSettleAnimation()
 
         val old = scrollYPx
-        val newY = applyOverScrollResistance(old + dy)
+        val newY = if (readingMode) (old + dy).coerceIn(minScroll(), maxScroll()) else applyOverScrollResistance(old + dy)
         val consumed = (newY - old).toInt()
         scrollYPx = newY
+        updateReadingSelection()
 
         layoutAll(recycler)
         return consumed
@@ -439,26 +434,31 @@ class RightRailFlowLayoutManager(
             onSettled?.invoke()
             return
         }
-        val min = minScroll()
-        val max = maxScroll()
-        val target = scrollYPx.coerceIn(min, max)
+        val target = if (readingMode) scrollForIndex(nearestIndex()) else scrollYPx.coerceIn(minScroll(), maxScroll())
         if (abs(target - scrollYPx) < 0.5f) {
+            cancelSettleAnimation()
             scrollYPx = target
+            finishReadingScroll()
+            requestLayout()
             onSettled?.invoke()
             return
         }
         cancelSettleAnimation()
-        settleAnimator = ValueAnimator.ofFloat(scrollYPx, target).apply {
+        val animator = ValueAnimator.ofFloat(scrollYPx, target).apply {
             duration = 260
             interpolator = interp
             addUpdateListener {
                 scrollYPx = it.animatedValue as Float
+                updateReadingSelection()
                 requestLayout()
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     if (settleAnimator === animation) {
                         settleAnimator = null
+                        scrollYPx = target
+                        finishReadingScroll()
+                        requestLayout()
                         onSettled?.invoke()
                     }
                 }
@@ -467,8 +467,20 @@ class RightRailFlowLayoutManager(
                     if (settleAnimator === animation) settleAnimator = null
                 }
             })
-            start()
         }
+        settleAnimator = animator
+        animator.start()
+    }
+
+    private fun finishReadingScroll() {
+        if (!readingScrollActive) return
+        updateReadingSelection()
+        readingScrollActive = false
+        notifySelectionChanged()
+    }
+
+    override fun onScrollStateChanged(state: Int) {
+        if (state == RecyclerView.SCROLL_STATE_DRAGGING) cancelSettleAnimation()
     }
 
     fun restoreState(index: Int, focus: Boolean) {
@@ -487,7 +499,9 @@ class RightRailFlowLayoutManager(
         val desired = yTop() + clamped * itemPitchPx - screenCenter()
         cancelSettleAnimation()
         scrollYPx = desired.coerceIn(minScroll(), maxScroll())
-        focusAnimator?.cancel()
+        cancelFocusAnimation()
+        readingMode = focus
+        readingScrollActive = false
         if (focus) {
             val changed = selectedIndex != clamped
             selectedIndex = clamped
@@ -525,55 +539,15 @@ class RightRailFlowLayoutManager(
     }
 
     private fun cancelSettleAnimation() {
-        settleAnimator?.cancel()
+        val animator = settleAnimator
         settleAnimator = null
+        animator?.cancel()
     }
 
     override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {
         val desired = yTop() + targetPosition * itemPitchPx - screenCenter()
         val dir = if (desired > scrollYPx) 1f else -1f
         return PointF(0f, dir)
-    }
-
-    private fun computeCurvePlacement(py: Float, centerY: Float): CurvePlacement {
-        if (itemPitchPx == 0) return CurvePlacement(0f, 0f)
-
-        val signedStepsFromCenter = (py - centerY) / itemPitchPx
-        val direction = if (signedStepsFromCenter >= 0f) 1f else -1f
-        val magnitude = abs(signedStepsFromCenter) / curveRotationRadiusItems
-        val eased = magnitude.coerceAtMost(1f).pow(curveRotationPow)
-        val rotation = -direction * eased * curveMaxRotationDeg
-        val extraRight = eased * curveExtraRightShiftPx
-
-        return CurvePlacement(extraRight, rotation)
-    }
-
-    private class GainLookup(private val focusRadiusPx: Float) {
-        private val invTwoSigmaSq = if (focusRadiusPx == 0f) 0f else 1f / (2f * focusRadiusPx * focusRadiusPx)
-        private val stepPx = max(1f, focusRadiusPx / 80f)
-        private val maxDistance = focusRadiusPx * 6f
-        private val table: FloatArray
-
-        init {
-            val size = (maxDistance / stepPx).roundToInt().coerceAtLeast(1)
-            table = FloatArray(size + 2)
-            for (i in table.indices) {
-                val dist = i * stepPx
-                val value = if (focusRadiusPx == 0f) 1f else kotlin.math.exp(-(dist * dist) * invTwoSigmaSq)
-                table[i] = value
-            }
-        }
-
-        fun gainFor(distance: Float): Float {
-            if (focusRadiusPx == 0f) return 1f
-            val clamped = distance.coerceIn(0f, maxDistance)
-            val pos = clamped / stepPx
-            val idx = pos.toInt()
-            val frac = pos - idx
-            val a = table.getOrElse(idx) { 0f }
-            val b = table.getOrElse(idx + 1) { 0f }
-            return a + (b - a) * frac
-        }
     }
 
     private class IntQuantizer(private val stepPx: Int = 4) {
@@ -584,65 +558,4 @@ class RightRailFlowLayoutManager(
         }
     }
 
-    private enum class GainBand {
-        FOCUSED,
-        PRIMARY,
-        SECONDARY,
-        TERTIARY
-    }
-
-    private class ScatterCalculator {
-        fun compute(
-            index: Int,
-            gain: Float,
-            normalizedScroll: Float,
-            isSelected: Boolean,
-            focusProgress: Float
-        ): ScatterOffsets {
-            val basePhase = index * 0.83f + normalizedScroll * 0.9f
-            val secondaryPhase = index * 1.27f - normalizedScroll * 0.45f
-            val tertiaryPhase = (index + normalizedScroll) * 0.55f
-
-            val waveA = FastTrig.sin(basePhase)
-            val waveB = FastTrig.cos(secondaryPhase)
-            val waveC = FastTrig.sin(tertiaryPhase + waveB * 0.35f)
-
-            val scatterStrength = (0.12f + (1f - gain) * 0.88f).coerceIn(0f, 1f)
-            val focusDamp = if (isSelected) (1f - focusProgress).coerceAtLeast(0f) else 1f
-            val amount = scatterStrength * focusDamp
-
-            val shiftX = (waveA * 14f + waveB * 8f) * amount
-            val shiftY = (waveB * 6f + waveC * 10f) * amount
-            val rotation = (waveA * 2.6f + waveC * 1.1f) * amount
-
-            return ScatterOffsets(shiftX, shiftY, rotation)
-        }
-    }
-    private object FastTrig {
-        private const val TABLE_SIZE = 2048
-        private val TWO_PI = (Math.PI * 2.0).toFloat()
-        private val HALF_PI = (Math.PI / 2.0).toFloat()
-        private val step = TWO_PI / TABLE_SIZE
-        private val table = FloatArray(TABLE_SIZE + 1).apply {
-            for (i in indices) {
-                this[i] = kotlin.math.sin(i * step)
-            }
-        }
-
-        fun sin(angle: Float): Float = lookup(angle)
-
-        fun cos(angle: Float): Float = lookup(angle + HALF_PI)
-
-        private fun lookup(angle: Float): Float {
-            if (angle.isNaN() || angle.isInfinite()) return 0f
-            var wrapped = angle % TWO_PI
-            if (wrapped < 0f) wrapped += TWO_PI
-            val position = wrapped / step
-            val index = position.toInt().coerceIn(0, TABLE_SIZE - 1)
-            val frac = position - index
-            val a = table[index]
-            val b = table[index + 1]
-            return a + (b - a) * frac
-        }
-    }
 }
