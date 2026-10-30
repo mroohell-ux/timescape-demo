@@ -1,4 +1,8 @@
 <resources>
+    <string name="card_expand">Expand card</string>
+    <string name="card_collapse">Collapse card</string>
+    <string name="card_state_collapsed">Collapsed</string>
+    <string name="card_state_expanded">Expanded</string>
     <string name="app_name">TimescapeDemo</string>
     <string name="dialog_add_card_title">Add card</string>
     <string name="dialog_edit_card_title">Edit card</string>

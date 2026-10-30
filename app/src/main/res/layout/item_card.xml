@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<com.example.timescapedemo.TimescapeCardLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="wrap_content"
+    android:layout_height="wrap_content">
+
+<LinearLayout
+    android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:gravity="center_horizontal"
     android:orientation="vertical">
+
+    <ImageButton
+        android:id="@+id/buttonCollapseCard"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="end"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_card_count_indicator"
+        android:contentDescription="@string/card_collapse"
+        android:padding="12dp"
+        android:src="@drawable/ic_card_collapse" />
 
 <com.example.timescapedemo.AspectRatioCardView
     android:id="@+id/card"
@@ -50,7 +65,7 @@
                 android:layout_height="wrap_content"
                 android:adjustViewBounds="true"
                 android:contentDescription="@string/image_card_content_desc"
-                android:scaleType="centerCrop"/>
+                android:scaleType="fitCenter"/>
 
             <ImageView
                 android:id="@+id/videoPlayOverlay"
@@ -139,6 +154,7 @@
                         android:textSize="12sp"
                         android:textStyle="normal" />
                 </LinearLayout>
+
             </LinearLayout>
 
             <TextView
@@ -195,7 +211,7 @@
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent">
 
-            <TextView
+            <com.example.timescapedemo.TimescapeTextView
                 android:id="@+id/time"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -213,7 +229,7 @@
                 android:gravity="center_vertical"
                 android:visibility="gone">
 
-                <TextView
+                <com.example.timescapedemo.TimescapeTextView
                     android:id="@+id/title"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -238,7 +254,7 @@
                     android:visibility="gone"/>
             </LinearLayout>
 
-            <TextView
+            <com.example.timescapedemo.TimescapeTextView
                 android:id="@+id/snippet"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -326,3 +342,5 @@
         android:scaleType="fitCenter"
         android:visibility="gone" />
 </LinearLayout>
+    <include layout="@layout/card_timescape_preview" />
+</com.example.timescapedemo.TimescapeCardLayout>
