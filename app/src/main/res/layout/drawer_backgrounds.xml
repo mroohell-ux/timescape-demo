@@ -300,6 +300,21 @@
             android:src="@drawable/bg_app_cosmic_flow"
             android:contentDescription="@string/drawer_app_background_preview_desc"/>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/drawer_app_background_presets"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Body2" />
+
+        <GridLayout
+            android:id="@+id/appBackgroundPresets"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:columnCount="3"
+            android:orientation="horizontal" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerPickAppBackground"
             android:layout_width="match_parent"

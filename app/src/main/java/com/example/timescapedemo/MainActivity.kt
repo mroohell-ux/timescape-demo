@@ -54,6 +54,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.GridLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -190,6 +191,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerImportNotesButton: MaterialButton
     private lateinit var drawerVideoMuteToggleButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
+    private val appBackgroundPresetViews = mutableMapOf<FlowWallpaperPreset, MaterialCardView>()
     private lateinit var notificationFrequencySlider: Slider
     private lateinit var notificationFrequencyValue: TextView
     private lateinit var cardFontSizeSlider: Slider
@@ -209,6 +211,7 @@ class MainActivity : AppCompatActivity() {
     private val cardTint: TintStyle = TintStyle.None
 
     private var appBackground: BgImage? = null
+    private var appBackgroundPreset = FlowWallpaperPreset.BLUE
 
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
@@ -353,6 +356,7 @@ class MainActivity : AppCompatActivity() {
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
     }
+    private val bookmarkButtonPosition by lazy { BookmarkButtonPosition(prefs) }
 
     private val pickImages =
         registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
@@ -810,6 +814,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         drawerPickAppBackgroundButton.setOnClickListener { launchAppBackgroundPicker() }
+        setupAppBackgroundPresets(header.findViewById(R.id.appBackgroundPresets))
         drawerResetAppBackgroundButton.setOnClickListener {
             setAppBackground(null)
             drawerLayout.closeDrawer(GravityCompat.START)
@@ -5609,12 +5614,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setAppBackground(image: BgImage?, announce: Boolean = true, persist: Boolean = true) {
+    private fun setupAppBackgroundPresets(container: GridLayout) {
+        FlowWallpaperPreset.entries.forEachIndexed { index, preset ->
+            val view = layoutInflater.inflate(R.layout.item_wallpaper_preset, container, false) as MaterialCardView
+            view.layoutParams = (view.layoutParams as GridLayout.LayoutParams).apply {
+                width = 0
+                columnSpec = GridLayout.spec(index % 3, 1f)
+                rowSpec = GridLayout.spec(index / 3)
+                setGravity(Gravity.FILL_HORIZONTAL)
+                bottomMargin = (8f * resources.displayMetrics.density).roundToInt()
+            }
+            view.contentDescription = getString(preset.titleRes)
+            view.findViewById<TextView>(R.id.wallpaperPresetName).setText(preset.titleRes)
+            view.findViewById<ImageView>(R.id.wallpaperPresetImage).setImageDrawable(preset.drawable(this))
+            view.setOnClickListener {
+                setAppBackground(null, preset = preset)
+            }
+            appBackgroundPresetViews[preset] = view
+            container.addView(view)
+        }
+    }
+
+    private fun updateAppBackgroundPresetSelection() {
+        val builtIn = appBackground == null || appBackground == BgImage.Res(R.drawable.bg_app_cosmic_flow)
+        appBackgroundPresetViews.forEach { (preset, view) ->
+            val selected = builtIn && preset == appBackgroundPreset
+            view.isSelected = selected
+            view.strokeWidth = ((if (selected) 2f else 1f) * resources.displayMetrics.density).roundToInt()
+            view.strokeColor = if (selected) Color.rgb(38, 132, 190) else Color.argb(64, 128, 128, 128)
+        }
+    }
+
+    private fun setAppBackground(
+        image: BgImage?,
+        announce: Boolean = true,
+        persist: Boolean = true,
+        preset: FlowWallpaperPreset = FlowWallpaperPreset.BLUE
+    ) {
         appBackground = image
+        appBackgroundPreset = preset
         val applied = applyAppBackground()
         if (announce) {
             val message = when {
-                image == null -> getString(R.string.snackbar_app_background_reset)
+                image == null && preset == FlowWallpaperPreset.BLUE -> getString(R.string.snackbar_app_background_reset)
                 applied -> getString(R.string.snackbar_app_background_updated)
                 else -> getString(R.string.snackbar_app_background_failed)
             }
@@ -5626,10 +5668,12 @@ class MainActivity : AppCompatActivity() {
     private fun applyAppBackground(): Boolean {
         val defaultRes = R.drawable.bg_app_cosmic_flow
         val bg = appBackground
-        applyAppBackgroundChrome(bg == null || bg == BgImage.Res(defaultRes))
-        if (bg == null) {
-            rootLayout.setBackgroundResource(defaultRes)
-            appBackgroundPreview.setImageResource(defaultRes)
+        val builtIn = bg == null || bg == BgImage.Res(defaultRes)
+        applyAppBackgroundChrome(builtIn)
+        updateAppBackgroundPresetSelection()
+        if (bg == null || bg == BgImage.Res(defaultRes)) {
+            rootLayout.background = appBackgroundPreset.drawable(this)
+            appBackgroundPreview.setImageDrawable(appBackgroundPreset.drawable(this))
             return true
         }
         when (bg) {
@@ -5658,7 +5702,9 @@ class MainActivity : AppCompatActivity() {
                     null
                 } ?: run {
                     appBackground = null
+                    appBackgroundPreset = FlowWallpaperPreset.BLUE
                     applyAppBackgroundChrome(true)
+                    updateAppBackgroundPresetSelection()
                     rootLayout.setBackgroundResource(defaultRes)
                     appBackgroundPreview.setImageResource(defaultRes)
                     return false
@@ -7698,10 +7744,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         val appBackgroundJson = prefs.getString(KEY_APP_BACKGROUND, null)
+        appBackgroundPreset = FlowWallpaperPreset.BLUE
         appBackground = if (!appBackgroundJson.isNullOrBlank()) {
             try {
                 val obj = JSONObject(appBackgroundJson)
                 when (obj.optString("type")) {
+                    "preset" -> {
+                        val key = obj.optString("key")
+                        appBackgroundPreset = FlowWallpaperPreset.fromKey(key) ?: run {
+                            Log.w("AppBackground", "Unknown Flow wallpaper preset: $key")
+                            FlowWallpaperPreset.BLUE
+                        }
+                        null
+                    }
                     "res" -> {
                         val id = obj.optInt("id")
                         val resolvedId = if (id != 0) id else {
@@ -7861,15 +7916,19 @@ class MainActivity : AppCompatActivity() {
                 appBackgroundObj.put("value", bg.uri.toString())
             }
             null -> {
-                // no-op: app background is cleared
+                if (appBackgroundPreset != FlowWallpaperPreset.BLUE) {
+                    appBackgroundObj.put("type", "preset")
+                    appBackgroundObj.put("key", appBackgroundPreset.key)
+                }
             }
         }
 
         with(prefs.edit()) {
             putString(KEY_FLOWS, flowsArray.toString())
             putString(KEY_IMAGES, imagesArray.toString())
-            if (appBackground != null) putString(KEY_APP_BACKGROUND, appBackgroundObj.toString())
-            else remove(KEY_APP_BACKGROUND)
+            if (appBackground != null || appBackgroundPreset != FlowWallpaperPreset.BLUE) {
+                putString(KEY_APP_BACKGROUND, appBackgroundObj.toString())
+            } else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
             val currentIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
@@ -8478,6 +8537,7 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             makeBookmarkButtonMovable()
+            bookmarkButtonPosition.attach(bookmarkButton)
         }
 
         private fun makeBookmarkButtonMovable() {
@@ -8528,11 +8588,13 @@ class MainActivity : AppCompatActivity() {
                     }
                     MotionEvent.ACTION_UP -> {
                         button.parent?.requestDisallowInterceptTouchEvent(false)
-                        if (!moved && !longPressed) button.performClick()
+                        if (moved) bookmarkButtonPosition.save(button)
+                        else if (!longPressed) button.performClick()
                         true
                     }
                     MotionEvent.ACTION_CANCEL -> {
                         button.parent?.requestDisallowInterceptTouchEvent(false)
+                        if (moved) bookmarkButtonPosition.save(button)
                         true
                     }
                     else -> true
@@ -8702,6 +8764,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun dispose() {
+            bookmarkButtonPosition.detach(bookmarkButton)
             recycler.removeOnScrollListener(scrollListener)
             recycler.removeOnItemTouchListener(emptyAreaTouchListener)
             recycler.removeCallbacks(applyActiveVideoCardRunnable)

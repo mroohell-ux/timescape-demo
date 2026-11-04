@@ -87,7 +87,8 @@ Text previews put the original background photograph behind a light-weight
 title, up to four summary lines and a timestamp. The previous two-line preview
 capacity is doubled without shrinking the font or truncating the underlying
 text used by the continuous glyph transition. Photographs fill the rectangular face
-with CenterCrop, reduced saturation (72%) and contrast (88%). The photograph
+with CenterCrop, lightly reduced saturation (90%) and contrast (96%) to retain
+vivid source colors. The photograph
 retains 72% alpha in its sharp central region over a lightly translucent blue glass
 base. Each outer 24% side band progressively softens and becomes more transparent,
 reaching 20% of the central photo opacity at the very edge. Maximum side softening
@@ -143,6 +144,11 @@ distance, snapping and gesture thresholds remain unchanged. Window coverage and
 prefetch use the same conservative base pitch; extra height only expands spacing.
 Reading dates sit beside the icons in the top action strip, stay single-line and
 use 10-12sp text, clear of the default left-side floating bookmark control.
+Dragging the floating bookmark control saves a single global position shared by
+all flows. Its position is stored as fractions of the available movement area,
+restored after page recycling and app restarts, and reapplied within bounds when
+the viewport changes size. Taps still navigate/save bookmarks and long presses
+still replace the bookmark; moving the button does not activate either action.
 The body starts below that strip rather than reserving a separate icon gap and
 date line. Action glyphs are 16dp with no inter-button gaps; their existing 40dp
 touch targets and all callbacks remain intact. The title-speech glyph is also
@@ -284,18 +290,21 @@ Non-fading softening retains its existing RenderEffect fallback.
 Switching back to original media disables
 both effects and releases shader references.
 
-The default app wallpaper is an original blue/cyan vector composition inspired
-by the 2012 Xperia Cosmic Flow look: translucent twisting ribbons, lit edges,
-shadowed folds and quieter distant waves. Following the phone-screen reference
-in `cosmic.png`, the upper and lower space fades smoothly into near-black,
-concentrating blue/cyan light in the central ribbons rather than filling the
-entire screen with blue. These dark regions remain fully painted background,
-not letterboxing; the card photographs themselves are not darkened.
-The [archived visual reference](https://www.goodfon.com/abstraction/wallpaper-sony-xperia-t-cosmic-flow.html)
-is not bundled or copied. The static vector is cached by Android, scales to the
-window and drawer preview, and has no animation timer or per-frame blur.
+The default app wallpaper is an original vector interpretation of the luminous
+Xperia-style wave reference in `bg.png`: a bright horizontal core, two smooth
+translucent peaks, fine inner filaments and a soft surrounding glow. The source
+screenshot, clock, launcher icons and other UI are not bundled or copied.
+The upper and lower space fades smoothly into near-black. These dark regions
+remain fully painted background, not letterboxing; card photographs are not darkened.
+The app-background drawer offers blue, gold, purple, green and rose thumbnails.
+All five palettes share the same vector geometry, alpha and light core; only
+RGB channels are remapped. Presets persist by stable string keys, not resource
+numbers. Selecting a custom photo clears the preset highlight; resetting selects
+blue. These choices do not replace the card-background image collection.
+The static vector is cached by Android, scales to the window and drawer preview,
+and has no animation timer or per-frame blur.
 Window startup, the root background, drawer preview and reset action use the
-same default. Default-wallpaper toolbar and system-bar icons are light;
+same blue default. All preset-wallpaper toolbar and system-bar icons are light;
 custom wallpapers retain the previous dark-icon appearance and are not replaced.
 
 The selected app wallpaper fills the viewport using centered, uniform cover
@@ -387,6 +396,10 @@ hardware/software alpha agreement, effect reset and unmodified media snapshots.
 `WallpaperDrawableTest` checks portrait/landscape centered coverage, changed bounds,
 matte removal with screenshot glyphs, preservation of dark content and album-file
 integrity/EXIF orientation.
+`FlowWallpaperPresetTest` checks the five stable palette keys, unchanged vector
+geometry/alpha, independent drawable instances and full portrait/landscape coverage.
+`CosmicFlowBackgroundTest` checks default startup/root/drawer consistency and the
+dark framing around the luminous wave.
 `PhotographBackgroundBlurTest` checks measurable fine-detail suppression, color and
 aspect preservation, transparency, bounded dimensions, separate media cache entries
 and unchanged source files.

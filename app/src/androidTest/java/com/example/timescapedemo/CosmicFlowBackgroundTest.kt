@@ -22,9 +22,10 @@ class CosmicFlowBackgroundTest {
         InstrumentationRegistry.getInstrumentation().targetContext, R.style.Theme_TimescapeDemo
     )
 
-    private fun wallpaper() = checkNotNull(ContextCompat.getDrawable(context, R.drawable.bg_app_cosmic_flow))
+    private fun wallpaper() = checkNotNull(ContextCompat.getDrawable(context, R.drawable.bg_app_cosmic_flow)).mutate()
 
     private fun render(drawable: Drawable, width: Int, height: Int): Bitmap {
+        drawable.mutate()
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         drawable.setBounds(0, 0, width, height)
         drawable.draw(Canvas(bitmap))
