@@ -8,11 +8,11 @@ import android.widget.ImageView
 internal object TextCardPhotoStyle {
     private const val PHOTO_OPACITY = .72f
     private val colorFilter = ColorMatrixColorFilter(ColorMatrix().apply {
-        setSaturation(.72f)
+        setSaturation(.90f)
         postConcat(ColorMatrix(floatArrayOf(
-            .88f, 0f, 0f, 0f, 15.36f,
-            0f, .88f, 0f, 0f, 15.36f,
-            0f, 0f, .88f, 0f, 15.36f,
+            .96f, 0f, 0f, 0f, 5.12f,
+            0f, .96f, 0f, 0f, 5.12f,
+            0f, 0f, .96f, 0f, 5.12f,
             0f, 0f, 0f, PHOTO_OPACITY, 0f
         )))
     })

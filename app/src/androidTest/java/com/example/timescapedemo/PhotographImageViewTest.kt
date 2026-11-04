@@ -52,7 +52,7 @@ class PhotographImageViewTest {
         }
     }
 
-    @Test fun glassPhotoModeratelyReducesSaturationAndContrast() {
+    @Test fun glassPhotoKeepsVividColorWithSlightGlassSoftening() {
         val colors = intArrayOf(Color.rgb(220, 70, 45), Color.BLUE,
             Color.rgb(64, 64, 64), Color.rgb(224, 224, 224))
         val source = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888).apply {
@@ -62,9 +62,9 @@ class PhotographImageViewTest {
         try {
             val red = rendered.getPixel(64, 16)
             val chromaRatio = (Color.red(red) - Color.green(red)) / 150f
-            assertTrue("Saturation/contrast change was not moderate: $chromaRatio", chromaRatio in .615f..0.65f)
+            assertTrue("Expected 90% saturation and 96% contrast: $chromaRatio", chromaRatio in .85f..0.88f)
             val contrast = Color.red(rendered.getPixel(64, 112)) - Color.red(rendered.getPixel(64, 80))
-            assertTrue("Expected 88% contrast, got $contrast", contrast in 139..142)
+            assertTrue("Expected 96% contrast, got $contrast", contrast in 152..155)
         } finally {
             rendered.recycle()
             source.recycle()

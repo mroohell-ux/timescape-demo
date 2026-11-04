@@ -66,6 +66,12 @@
     <string name="drawer_notification_frequency">Notification frequency</string>
     <string name="drawer_notification_frequency_value">%1$d pushes/hr</string>
     <string name="drawer_app_background">App background</string>
+    <string name="drawer_app_background_presets">Flow color presets</string>
+    <string name="wallpaper_preset_blue">Blue</string>
+    <string name="wallpaper_preset_gold">Gold</string>
+    <string name="wallpaper_preset_purple">Purple</string>
+    <string name="wallpaper_preset_green">Green</string>
+    <string name="wallpaper_preset_rose">Rose</string>
     <string name="drawer_app_background_preview_desc">Preview of the current app background</string>
     <string name="drawer_pick_app_background">Choose app background</string>
     <string name="drawer_reset_app_background">Use default background</string>
