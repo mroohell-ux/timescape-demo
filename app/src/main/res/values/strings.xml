@@ -1,4 +1,5 @@
 <resources>
+    <string name="card_flip_image_unavailable">Some card images could not be loaded. A placeholder is shown.</string>
     <string name="card_expand">Expand card</string>
     <string name="card_collapse">Collapse card</string>
     <string name="card_state_collapsed">Collapsed</string>
@@ -23,10 +24,13 @@
     <string name="menu_search_cards">Search cards</string>
     <string name="menu_shuffle_cards">Shuffle cards</string>
     <string name="menu_unshuffle_cards">Restore order</string>
-    <string name="menu_reorder_flows_on">Reorder flows: On</string>
-    <string name="menu_reorder_flows_off">Reorder flows: Off</string>
-    <string name="snackbar_reorder_flows_enabled">Flow reordering enabled</string>
-    <string name="snackbar_reorder_flows_disabled">Flow merge mode enabled</string>
+    <string name="flow_drag_hint">Drag to reorder or merge</string>
+    <string name="flow_drag_reorder_hint">Release to reorder</string>
+    <string name="flow_drag_cancel_hint">Release to cancel</string>
+    <string name="flow_drag_merge_wait">Merge into “%1$s”</string>
+    <string name="flow_drag_merge_ready">Release to merge into “%1$s”</string>
+    <string name="flow_drag_unavailable">Could not move this flow. At least two flows are needed.</string>
+    <string name="flow_drag_target_unavailable">One of these flows is no longer available.</string>
     <string name="search_cards_hint">Search cards</string>
     <string name="snackbar_not_enough_cards_to_shuffle">Add at least two cards to shuffle.</string>
     <string name="drawer_card_backgrounds">Card backgrounds</string>
@@ -101,7 +105,6 @@
     <string name="snackbar_image_card_updated">Updated image card</string>
     <string name="snackbar_no_photo_selected">No photo selected</string>
     <string name="snackbar_merged_flows">Merged "%1$s" into "%2$s"</string>
-    <string name="snackbar_need_another_flow_to_merge">Add another flow before merging.</string>
     <string name="snackbar_need_another_flow_to_move_card">Add another flow to move cards.</string>
     <string name="snackbar_moved_card_to_flow">Moved card to "%1$s"</string>
     <string name="snackbar_handwriting_required">Draw something before saving.</string>

@@ -17,8 +17,11 @@ import java.io.InputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 object BackgroundImageLoader {
+    private const val PHOTOGRAPH_EDGE_PX = 768
     private val cache: LruCache<String, Bitmap> = object : LruCache<String, Bitmap>(cacheSize()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
@@ -43,13 +46,14 @@ object BackgroundImageLoader {
         uri: Uri,
         targetWidth: Int? = null,
         targetHeight: Int? = null,
+        photographicBackground: Boolean = false,
         onResult: (Result) -> Unit
     ) {
         val appContext = context.applicationContext
         imageView.setTag(R.id.tag_bg_uri, uri)
-        val width = targetWidth?.takeIf { it > 0 }
-        val height = targetHeight?.takeIf { it > 0 }
-        val cacheKey = cacheKey(uri, width, height)
+        val width = if (photographicBackground) PHOTOGRAPH_EDGE_PX else targetWidth?.takeIf { it > 0 }
+        val height = if (photographicBackground) PHOTOGRAPH_EDGE_PX else targetHeight?.takeIf { it > 0 }
+        val cacheKey = cacheKey(uri, width, height) + if (photographicBackground) ":photo" else ""
         cache.get(cacheKey)?.let { cached ->
             onResult(Result.Success(cached))
             return
@@ -63,7 +67,7 @@ object BackgroundImageLoader {
         }
         val shouldStart = registerCallback(cacheKey, callback)
         if (shouldStart) {
-            enqueueDecode(appContext, cacheKey, uri, width, height)
+            enqueueDecode(appContext, cacheKey, uri, width, height, photographicBackground)
         }
     }
 
@@ -82,11 +86,12 @@ object BackgroundImageLoader {
         cacheKey: String,
         uri: Uri,
         targetWidth: Int?,
-        targetHeight: Int?
+        targetHeight: Int?,
+        photographicBackground: Boolean
     ) {
         executor.execute {
             val result = try {
-                val bitmap = decode(context, uri, targetWidth, targetHeight)
+                val bitmap = decode(context, uri, targetWidth, targetHeight, photographicBackground)
                 if (bitmap != null) {
                     cache.put(cacheKey, bitmap)
                     Result.Success(bitmap)
@@ -134,7 +139,8 @@ object BackgroundImageLoader {
         context: Context,
         uri: Uri,
         targetWidth: Int?,
-        targetHeight: Int?
+        targetHeight: Int?,
+        photographicBackground: Boolean
     ): Bitmap? {
         val width = targetWidth
         val height = targetHeight
@@ -143,7 +149,11 @@ object BackgroundImageLoader {
             openStream(context, uri)?.use { input ->
                 BitmapFactory.decodeStream(input, null, bounds)
             }
-            val sampleSize = calculateSampleSize(bounds, width, height)
+            val sampleSize = if (photographicBackground) {
+                var sample = 1
+                while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= PHOTOGRAPH_EDGE_PX) sample *= 2
+                sample
+            } else calculateSampleSize(bounds, width, height)
             BitmapFactory.Options().apply {
                 inSampleSize = sampleSize
                 inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -153,8 +163,14 @@ object BackgroundImageLoader {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
         }
-        return openStream(context, uri)?.use { input ->
+        val source = openStream(context, uri)?.use { input ->
             BitmapFactory.decodeStream(input, null, options)
+        } ?: return null
+        if (!photographicBackground || max(source.width, source.height) <= PHOTOGRAPH_EDGE_PX) return source
+        return try {
+            preparePhotograph(source)
+        } finally {
+            source.recycle()
         }
     }
 
@@ -188,6 +204,13 @@ object BackgroundImageLoader {
         val minimum = 8L * 1024L * 1024L
         val desired = target.coerceAtLeast(minimum)
         return desired.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    internal fun preparePhotograph(source: Bitmap): Bitmap {
+        val scale = min(1f, PHOTOGRAPH_EDGE_PX.toFloat() / max(source.width, source.height))
+        val width = (source.width * scale).roundToInt().coerceAtLeast(1)
+        val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(source, width, height, true)
     }
 
     private fun cacheKey(uri: Uri, targetWidth: Int?, targetHeight: Int?): String {
