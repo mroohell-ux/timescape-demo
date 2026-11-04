@@ -4,6 +4,12 @@
     <color name="white">#FFFFFFFF</color>
     <color name="flow_bar_surface">#CCFFFFFF</color>
     <color name="flow_bar_stroke">#33FFFFFF</color>
+    <color name="flow_dock_surface">#40072043</color>
+    <color name="flow_dock_stroke">#66D5EFFF</color>
+    <color name="flow_dock_selection">#38E3F7FF</color>
+    <color name="flow_dock_text">#D9E7F5FF</color>
+    <color name="flow_dock_text_selected">#FFFFFFFF</color>
+    <color name="flow_dock_accent">#B5E4FF</color>
     <color name="sticky_note_icon_empty_tint">#9E9E9E</color>
     <color name="handwriting_dialog_surface">#FFF7EA</color>
     <color name="handwriting_action_bar_surface">#FDF2E2</color>

@@ -19,6 +19,7 @@ class AspectRatioCardView @JvmOverloads constructor(
     private var ratio: Float = 1f // width / height
     private var useRatio: Boolean = false
     private var heightCapPx: Int = Int.MAX_VALUE
+    internal var measureMediaAtNaturalSize = false
 
     fun setHeightCap(px: Int) {
         if (heightCapPx == px) return
@@ -38,7 +39,7 @@ class AspectRatioCardView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        if (heightCapPx != Int.MAX_VALUE &&
+        if ((!measureMediaAtNaturalSize || useRatio) && heightCapPx != Int.MAX_VALUE &&
             (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED ||
                 MeasureSpec.getSize(heightMeasureSpec) > heightCapPx)
         ) {

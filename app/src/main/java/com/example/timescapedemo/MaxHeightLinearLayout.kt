@@ -10,6 +10,7 @@ class MaxHeightLinearLayout @JvmOverloads constructor(
 ) : LinearLayout(context, attrs, defStyleAttr) {
 
     private var maxHeightPx: Int = Int.MAX_VALUE
+    internal val heightCap: Int get() = maxHeightPx
 
     fun setMaxHeightPx(px: Int) {
         if (px != maxHeightPx) {

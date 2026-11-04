@@ -1,16 +1,25 @@
 <resources>
-    <!-- Bright, optimistic look -->
-    <style name="Theme.TimescapeDemo" parent="Theme.Material3.Light.NoActionBar">
-        <!-- Paint the whole window with our pastel background -->
-        <item name="android:windowBackground">@drawable/bg_app_light_optimistic</item>
+    <style name="Theme.TimescapeDemo" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/bg_app_cosmic_flow</item>
 
-        <!-- Edge-to-edge with dark icons (because background is light) -->
+        <!-- Custom wallpapers restore the previous light-background chrome at runtime. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
 
         <!-- Keep system from force-darking custom backgrounds -->
         <item name="android:forceDarkAllowed">false</item>
+    </style>
+
+    <style name="ThemeOverlay.TimescapeDemo.FlowDock" parent="">
+        <item name="chipStyle">@style/Widget.TimescapeDemo.FlowDockChip</item>
+    </style>
+
+    <style name="Widget.TimescapeDemo.FlowDockChip" parent="Widget.Material3.Chip.Filter">
+        <item name="chipSurfaceColor">@android:color/transparent</item>
+        <item name="chipBackgroundColor">@android:color/transparent</item>
+        <item name="chipStrokeWidth">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 </resources>

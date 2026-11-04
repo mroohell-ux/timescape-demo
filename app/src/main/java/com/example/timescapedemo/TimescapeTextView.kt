@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -19,6 +20,9 @@ class TimescapeTextView @JvmOverloads constructor(
     private val savedPaint = TextPaint()
     private var faceLight: Shader? = null
     private var faceColor = Color.TRANSPARENT
+    internal var drawPassCount = 0
+        private set
+    private val recordDiagnostics = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     var depthAmount = 1f
         set(value) {
             val next = value.coerceIn(0f, 1f)
@@ -57,6 +61,7 @@ class TimescapeTextView @JvmOverloads constructor(
     )
 
     override fun onDraw(canvas: Canvas) {
+        if (recordDiagnostics) drawPassCount++
         if (depthAmount == 0f) {
             super.onDraw(canvas)
             return

@@ -1,6 +1,7 @@
 package com.example.timescapedemo
 
 import android.animation.ValueAnimator
+import android.graphics.Matrix
 import android.graphics.PointF
 import android.view.View
 import android.widget.TextView
@@ -8,6 +9,7 @@ import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -19,11 +21,19 @@ import kotlin.math.roundToInt
 class RightRailFlowLayoutManager(
     private val baseSidePx: Int,          // width near center (non-focused)
     private val focusSidePx: Int,         // width when focused (main)
-    private val itemPitchPx: Int,         // visual spacing (center-to-center)
+    private val itemPitchPx: Int,         // logical scroll distance per card
     private val rightInsetPx: Int,
     private val topInsetPx: Int = 0,
-    private val bottomInsetPx: Int = 0
+    private val bottomInsetPx: Int = 0,
+    geometry: CardFlowGeometry = CardFlowGeometry()
 ) : RecyclerView.LayoutManager(), RecyclerView.SmoothScroller.ScrollVectorProvider {
+
+    var geometry: CardFlowGeometry = geometry
+        set(value) {
+            if (field == value) return
+            field = value
+            requestLayout()
+        }
 
     // focus animation state
     private var selectedIndex: Int? = null
@@ -52,7 +62,18 @@ class RightRailFlowLayoutManager(
     // Precomputed helpers to reduce per-frame work
     private val widthQuantizer = IntQuantizer()
     private val heightQuantizer = IntQuantizer(stepPx = 12)
+    private val compactLayoutWidth = widthQuantizer.snap((baseSidePx * .80f).roundToInt())
+    private val readingLayoutWidth = widthQuantizer.snap(focusSidePx)
     private val layoutOverscan = 2
+    private val inverseHitMatrix = Matrix()
+    private val hitPoint = FloatArray(2)
+    private val compactPose = CardFlowPose()
+    private var minimumPreviewHeight = 0f
+
+    override fun onAttachedToWindow(view: RecyclerView) {
+        super.onAttachedToWindow(view)
+        minimumPreviewHeight = view.resources.getDimension(R.dimen.card_preview_min_height)
+    }
 
     private data class PendingRestore(
         val index: Int,
@@ -111,6 +132,25 @@ class RightRailFlowLayoutManager(
     }
 
     fun hasSelection(): Boolean = pendingRestore?.focus ?: (selectedIndex != null)
+
+    fun hasCardUnder(x: Float, y: Float): Boolean {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) ?: continue
+            if (child.visibility != View.VISIBLE) continue
+            val parent = child.parent as View
+            hitPoint[0] = x + parent.scrollX - child.left
+            hitPoint[1] = y + parent.scrollY - child.top
+            if (!child.matrix.isIdentity) {
+                if (!child.matrix.invert(inverseHitMatrix)) continue
+                inverseHitMatrix.mapPoints(hitPoint)
+            }
+            if (hitPoint[0] >= 0 && hitPoint[0] < child.width &&
+                hitPoint[1] >= 0 && hitPoint[1] < child.height &&
+                (child !is TimescapeCardLayout || child.containsCardPoint(hitPoint[0], hitPoint[1]))
+            ) return true
+        }
+        return false
+    }
 
     fun focus(index: Int) {
         if (itemCount == 0) return
@@ -184,6 +224,22 @@ class RightRailFlowLayoutManager(
     private fun yBottom() = height - paddingBottom - bottomInsetPx - itemPitchPx / 2f
     private fun railX() = paddingLeft + (width - paddingLeft - paddingRight - rightInsetPx) / 2f
 
+    private fun compactPitch(): Float {
+        return minimumPreviewHeight * cos(Math.toRadians(geometry.maximumPitchDegrees.toDouble())).toFloat() *
+            min(1f, geometry.distantScaleY) *
+            (1f - geometry.cardOverlapFraction)
+    }
+
+    private fun ribbonOffset(depth: Float) = geometry.ribbonOffset(depth, compactPitch())
+
+    private fun depthAtRibbonOffset(offset: Float) =
+        geometry.depthAtRibbonOffset(offset, compactPitch())
+
+    private fun compactCenterY(index: Int, scroll: Float): Float {
+        val cy = screenCenter()
+        return cy + ribbonOffset((yTop() + index * itemPitchPx - scroll - cy) / itemPitchPx)
+    }
+
     /** Allow first/last items to be centered without dead space. */
     private fun minScroll() = yTop() - screenCenter()
     private fun maxScroll(): Float {
@@ -196,6 +252,12 @@ class RightRailFlowLayoutManager(
     override fun onLayoutChildren(recycler: RecyclerView.Recycler, state: RecyclerView.State) {
         detachAndScrapAttachedViews(recycler)
         if (itemCount == 0 || width == 0 || height == 0) return
+        if (minimumPreviewHeight == 0f) {
+            // Auto-measure can precede attachment to the window.
+            val child = recycler.getViewForPosition(nearestIndex())
+            addView(child)
+            minimumPreviewHeight = child.resources.getDimension(R.dimen.card_preview_min_height)
+        }
         if (lastViewportHeight != 0 && lastViewportHeight != height && pendingRestore == null) {
             scrollYPx += (lastViewportHeight - height) * 0.25f
         }
@@ -262,21 +324,27 @@ class RightRailFlowLayoutManager(
         val snippet: TextView?,
         val card: AspectRatioCardView?,
         val presentation: TimescapeCardLayout?,
+        val pose: CardFlowPose = CardFlowPose(),
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
         var lastQuantizedSide: Int = -1,
-        var extraHeight: Float = 0f
+        var extraHeight: Float = 0f,
+        var extraOffset: Float = 0f,
+        var visualScale: Float = 1f,
+        var lastLayoutWidth: Int = -1,
+        var lastLayoutHeight: Int = -1
     )
 
     private fun layoutWindow(scroll: Float): IntRange {
-        val yT = yTop()
+        val cy = screenCenter()
+        val position = (scroll + cy - yTop()) / itemPitchPx
         val firstIdx = max(
             0,
-            floor(((scroll + (yT - itemPitchPx)) - yT) / itemPitchPx).toInt() - layoutOverscan
+            floor(position + depthAtRibbonOffset(yTop() - itemPitchPx - cy)).toInt() - layoutOverscan
         )
         val lastIdx = min(
             itemCount - 1,
-            ceil(((scroll + (yBottom() - yT) + itemPitchPx) - yT) / itemPitchPx).toInt() + layoutOverscan
+            ceil(position + depthAtRibbonOffset(yBottom() + itemPitchPx - cy)).toInt() + layoutOverscan
         )
         return firstIdx..lastIdx
     }
@@ -311,10 +379,15 @@ class RightRailFlowLayoutManager(
             val py = yT + i * itemPitchPx - scrollYPx
             val depth = (py - cy) / itemPitchPx
             val opening = expansionFor(i)
-            val perspectiveScale = (1f - max(0f, depth) * 0.10f - max(0f, -depth) * 0.025f).coerceIn(0.52f, 1f)
-            var side = (baseSidePx * 0.84f * perspectiveScale).roundToInt()
-            side = (side + (focusSidePx - side) * opening).roundToInt()
-            side = widthQuantizer.snap(side)
+            geometry.sample(depth, opening, cache.pose)
+            val visualWidth = compactLayoutWidth * cache.pose.depthScale * (1f - opening) + readingLayoutWidth * opening
+            // Depth changes only RenderNode scale, not text/image layout dimensions.
+            val layoutWidth = widthQuantizer.snap(
+                (compactLayoutWidth + (readingLayoutWidth - compactLayoutWidth) * opening).roundToInt()
+            )
+            cache.visualScale = visualWidth / layoutWidth
+            cache.presentation?.setOverviewWidth(compactLayoutWidth)
+            cache.presentation?.setReadingWidth(readingLayoutWidth)
             cache.presentation?.setExpansion(opening)
             cache.presentation?.setViewportCap(heightCap)
             cache.card?.setHeightCap(heightCap)
@@ -324,42 +397,82 @@ class RightRailFlowLayoutManager(
                     true
                 }
             } ?: false
-            measureCardWithWidthAndCap(child, side, heightCap, cache, textChanged)
+            measureCardWithWidthAndCap(child, layoutWidth, heightCap, cache, textChanged)
             cache.extraHeight = (child.measuredHeight - (cache.presentation?.previewHeight ?: child.measuredHeight))
-                .toFloat().coerceAtLeast(0f)
+                .toFloat().coerceAtLeast(0f) * cache.visualScale * cache.pose.scaleY
+            val compact = if (opening == 0f) cache.pose else compactPose.also {
+                geometry.sample(depth, 0f, it)
+            }
+            val compactExcess = ((cache.presentation?.previewHeight ?: child.measuredHeight) -
+                minimumPreviewHeight).coerceAtLeast(0f) *
+                compact.depthScale * compact.scaleY *
+                cos(Math.toRadians(compact.pitch.toDouble())).toFloat() * (1f - geometry.cardOverlapFraction)
+            cache.extraHeight += compactExcess
+            cache.extraOffset = totalExtraHeight + cache.extraHeight / 2f
             totalExtraHeight += cache.extraHeight
         }
 
-        var precedingExtraHeight = 0f
+        val position = (scrollYPx + cy - yT) / itemPitchPx
+        val anchorIndex = floor(position).toInt().coerceIn(firstIdx, max(firstIdx, lastIdx - 1))
+        val anchor = ensureCache(checkNotNull(findViewByPosition(anchorIndex))).extraOffset
+        val nextAnchor = if (anchorIndex < lastIdx) {
+            ensureCache(checkNotNull(findViewByPosition(anchorIndex + 1))).extraOffset
+        } else anchor
+        val anchorOffset = anchor + (nextAnchor - anchor) * (position - anchorIndex)
+        val compactPitch = compactPitch()
         for (i in firstIdx..lastIdx) {
             val child = findViewByPosition(i) ?: continue
             val baseY = yT + i * itemPitchPx - scrollYPx
             val depth = (baseY - cy) / itemPitchPx
             val opening = expansionFor(i)
-            val extraHeight = ensureCache(child).extraHeight
-            // Accumulate both opening cards' growth instead of displacing around a discrete selection.
-            val push = precedingExtraHeight + extraHeight / 2f - totalExtraHeight / 2f
-            precedingExtraHeight += extraHeight
+            val cache = ensureCache(child)
+            val push = cache.extraOffset - anchorOffset
             val readingShift = if (selectedIndex != null) height * 0.25f * focusProgress else 0f
-            val py = baseY + push + readingShift
-            val px = baseX - kotlin.math.sin(depth * 0.72f) * width * 0.11f * (1f - opening)
+            val py = cy + geometry.ribbonOffset(depth, compactPitch) + push + readingShift
+            val pose = cache.pose
+            val px = baseX + pose.bend * width
             val w = getDecoratedMeasuredWidth(child)
             val h = getDecoratedMeasuredHeight(child)
             val l = (px - w / 2f).toInt()
             val t = (py - h / 2f).toInt()
-            layoutDecoratedWithMargins(child, l, t, l + w, t + h)
+            if (child.isLaidOut && !child.isLayoutRequested &&
+                cache.lastLayoutWidth == w && cache.lastLayoutHeight == h
+            ) {
+                val params = child.layoutParams as RecyclerView.LayoutParams
+                child.offsetLeftAndRight(l + params.leftMargin + getLeftDecorationWidth(child) - child.left)
+                child.offsetTopAndBottom(t + params.topMargin + getTopDecorationHeight(child) - child.top)
+            } else {
+                layoutDecoratedWithMargins(child, l, t, l + w, t + h)
+            }
+            cache.lastLayoutWidth = w
+            cache.lastLayoutHeight = h
 
             val density = child.resources.displayMetrics.density
-            child.alpha = 1f - (max(0f, depth) * 0.055f).coerceAtMost(0.28f) * (1f - opening)
-            child.scaleX = 1f
-            child.scaleY = 1f
-            child.translationX = 0f
-            child.translationY = 0f
-            child.cameraDistance = 1500f * density
-            child.rotationX = (8f + min(abs(depth), 4f) * 0.5f) * (1f - opening)
-            child.rotationY = (3f - depth.coerceIn(-3f, 3f) * 0.5f) * (1f - opening)
-            child.rotation = (-kotlin.math.sin(depth * 0.65f) * 0.6f) * (1f - opening)
-            (child as? TimescapeCardLayout)?.setDepth(depth)
+            child.alpha = if (cache.presentation?.isMediaPreview == false) 1f else {
+                1f - (max(0f, depth) * 0.055f).coerceAtMost(0.28f) * (1f - opening)
+            }
+            child.scaleX = cache.visualScale
+            child.scaleY = cache.visualScale * pose.scaleY
+            child.pivotX = child.width * pose.pivotX
+            child.pivotY = child.height * pose.pivotY
+            // Keep the ribbon's center stable when the scale pivot moves; retain subpixel scroll.
+            child.translationX = px - w / 2f - l +
+                (child.scaleX - 1f) * (child.pivotX - child.width / 2f)
+            child.translationY = py - h / 2f - t +
+                (child.scaleY - 1f) * (child.pivotY - child.height / 2f)
+            child.cameraDistance = geometry.cameraDistance(
+                child.width, child.height, child.resources.displayMetrics.densityDpi, pose.pivotX, pose.pivotY
+            )
+            child.rotationX = pose.pitch
+            child.rotationY = pose.yaw
+            child.rotation = pose.roll
+            cache.presentation?.setCornerMorph(pose.corners)
+            cache.presentation?.setDepth(depth, geometry)
+            val visualHalfHeight = h * child.scaleY / 2f
+            cache.presentation?.setRenderCaching(
+                py + visualHalfHeight >= -itemPitchPx / 2f &&
+                    py - visualHalfHeight <= height + itemPitchPx / 2f
+            )
             child.elevation = 0f
             val ribbonZ = (14f - depth * 2f).coerceIn(1f, 24f)
             child.translationZ = (ribbonZ + (32f - ribbonZ) * opening) * density
@@ -386,20 +499,20 @@ class RightRailFlowLayoutManager(
 
         if (direction > 0) {
             val start = (currentWindow.last + 1).coerceAtLeast(0)
-            val end = min(targetWindow.last, itemCount - 1)
+            val end = min(max(targetWindow.last, start), itemCount - 1)
             if (start <= end) {
                 for (i in start..end) {
-                    val centerY = yTop() + i * itemPitchPx - scrollYPx
+                    val centerY = compactCenterY(i, scrollYPx)
                     val distance = max(0f, centerY - yBottom()).toInt()
                     layoutPrefetchRegistry.addPosition(i, distance)
                 }
             }
         } else {
-            val start = targetWindow.first.coerceAtLeast(0)
             val end = (currentWindow.first - 1).coerceAtMost(itemCount - 1)
+            val start = min(targetWindow.first, end).coerceAtLeast(0)
             if (start <= end) {
                 for (i in end downTo start) {
-                    val centerY = yTop() + i * itemPitchPx - scrollYPx
+                    val centerY = compactCenterY(i, scrollYPx)
                     val distance = max(0f, yTop() - centerY).toInt()
                     layoutPrefetchRegistry.addPosition(i, distance)
                 }
@@ -557,5 +670,4 @@ class RightRailFlowLayoutManager(
             return snapped.coerceAtLeast(0)
         }
     }
-
 }

@@ -1,9 +1,5 @@
 package com.example.timescapedemo
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -12,6 +8,7 @@ import android.graphics.BlendModeColorFilter
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
@@ -31,6 +28,7 @@ import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.VideoView
+import android.widget.Toast
 import androidx.annotation.ColorInt
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
@@ -44,18 +42,14 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.view.isVisible
 import com.google.android.material.card.MaterialCardView
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
 import androidx.core.net.toUri
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-// Legacy sizing for auxiliary backgrounds. Photographic text faces and previews instead
-// request viewport-sized images (up to 1280px) so their subjects remain recognizable.
+// Legacy sizing for auxiliary backgrounds. Text photographs use a separate bounded cache.
 private const val DEFAULT_MAX_BG_LONG_EDGE_PX = 80
-private val PREVIEW_WHITESPACE = Regex("\\s+")
 private const val DEFAULT_MIN_BG_LONG_EDGE_PX = 30
 private const val DEFAULT_BG_WIDTH_FRACTION = 0.25f
 private const val MIN_BG_WIDTH_FRACTION = 0.1f
@@ -139,11 +133,53 @@ class CardsAdapter(
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val presentation = v as TimescapeCardLayout
+        val flip: GestureCardFlipLayout = v.findViewById(R.id.cardFlip)
+        val flipContent: View = v.findViewById(R.id.cardFlipContent)
+        var boundFace = HandwritingFace.FRONT
+        var preparationVersion = 0
+        var preparedHolder: VH? = null
+        var resumeVideoAfterFlip = false
+        var faceLoadFailed = false
+        private var bindingVersion = 0
+        private var pendingFaceLoads = 0
+        private val faceReadyCallbacks = mutableListOf<() -> Unit>()
+
+        fun beginFaceBinding(face: HandwritingFace) {
+            bindingVersion++
+            boundFace = face
+            pendingFaceLoads = 0
+            faceLoadFailed = false
+            faceReadyCallbacks.clear()
+        }
+
+        fun trackFaceLoad(): () -> Unit {
+            val version = bindingVersion
+            pendingFaceLoads++
+            var finished = false
+            return {
+                if (!finished && bindingVersion == version) {
+                    finished = true
+                    pendingFaceLoads--
+                    if (pendingFaceLoads == 0) {
+                        val callbacks = faceReadyCallbacks.toList()
+                        faceReadyCallbacks.clear()
+                        callbacks.forEach { it() }
+                    }
+                }
+            }
+        }
+
+        fun whenFaceReady(callback: () -> Unit) {
+            if (pendingFaceLoads == 0) callback() else faceReadyCallbacks.add(callback)
+        }
         val previewSurface: View = v.findViewById(R.id.cardPreviewSurface)
         val preview: MaterialCardView = v.findViewById(R.id.cardPreview)
         val previewImage: ImageView = v.findViewById(R.id.previewImage)
         val previewScrim: View = v.findViewById(R.id.previewScrim)
         val previewText: View = v.findViewById(R.id.previewText)
+        val previewHeading: View = v.findViewById(R.id.previewHeading)
+        val imageScroll: ImageCardScrollView = v.findViewById(R.id.imageCardScroll)
+        val handwritingScroll: ImageCardScrollView = v.findViewById(R.id.handwritingScroll)
         val previewTitle: TextView = v.findViewById(R.id.previewTitle)
         val previewSnippet: TextView = v.findViewById(R.id.previewSnippet)
         val previewTime: TextView = v.findViewById(R.id.previewTime)
@@ -160,7 +196,7 @@ class CardsAdapter(
         val textScrim: View = v.findViewById(R.id.textScrim)
         val imageCardContainer: View = v.findViewById(R.id.imageCardContainer)
         val imageCard: ImageView = v.findViewById(R.id.imageCard)
-        val cardContent: View = v.findViewById(R.id.card_content)
+        val cardContent: MaxHeightLinearLayout = v.findViewById(R.id.card_content)
         val handwritingContainer: View = v.findViewById(R.id.handwritingContainer)
         val handwriting: ImageView = v.findViewById(R.id.handwritingImage)
         val stickyNotesButton: ImageButton = v.findViewById(R.id.buttonStickyNotes)
@@ -319,6 +355,48 @@ class CardsAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false)
         val vh = VH(v)
+        vh.flip.canFlip = {
+            val position = vh.bindingAdapterPosition
+            val manager = (v.parent as? RecyclerView)?.layoutManager as? RightRailFlowLayoutManager
+            position != RecyclerView.NO_POSITION && manager?.isFocused(position) == true &&
+                vh.presentation.expansionProgress == 1f && canFlipCardAt(position)
+        }
+        vh.flip.onPrepare = { prepareFlip(vh) }
+        vh.flip.onFlipStarted = {
+            vh.presentation.setFlipLifted(true)
+            vh.resumeVideoAfterFlip = vh.videoInlineView.isPlaying ||
+                (getItemAt(vh.bindingAdapterPosition)?.video?.isPlaying == true && vh.videoInlineView.isVisible)
+            if (vh.resumeVideoAfterFlip) vh.videoInlineView.pause()
+        }
+        vh.flip.onFlipFinished = {
+            vh.presentation.setFlipLifted(false)
+            val shouldResume = vh.resumeVideoAfterFlip ||
+                getItemAt(vh.bindingAdapterPosition)?.video?.isPlaying == true
+            if (shouldResume && vh.flip.canFlip() && vh.itemView.isAttachedToWindow &&
+                vh.boundFace == HandwritingFace.FRONT &&
+                vh.videoInlineView.isVisible
+            ) {
+                vh.videoInlineView.start()
+                vh.videoPlayPauseButton.setImageResource(android.R.drawable.ic_media_pause)
+                vh.videoPlayPauseButton.contentDescription = vh.itemView.context.getString(R.string.video_pause)
+            }
+            vh.resumeVideoAfterFlip = false
+        }
+        vh.flip.onFaceSettled = { changed, complete ->
+            val position = vh.bindingAdapterPosition
+            val item = getItemAt(position)
+            if (!changed || item == null) {
+                complete()
+            } else {
+                val next = oppositeFace(vh.boundFace)
+                handwritingFaces[item.id] = next
+                vh.beginFaceBinding(next)
+                bindReadingFace(vh, item, next, position)
+                if (item.handwriting != null || item.imageHandwriting != null) bindPreview(vh, item)
+                bindReceipt(vh, item)
+                vh.whenFaceReady { vh.flip.post { complete() } }
+            }
+        }
         vh.gestureDetector = GestureDetectorCompat(v.context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val idx = vh.bindingAdapterPosition
@@ -367,6 +445,10 @@ class CardsAdapter(
         vh.receipt.setOnTouchListener(cardGestureTouchListener)
         vh.preview.setOnTouchListener(cardGestureTouchListener)
         vh.previewSurface.setOnTouchListener(cardGestureTouchListener)
+        vh.imageScroll.onCardTouch = { vh.gestureDetector.onTouchEvent(it) }
+        vh.imageScroll.onViewportChanged = { vh.flip.invalidatePreparedFaces() }
+        vh.handwritingScroll.onCardTouch = { vh.gestureDetector.onTouchEvent(it) }
+        vh.handwritingScroll.onViewportChanged = { vh.flip.invalidatePreparedFaces() }
         ViewCompat.replaceAccessibilityAction(
             vh.previewSurface, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
             parent.context.getString(R.string.card_expand)
@@ -405,6 +487,22 @@ class CardsAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
+        holder.preparationVersion++
+        clearPreparedHolder(holder)
+        holder.flip.reset()
+        holder.presentation.setFlipLifted(false)
+        bindCard(holder, item, position, currentCardFace(item.id))
+    }
+
+    private fun bindCard(
+        holder: VH,
+        item: CardItem,
+        position: Int,
+        face: HandwritingFace,
+        bindOverview: Boolean = true
+    ) {
+        holder.beginFaceBinding(face)
+        holder.itemView.setTag(R.id.tag_card_id, item.id)
         holder.card.animate().cancel()
         holder.card.rotationY = 0f
         holder.card.scaleX = 1f
@@ -443,19 +541,7 @@ class CardsAdapter(
         ).toString().also { item.relativeTimeText = it }
         val handwritingContent = item.handwriting
         val imageContent = item.image
-        val fallbackText = when {
-            handwritingContent != null -> {
-                if (item.snippet.isNotBlank()) item.snippet
-                else holder.itemView.context.getString(R.string.handwriting_card_missing)
-            }
-            imageContent != null -> {
-                if (item.snippet.isNotBlank()) item.snippet
-                else holder.itemView.context.getString(R.string.image_card_missing)
-            }
-            else -> item.snippet
-        }
-        holder.itemView.setTag(R.id.tag_card_id, item.id)
-        bindPreview(holder, item)
+        if (bindOverview) bindPreview(holder, item)
         holder.playOverlay.isVisible = false
         holder.durationBadge.isVisible = false
         holder.progressBar.isVisible = false
@@ -465,33 +551,9 @@ class CardsAdapter(
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
         holder.card.cameraDistance =
             holder.itemView.resources.displayMetrics.density * HANDWRITING_CAMERA_DISTANCE
-        val face = currentCardFace(item.id)
-        if (handwritingContent != null) {
-            holder.card.clearRatio()
-            holder.card.scaleX = 1f
-            holder.card.scaleY = 1f
-            bindHandwriting(holder, item, handwritingContent, face, fallbackText, position)
-            clearTitle(holder)
-        } else if (item.video != null) {
-            bindVideoCard(holder, item, fallbackText, position)
-            clearTitle(holder)
-        } else if (imageContent != null) {
-            holder.card.clearRatio()
-            holder.card.scaleX = 1f
-            holder.card.scaleY = 1f
-            bindImageCard(holder, item, face, fallbackText, position)
-            clearTitle(holder)
-        } else {
-            holder.card.clearRatio()
-            holder.card.scaleX = 1f
-            holder.card.scaleY = 1f
-            HandwritingBitmapLoader.clear(holder.handwriting)
-            BackgroundImageLoader.clear(holder.imageCard)
-            holder.imageCard.setImageDrawable(null)
-            bindTextCard(holder, item, face)
-        }
+        bindReadingFace(holder, item, face, position, allowPlayback = bindOverview)
         holder.snippet.setTextSize(TypedValue.COMPLEX_UNIT_SP, bodyTextSizeSp)
-        val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceAtLeast(MIN_TIME_TEXT_SIZE_SP)
+        val timeSize = (bodyTextSizeSp - TIME_SIZE_DELTA).coerceIn(MIN_TIME_TEXT_SIZE_SP, MAX_TIME_TEXT_SIZE_SP)
         holder.time.setTextSize(TypedValue.COMPLEX_UNIT_SP, timeSize)
         holder.snippet.typeface = bodyTypeface
         holder.time.typeface = bodyTypeface
@@ -506,10 +568,32 @@ class CardsAdapter(
         // ---- Bind background image (drawable or Uri) ----
         val shouldDisplayBackground = handwritingContent == null && imageContent == null
         BackgroundImageLoader.clear(holder.bg)
+        holder.bg.foreground = null
+        holder.bg.background = null
         val hasBackground = if (shouldDisplayBackground) {
             when (val b = item.bg) {
                 is BgImage.Res -> {
-                    holder.bg.setImageResource(b.id)
+                    if (item.video != null || !isPhotographicResource(holder.itemView.context, b.id)) {
+                        holder.bg.setImageResource(b.id)
+                    }
+                    else {
+                        holder.bg.setImageResource(PLACEHOLDER_RES_ID)
+                        val loaded = holder.trackFaceLoad()
+                        val uri = "android.resource://${holder.itemView.context.packageName}/${b.id}".toUri()
+                        BackgroundImageLoader.load(
+                            holder.itemView.context, holder.bg, uri, photographicBackground = true
+                        ) { result ->
+                            if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
+                            when (result) {
+                                is BackgroundImageLoader.Result.Success -> holder.bg.setImageBitmap(result.bitmap)
+                                else -> {
+                                    holder.faceLoadFailed = true
+                                    Log.w("TimescapeBackground", "Resource background unavailable for card ${item.id}: $result")
+                                }
+                            }
+                            loaded()
+                        }
+                    }
                     true
                 }
                 is BgImage.UriRef -> {
@@ -522,12 +606,14 @@ class CardsAdapter(
                             val side = holder.itemView.resources.displayMetrics.widthPixels.coerceAtMost(1280)
                             side to side
                         } else estimateBackgroundSize(holder)
+                        val loaded = holder.trackFaceLoad()
                         BackgroundImageLoader.load(
                             context = holder.itemView.context,
                             imageView = holder.bg,
                             uri = b.uri,
                             targetWidth = targetWidth,
-                            targetHeight = targetHeight
+                            targetHeight = targetHeight,
+                            photographicBackground = item.video == null
                         ) { result ->
                             val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
                             if (!isSameCard) return@load
@@ -537,16 +623,20 @@ class CardsAdapter(
                                     holder.bg.setImageBitmap(result.bitmap)
                                 }
                                 is BackgroundImageLoader.Result.PermissionDenied -> {
+                                    holder.faceLoadFailed = true
                                     blockedUris.add(b.uri)
                                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
                                 }
                                 is BackgroundImageLoader.Result.NotFound -> {
+                                    holder.faceLoadFailed = true
                                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
                                 }
                                 is BackgroundImageLoader.Result.Error -> {
+                                    holder.faceLoadFailed = true
                                     holder.bg.setImageResource(PLACEHOLDER_RES_ID)
                                 }
                             }
+                            loaded()
                         }
                         true
                     }
@@ -561,6 +651,7 @@ class CardsAdapter(
             false
         }
 
+        (holder.bg as? PhotographImageView)?.setSoftening(0f)
         // Base blur (keeps transparency)
         val baseEffect = if (hasBackground) blurEffect else null
 
@@ -577,26 +668,178 @@ class CardsAdapter(
         val density = holder.itemView.resources.displayMetrics.density
         holder.card.radius = (if (photoText) 2f else 20f) * density
         holder.card.cardElevation = if (photoText) 0f else holder.restingCardElevation
-        holder.card.foreground = if (photoText) {
-            ContextCompat.getDrawable(holder.itemView.context, R.drawable.timescape_photo_edge)
-        } else null
-        holder.textScrim.setBackgroundResource(if (photoText) R.drawable.timescape_photo_scrim else R.drawable.text_scrim)
-        holder.textScrim.alpha = if (photoText) 1f else 0.45f
+        holder.card.foreground = CardEdgeDrawable(density, holder.card.radius,
+            glass = item.image == null && item.handwriting == null && item.video == null)
+        if (photoText) holder.textScrim.background = null
+        else holder.textScrim.setBackgroundResource(R.drawable.text_scrim)
+        holder.textScrim.isVisible = holder.cardContent.isVisible && !photoText
+        holder.textScrim.alpha = 0.45f
         holder.cardContent.setPadding((20 * density).roundToInt(),
-            ((if (photoText) 58 else 20) * density).roundToInt(),
+            (4 * density).roundToInt(),
             (20 * density).roundToInt(), (20 * density).roundToInt())
         holder.title.textSize = if (photoText) 28f else 20f
-        holder.bg.alpha = if (photoText) 0.90f else 1f
+        holder.bg.alpha = 1f
+        (holder.bg as? PhotographImageView)?.setFadingEdges(false)
         if (photoText) {
             stylePhotograph(holder.bg)
             holder.title.typeface = bodyTypeface ?: Typeface.create("sans-serif-light", Typeface.NORMAL)
         }
     }
 
+    private fun bindReadingFace(
+        holder: VH,
+        item: CardItem,
+        face: HandwritingFace,
+        position: Int,
+        allowPlayback: Boolean = true
+    ) {
+        holder.imageScroll.bind(item.id, item.image != null && face == HandwritingFace.FRONT, face = face)
+        holder.handwritingScroll.bind(
+            item.id,
+            item.handwriting != null || (item.imageHandwriting != null && face == HandwritingFace.BACK),
+            fitAtWidth = true,
+            face = face
+        )
+        val fallback = item.snippet.ifBlank {
+            when {
+                item.handwriting != null -> holder.itemView.context.getString(R.string.handwriting_card_missing)
+                item.image != null -> holder.itemView.context.getString(R.string.image_card_missing)
+                else -> ""
+            }
+        }
+        val handwriting = item.handwriting
+        holder.card.clearRatio()
+        holder.card.scaleX = 1f
+        holder.card.scaleY = 1f
+        if (item.video != null && face == HandwritingFace.BACK) {
+            persistVideoProgress(holder)
+            holder.videoInlineView.setOnPreparedListener(null)
+            holder.videoInlineView.stopPlayback()
+            holder.videoInlineView.isVisible = false
+            hideVideoControls(holder)
+            attachedVideoHolders.remove(holder)
+        }
+        when {
+            handwriting != null -> {
+                bindHandwriting(holder, item, handwriting, face, fallback, position)
+                clearTitle(holder)
+            }
+            face == HandwritingFace.BACK && item.imageHandwriting == null &&
+                (!item.backSnippet.isNullOrBlank() || item.thermalReceipt != null) -> {
+                bindTextCard(holder, item, face)
+            }
+            item.video != null -> {
+                bindVideoCard(holder, item, fallback, position, allowPlayback)
+                clearTitle(holder)
+            }
+            item.image != null -> {
+                bindImageCard(holder, item, face, fallback, position)
+                clearTitle(holder)
+            }
+            else -> {
+                HandwritingBitmapLoader.clear(holder.handwriting)
+                BackgroundImageLoader.clear(holder.imageCard)
+                holder.imageCard.setImageDrawable(null)
+                bindTextCard(holder, item, face)
+            }
+        }
+    }
+
+    private fun oppositeFace(face: HandwritingFace) =
+        if (face == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
+
+    private fun prepareFlip(holder: VH) {
+        val item = getItemAt(holder.bindingAdapterPosition) ?: return
+        val version = holder.preparationVersion
+        holder.whenFaceReady sourceReady@ {
+            if (version != holder.preparationVersion) return@sourceReady
+            if (!holder.flip.canFlip()) {
+                holder.flip.preparationCancelled()
+                return@sourceReady
+            }
+            val parent = holder.itemView.parent as? ViewGroup ?: return@sourceReady
+            val back = VH(LayoutInflater.from(parent.context).inflate(R.layout.item_card, parent, false))
+            holder.preparedHolder = back
+            bindCard(back, item, holder.bindingAdapterPosition, oppositeFace(holder.boundFace), false)
+            back.imageScroll.copyReadingOffsetsFrom(holder.imageScroll)
+            back.handwritingScroll.copyReadingOffsetsFrom(holder.handwritingScroll)
+            back.presentation.setViewportCap(holder.presentation.readingHeightCap)
+            back.card.setHeightCap(holder.presentation.readingHeightCap)
+            back.cardContent.setMaxHeightPx(holder.cardContent.heightCap)
+            back.snippet.maxLines = Int.MAX_VALUE
+            back.presentation.setExpansion(1f)
+            back.whenFaceReady backReady@ {
+                if (version != holder.preparationVersion) return@backReady
+                if (!holder.flip.canFlip()) {
+                    clearPreparedHolder(holder)
+                    holder.flip.preparationCancelled()
+                    return@backReady
+                }
+                val width = holder.flip.width
+                if (width <= 0 || holder.flipContent.height <= 0) {
+                    clearPreparedHolder(holder)
+                    holder.flip.preparationCancelled()
+                    return@backReady
+                }
+                back.itemView.measure(
+                    View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                )
+                back.itemView.layout(0, 0, back.itemView.measuredWidth, back.itemView.measuredHeight)
+                if (holder.faceLoadFailed || back.faceLoadFailed) {
+                    Log.w("CardFlip", "Some images could not be prepared for card ${item.id}")
+                    Toast.makeText(parent.context, R.string.card_flip_image_unavailable, Toast.LENGTH_SHORT).show()
+                }
+                holder.flip.setFaces(captureFace(holder), captureFace(back))
+                clearPreparedHolder(holder)
+            }
+        }
+    }
+
+    private fun captureFace(holder: VH): CardFlipSnapshot {
+        val content = holder.flipContent
+        val scale = min(1f, min(1024f / content.width, 2048f / content.height))
+        val bitmap = Bitmap.createBitmap(
+            (content.width * scale).roundToInt().coerceAtLeast(1),
+            (content.height * scale).roundToInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888
+        )
+        val canvas = Canvas(bitmap)
+        canvas.scale(scale, scale)
+        // SurfaceView cannot be copied by View.draw; use its existing cover during a flip.
+        val visibility = holder.videoInlineView.visibility
+        val elevation = holder.card.cardElevation
+        holder.videoInlineView.visibility = View.INVISIBLE
+        holder.card.cardElevation = 0f
+        try {
+            content.draw(canvas)
+        } finally {
+            holder.videoInlineView.visibility = visibility
+            holder.card.cardElevation = elevation
+        }
+        return CardFlipSnapshot(bitmap, content.height, holder.card.radius)
+    }
+
+    private fun clearPreparedHolder(holder: VH) {
+        holder.preparedHolder?.let {
+            it.beginFaceBinding(it.boundFace)
+            BackgroundImageLoader.clear(it.bg)
+            BackgroundImageLoader.clear(it.imageCard)
+            HandwritingBitmapLoader.clear(it.handwriting)
+            HandwritingBitmapLoader.clear(it.receipt)
+            it.videoInlineView.stopPlayback()
+        }
+        holder.preparedHolder = null
+    }
+
     private fun stylePhotograph(image: ImageView) {
-        image.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0.65f) })
-        val radius = 0.65f * image.resources.displayMetrics.density
-        image.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP))
+        TextCardPhotoStyle.applyTo(image)
+    }
+
+    private fun isPhotographicResource(context: Context, resource: Int): Boolean {
+        val value = TypedValue()
+        context.resources.getValue(resource, value, true)
+        return value.string?.toString()?.endsWith(".xml") == false
     }
 
     private fun bindPreview(holder: VH, item: CardItem) {
@@ -605,19 +848,22 @@ class CardsAdapter(
         val media = item.image != null || item.handwriting != null || item.video != null
         holder.presentation.configurePreview(media, item.video?.aspectRatio ?: 1.5f)
         holder.preview.radius = (if (media) 20f else 2f) * density
-        holder.preview.foreground = if (media) null else {
-            ContextCompat.getDrawable(context, R.drawable.timescape_photo_edge)
-        }
-        holder.preview.setCardBackgroundColor(if (media) Color.TRANSPARENT else 0xB51B4668.toInt())
+        holder.preview.foreground = CardEdgeDrawable(density, holder.preview.radius, glass = !media)
+        holder.preview.setCardBackgroundColor(
+            if (media || item.bg != null) Color.TRANSPARENT else 0xB51B4668.toInt()
+        )
         holder.previewText.isVisible = !media
-        holder.previewScrim.isVisible = !media
+        holder.previewScrim.isVisible = false
         holder.previewTypeIcon.isVisible = !media || item.video != null
         holder.previewTypeIcon.setImageResource(
             if (item.video != null) android.R.drawable.ic_media_play else R.drawable.ic_sticky_note
         )
         holder.previewTitle.text = item.title
-        holder.previewTitle.isVisible = item.title.isNotBlank()
-        holder.previewSnippet.text = item.snippet.replace(PREVIEW_WHITESPACE, " ").trim()
+        val hasTitle = item.title.isNotBlank()
+        holder.previewHeading.isVisible = hasTitle
+        holder.previewTitle.isVisible = hasTitle
+        holder.previewTime.isVisible = !media
+        holder.previewSnippet.text = normalizeCardText(item.snippet).text
         holder.previewTime.text = holder.time.text
         holder.previewTitle.typeface = bodyTypeface ?: Typeface.create("sans-serif-light", Typeface.NORMAL)
         holder.previewSnippet.typeface = bodyTypeface ?: if (item.title.isBlank()) {
@@ -633,19 +879,29 @@ class CardsAdapter(
         val image = holder.previewImage
         BackgroundImageLoader.clear(image)
         HandwritingBitmapLoader.clear(image)
+        (image as? PhotographImageView)?.setSoftening(0f)
+        (image as? PhotographImageView)?.setFadingEdges(false)
         image.colorFilter = null
+        image.foreground = null
+        image.background = null
         image.setRenderEffect(null)
-        image.alpha = if (media) 1f else 0.9f
+        image.alpha = 1f
         image.scaleType = if (media) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
-        if (!media) stylePhotograph(image)
+        if (!media && item.bg != null) stylePhotograph(image)
         val side = context.resources.displayMetrics.widthPixels.coerceAtMost(1280)
         fun applyBitmap(bitmap: Bitmap) {
             image.setImageBitmap(bitmap)
             if (media) holder.presentation.configurePreview(true, bitmap.width.toFloat() / bitmap.height)
         }
         val handwriting = item.handwriting
-        if (handwriting != null) {
-            HandwritingBitmapLoader.load(context, handwriting.path, image, side, side) { bitmap ->
+        if (handwriting != null && holder.boundFace == HandwritingFace.BACK && handwriting.back == null) {
+            applyBitmap(HandwritingPaperRenderer.renderPlaceholder(handwriting.options, side, side, density))
+            return
+        }
+        val handwrittenSide = handwriting?.side(holder.boundFace)
+            ?: item.imageHandwriting?.takeIf { holder.boundFace == HandwritingFace.BACK }
+        if (handwrittenSide != null) {
+            HandwritingBitmapLoader.load(context, handwrittenSide.path, image, side, side) { bitmap ->
                 if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
                 if (bitmap != null) applyBitmap(bitmap)
                 else {
@@ -658,12 +914,17 @@ class CardsAdapter(
         val source = if (media) {
             item.image?.uri?.let { BgImage.UriRef(it) }
                 ?: item.video?.coverImagePath?.let { BgImage.UriRef(java.io.File(it).toUri()) }
-        } else item.bg
+        } else when (val background = item.bg) {
+            is BgImage.Res -> if (isPhotographicResource(context, background.id)) {
+                BgImage.UriRef("android.resource://${context.packageName}/${background.id}".toUri())
+            } else background
+            else -> background
+        }
         when (source) {
             is BgImage.Res -> image.setImageResource(source.id)
             is BgImage.UriRef -> {
                 image.setImageResource(PLACEHOLDER_RES_ID)
-                BackgroundImageLoader.load(context, image, source.uri, side, side) { result ->
+                BackgroundImageLoader.load(context, image, source.uri, side, side, photographicBackground = !media) { result ->
                     if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
                     when (result) {
                         is BackgroundImageLoader.Result.Success -> applyBitmap(result.bitmap)
@@ -681,7 +942,7 @@ class CardsAdapter(
     }
 
     private fun bindReceipt(holder: VH, item: CardItem) {
-        val attachment = item.thermalReceipt?.takeIf { it.face == currentCardFace(item.id) }
+        val attachment = item.thermalReceipt?.takeIf { it.face == holder.boundFace }
         holder.receipt.isVisible = attachment != null
         HandwritingBitmapLoader.clear(holder.receipt)
         if (attachment == null) {
@@ -700,18 +961,24 @@ class CardsAdapter(
             width = ViewGroup.LayoutParams.MATCH_PARENT
             height = receiptDisplayHeight(itemWidth, attachment.heightPercent)
         }
+        val loaded = holder.trackFaceLoad()
         HandwritingBitmapLoader.load(
             holder.itemView.context,
             attachment.side.path,
             holder.receipt
-        ) { bitmap -> holder.receipt.setImageBitmap(bitmap) }
+        ) { bitmap ->
+            holder.faceLoadFailed = holder.faceLoadFailed || bitmap == null
+            holder.receipt.setImageBitmap(bitmap)
+            loaded()
+        }
     }
 
     private fun bindVideoCard(
         holder: VH,
         item: CardItem,
         fallbackText: CharSequence,
-        position: Int
+        position: Int,
+        allowPlayback: Boolean = true
     ) {
         setCardMode(holder, CardMode.IMAGE, fallbackText)
         syncVideoControlRotation(holder)
@@ -727,6 +994,7 @@ class CardsAdapter(
         val coverFile = coverPath?.let { java.io.File(it) }
         if (coverFile != null && coverFile.exists()) {
             val (targetWidth, targetHeight) = estimateImageTargetSize(holder)
+            val loaded = holder.trackFaceLoad()
             BackgroundImageLoader.load(
                 context = holder.itemView.context,
                 imageView = holder.imageCard,
@@ -738,13 +1006,17 @@ class CardsAdapter(
                 if (!isSameCard) return@load
                 when (result) {
                     is BackgroundImageLoader.Result.Success -> holder.imageCard.setImageBitmap(result.bitmap)
-                    else -> holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+                    else -> {
+                        holder.faceLoadFailed = true
+                        holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
+                    }
                 }
+                loaded()
             }
         } else {
             holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
         }
-        val isActive = activeVideoCardId == item.id
+        val isActive = allowPlayback && activeVideoCardId == item.id
         holder.card.clearRatio()
         val scale = when {
             video.aspectRatio <= 0.8f -> 0.82f // portrait/screen records
@@ -779,7 +1051,8 @@ class CardsAdapter(
                 if (resumeProgressMs > 0L) {
                     holder.videoInlineView.seekTo(resumeProgressMs.toInt())
                 }
-                val shouldPlay = video.isPlaying
+                val shouldPlay = video.isPlaying && holder.boundFace == HandwritingFace.FRONT &&
+                    !holder.flip.isFlipping
                 if (shouldPlay) {
                     holder.videoInlineView.start()
                 } else {
@@ -798,8 +1071,10 @@ class CardsAdapter(
                 )
                 holder.videoPlayPauseButton.contentDescription =
                     holder.itemView.context.getString(if (shouldPlay) R.string.video_pause else R.string.video_play)
-                (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
-                    onVideoPlaybackStateChanged?.invoke(cardId, shouldPlay)
+                if (!holder.flip.isFlipping) {
+                    (holder.itemView.getTag(R.id.tag_card_id) as? Long)?.let { cardId ->
+                        onVideoPlaybackStateChanged?.invoke(cardId, shouldPlay)
+                    }
                 }
                 holder.itemView.removeCallbacks(videoProgressUpdater)
                 holder.itemView.post(videoProgressUpdater)
@@ -901,10 +1176,17 @@ class CardsAdapter(
     override fun getItemId(position: Int): Long = getItem(position).id
 
     override fun onViewRecycled(holder: VH) {
+        FlowWindPageTransformer.clearCard(holder.itemView)
+        holder.preparationVersion++
+        clearPreparedHolder(holder)
+        holder.flip.reset()
+        holder.presentation.setFlipLifted(false)
+        holder.beginFaceBinding(HandwritingFace.FRONT)
         holder.presentation.setExpansion(0f)
         BackgroundImageLoader.clear(holder.previewImage)
         HandwritingBitmapLoader.clear(holder.previewImage)
         HandwritingBitmapLoader.clear(holder.handwriting)
+        HandwritingBitmapLoader.clear(holder.receipt)
         BackgroundImageLoader.clear(holder.bg)
         BackgroundImageLoader.clear(holder.imageCard)
         holder.imageCard.setImageDrawable(null)
@@ -950,8 +1232,7 @@ class CardsAdapter(
         content: HandwritingContent,
         face: HandwritingFace,
         fallbackText: CharSequence,
-        position: Int,
-        onReady: (() -> Unit)? = null
+        position: Int
     ) {
         val handwritingContent = content
         val density = holder.itemView.resources.displayMetrics.density
@@ -966,11 +1247,11 @@ class CardsAdapter(
             )
             holder.handwritingContainer.setBackgroundColor(handwritingContent.options.backgroundColor)
             holder.handwriting.setImageBitmap(placeholder)
+            holder.handwritingScroll.markContentReady()
             holder.handwriting.contentDescription = holder.itemView.context.getString(
                 R.string.handwriting_card_content_desc
             )
             setCardMode(holder, CardMode.HANDWRITING, fallbackText)
-            onReady?.invoke()
             prefetchNeighbors(holder, position, handwritingContent.options)
             return
         }
@@ -979,6 +1260,7 @@ class CardsAdapter(
         holder.handwritingContainer.setBackgroundColor(side.options.backgroundColor)
         HandwritingBitmapLoader.clear(holder.handwriting)
         setCardMode(holder, CardMode.HANDWRITING, fallbackText)
+        val loaded = holder.trackFaceLoad()
         HandwritingBitmapLoader.load(
             context = holder.itemView.context,
             path = side.path,
@@ -988,7 +1270,7 @@ class CardsAdapter(
         ) { bitmap ->
             val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
             if (!isSameCard) return@load
-            val expectedFace = currentCardFace(item.id)
+            val expectedFace = holder.boundFace
             if (expectedFace != face) return@load
             val toDisplay = bitmap ?: HandwritingPaperRenderer.renderPlaceholder(
                 options = side.options,
@@ -997,10 +1279,12 @@ class CardsAdapter(
                 density = density
             )
             holder.handwriting.setImageBitmap(toDisplay)
+            holder.handwritingScroll.markContentReady()
+            holder.faceLoadFailed = holder.faceLoadFailed || bitmap == null
             holder.handwriting.contentDescription = holder.itemView.context.getString(
                 R.string.handwriting_card_content_desc
             )
-            onReady?.invoke()
+            loaded()
         }
         handwritingContent.back?.let { backSide ->
             val (width, height) = estimateTargetSize(holder, backSide.options)
@@ -1048,6 +1332,7 @@ class CardsAdapter(
             return
         }
         val (targetWidth, targetHeight) = estimateImageTargetSize(holder)
+        val loaded = holder.trackFaceLoad()
         BackgroundImageLoader.load(
             context = holder.itemView.context,
             imageView = holder.imageCard,
@@ -1061,18 +1346,23 @@ class CardsAdapter(
                 is BackgroundImageLoader.Result.Success -> {
                     blockedUris.remove(uri)
                     holder.imageCard.setImageBitmap(result.bitmap)
+                    holder.imageScroll.markContentReady()
                 }
                 is BackgroundImageLoader.Result.PermissionDenied -> {
+                    holder.faceLoadFailed = true
                     blockedUris.add(uri)
                     holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
                 }
                 is BackgroundImageLoader.Result.NotFound -> {
+                    holder.faceLoadFailed = true
                     holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
                 }
                 is BackgroundImageLoader.Result.Error -> {
+                    holder.faceLoadFailed = true
                     holder.imageCard.setImageResource(PLACEHOLDER_RES_ID)
                 }
             }
+            loaded()
         }
     }
 
@@ -1088,6 +1378,7 @@ class CardsAdapter(
         holder.handwritingContainer.setBackgroundColor(side.options.backgroundColor)
         HandwritingBitmapLoader.clear(holder.handwriting)
         setCardMode(holder, CardMode.HANDWRITING, fallbackText)
+        val loaded = holder.trackFaceLoad()
         HandwritingBitmapLoader.load(
             context = holder.itemView.context,
             path = side.path,
@@ -1097,7 +1388,7 @@ class CardsAdapter(
         ) { bitmap ->
             val isSameCard = holder.itemView.getTag(R.id.tag_card_id) == item.id
             if (!isSameCard) return@load
-            val expectedFace = currentCardFace(item.id)
+            val expectedFace = holder.boundFace
             if (expectedFace != HandwritingFace.BACK) return@load
             val toDisplay = bitmap ?: HandwritingPaperRenderer.renderPlaceholder(
                 options = side.options,
@@ -1106,72 +1397,21 @@ class CardsAdapter(
                 density = density
             )
             holder.handwriting.setImageBitmap(toDisplay)
+            holder.handwritingScroll.markContentReady()
+            holder.faceLoadFailed = holder.faceLoadFailed || bitmap == null
             holder.handwriting.contentDescription = holder.itemView.context.getString(
                 R.string.handwriting_card_content_desc
             )
+            loaded()
         }
         prefetchNeighbors(holder, position, side.options)
     }
 
     fun toggleCardFace(holder: VH): HandwritingFace? {
         val position = holder.bindingAdapterPosition
-        if (position == RecyclerView.NO_POSITION) return null
-        val item = getItem(position)
-        val handwritingContent = item.handwriting
-        val hasImageBack = item.imageHandwriting != null
-        val hasTextBack = !item.backSnippet.isNullOrBlank()
-        val hasHandwriting = handwritingContent != null
-        if (!hasHandwriting && (!hasImageBack || item.image == null) && !hasTextBack && item.thermalReceipt == null) {
-            return null
-        }
-        val current = currentCardFace(item.id)
-        val next = if (current == HandwritingFace.FRONT) HandwritingFace.BACK else HandwritingFace.FRONT
-        handwritingFaces[item.id] = next
-        val fallbackText = when {
-            handwritingContent != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.handwriting_card_missing)
-            item.image != null -> if (item.snippet.isNotBlank()) item.snippet else holder.itemView.context.getString(R.string.image_card_missing)
-            else -> item.snippet
-        }
-        when {
-            handwritingContent != null -> animateHandwritingFlip(holder, item, next, fallbackText, position)
-            hasImageBack && item.image != null -> bindImageCard(holder, item, next, fallbackText, position)
-            hasTextBack || item.thermalReceipt != null -> {
-                animateTextReceiptFlip(holder, item, next)
-                return next
-            }
-        }
-        bindReceipt(holder, item)
-        return next
-    }
-
-    private fun animateTextReceiptFlip(holder: VH, item: CardItem, toFace: HandwritingFace) {
-        holder.card.animate().cancel()
-        holder.receipt.animate().cancel()
-        // MaterialCardView's elevated outline becomes a large grey shape while the view is
-        // edge-on. Suppress that outline only for the flip; the normal resting shadow returns
-        // as soon as the new face is fully visible.
-        holder.card.cardElevation = 0f
-        holder.card.animate()
-            .rotationY(90f)
-            .scaleX(CARD_FLIP_MIDPOINT_SCALE)
-            .setDuration(CARD_FLIP_HALF_DURATION)
-            .setInterpolator(AccelerateInterpolator())
-            .withEndAction {
-                if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@withEndAction
-                bindTextCard(holder, item, toFace)
-                bindReceipt(holder, item)
-                holder.card.rotationY = -90f
-                holder.card.animate()
-                    .rotationY(0f)
-                    .scaleX(1f)
-                    .setDuration(CARD_FLIP_HALF_DURATION)
-                    .setInterpolator(DecelerateInterpolator())
-                    .withEndAction {
-                        holder.card.cardElevation = holder.restingCardElevation
-                    }
-                    .start()
-            }
-            .start()
+        if (position == RecyclerView.NO_POSITION || !canFlipCardAt(position)) return null
+        val next = oppositeFace(holder.boundFace)
+        return if (holder.flip.flip()) next else null
     }
 
     fun currentFaceFor(index: Int): HandwritingFace {
@@ -1189,66 +1429,6 @@ class CardsAdapter(
     }
 
     private fun currentCardFace(itemId: Long): HandwritingFace = handwritingFaces[itemId] ?: HandwritingFace.FRONT
-
-    private fun animateHandwritingFlip(
-        holder: VH,
-        item: CardItem,
-        toFace: HandwritingFace,
-        fallbackText: CharSequence,
-        position: Int
-    ) {
-        val container = holder.handwritingContainer
-        cancelOngoingFlip(container)
-        holder.card.cardElevation = 0f
-        val fold = AnimatorSet().apply {
-            playTogether(
-                ObjectAnimator.ofFloat(container, View.ROTATION_Y, 0f, 90f).apply {
-                    duration = CARD_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, 1f, CARD_FLIP_MIDPOINT_SCALE).apply {
-                    duration = CARD_FLIP_HALF_DURATION
-                    interpolator = AccelerateInterpolator()
-                }
-            )
-        }
-        val unfold = AnimatorSet().apply {
-            playTogether(
-                ObjectAnimator.ofFloat(container, View.ROTATION_Y, -90f, 0f).apply {
-                    duration = CARD_FLIP_HALF_DURATION
-                    interpolator = DecelerateInterpolator()
-                },
-                ObjectAnimator.ofFloat(container, View.SCALE_X, CARD_FLIP_MIDPOINT_SCALE, 1f).apply {
-                    duration = CARD_FLIP_HALF_DURATION
-                    interpolator = DecelerateInterpolator()
-                }
-            )
-        }
-        val animationPair = fold to unfold
-        fold.addListener(object : AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: Animator) {
-                container.rotationY = -90f
-                val handwritingContent = item.handwriting ?: return
-                bindHandwriting(holder, item, handwritingContent, toFace, fallbackText, position) {
-                    if (container.getTag(R.id.tag_handwriting_flip_animator) == animationPair) {
-                        unfold.start()
-                    }
-                }
-            }
-        })
-        unfold.addListener(object : AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: Animator) {
-                container.rotationY = 0f
-                container.scaleX = 1f
-                container.scaleY = 1f
-                container.alpha = 1f
-                holder.card.cardElevation = holder.restingCardElevation
-                container.setTag(R.id.tag_handwriting_flip_animator, null)
-            }
-        })
-        container.setTag(R.id.tag_handwriting_flip_animator, animationPair)
-        fold.start()
-    }
 
     private fun prefetchNeighbors(holder: VH, position: Int, referenceOptions: HandwritingOptions) {
         val context = holder.itemView.context.applicationContext
@@ -1361,7 +1541,7 @@ class CardsAdapter(
         when (mode) {
             CardMode.TEXT -> {
                 holder.cardContent.isVisible = true
-                holder.textScrim.isVisible = true
+                holder.textScrim.isVisible = holder.textScrim.background != null
                 holder.time.isVisible = true
                 holder.snippet.isVisible = true
                 holder.snippet.text = fallbackText
@@ -1444,17 +1624,6 @@ class CardsAdapter(
         holder.titleSpeakButton.isVisible = false
         holder.titleSpeakButton.setOnClickListener(null)
         holder.titleSpeakButton.contentDescription = null
-    }
-
-    private fun cancelOngoingFlip(container: View) {
-        val running = container.getTag(R.id.tag_handwriting_flip_animator) as? Pair<AnimatorSet, AnimatorSet>
-        running?.first?.cancel()
-        running?.second?.cancel()
-        container.setTag(R.id.tag_handwriting_flip_animator, null)
-        container.rotationY = 0f
-        container.scaleX = 1f
-        container.scaleY = 1f
-        container.alpha = 1f
     }
 
     // ---------- Tint implementations ----------
@@ -1639,10 +1808,9 @@ class CardsAdapter(
         private const val MAX_BODY_TEXT_SIZE_SP = 32f
         private const val TIME_SIZE_DELTA = 3f
         private const val MIN_TIME_TEXT_SIZE_SP = 10f
+        private const val MAX_TIME_TEXT_SIZE_SP = 12f
         private val PLACEHOLDER_RES_ID = R.drawable.bg_placeholder
         private const val BG_BLUR_RADIUS = 12f
-        private const val CARD_FLIP_HALF_DURATION = 110L
-        private const val CARD_FLIP_MIDPOINT_SCALE = 0.98f
         private const val HANDWRITING_CAMERA_DISTANCE = 8000f
 
         private const val DUOTONE_SHADER = """

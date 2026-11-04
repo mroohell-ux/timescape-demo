@@ -95,8 +95,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.viewpager2.widget.CompositePageTransformer
-import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
@@ -129,7 +127,6 @@ import java.util.concurrent.TimeUnit
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import kotlin.math.abs
-import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -153,10 +150,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rootLayout: CoordinatorLayout
     private lateinit var toolbar: MaterialToolbar
     private lateinit var flowPager: ViewPager2
-    private lateinit var flowBar: View
-    private lateinit var flowChipGroup: ChipGroup
+    private lateinit var flowBar: FlowDockView
+    private lateinit var flowChipGroup: FlowDockChipGroup
     private lateinit var flowChipScroll: HorizontalScrollView
     private lateinit var flowLibraryButton: MaterialButton
+    private lateinit var flowChipDragController: FlowChipDragController
 
     private var searchMenuItem: MenuItem? = null
     private var searchView: SearchView? = null
@@ -190,7 +188,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var drawerCopyWatchEndpointButton: MaterialButton
     private lateinit var drawerWatchSyncHelpButton: MaterialButton
     private lateinit var drawerImportNotesButton: MaterialButton
-    private lateinit var drawerToggleReorderFlowsButton: MaterialButton
     private lateinit var drawerVideoMuteToggleButton: MaterialButton
     private lateinit var appBackgroundPreview: ImageView
     private lateinit var notificationFrequencySlider: Slider
@@ -209,7 +206,7 @@ class MainActivity : AppCompatActivity() {
     private val flowControllers: MutableMap<Long, FlowPageController> = mutableMapOf()
     private val flowShuffleStates: MutableMap<Long, FlowShuffleState> = mutableMapOf()
 
-    private val cardTint: TintStyle = TintStyle.MultiplyDark(color = Color.BLACK, alpha = 0.15f)
+    private val cardTint: TintStyle = TintStyle.None
 
     private var appBackground: BgImage? = null
 
@@ -224,12 +221,15 @@ class MainActivity : AppCompatActivity() {
     private var cardTypeface: Typeface? = null
     private var cardFontPath: String? = null
     private var cardFontDisplayName: String? = null
-    private var isFlowReorderModeEnabled: Boolean = false
     private var isTwoFlowLandscapeEnabled: Boolean = false
     private var isFlowLabelsTemporarilyVisible: Boolean = false
     private var isFlowLabelsWidgetInteractionActive: Boolean = false
     private var flowLabelsInteractionStartedAtMs: Long = 0L
     private val hideFlowLabelsRunnable: Runnable = Runnable {
+        if (::flowChipDragController.isInitialized && flowChipDragController.isDragging) {
+            flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_INTERACTION_RETRY_MS)
+            return@Runnable
+        }
         if (isFlowLabelsWidgetInteractionActive) {
             val activeDuration = SystemClock.elapsedRealtime() - flowLabelsInteractionStartedAtMs
             if (activeDuration >= FLOW_LABELS_INTERACTION_MAX_DURATION_MS) {
@@ -313,8 +313,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingPdfImportFlowId: Long? = null
     private var pendingExportFlowId: Long? = null
     private var pendingExportFileName: String? = null
-    private var activeFlowReorderDragId: Long? = null
-    private var activeFlowReorderHoverIndex: Int? = null
 
     private data class HandwritingDialogExtras(
         val baseBitmap: Bitmap? = null,
@@ -616,7 +614,9 @@ class MainActivity : AppCompatActivity() {
         cardFontSizeSp = prefs.getFloat(KEY_CARD_FONT_SIZE, DEFAULT_CARD_FONT_SIZE_SP)
         cardFontPath = prefs.getString(KEY_CARD_FONT_PATH, null)
         cardFontDisplayName = prefs.getString(KEY_CARD_FONT_NAME, null)
-        isFlowReorderModeEnabled = prefs.getBoolean(KEY_FLOW_REORDER_MODE_ENABLED, false)
+        if (prefs.contains("flow_reorder_mode_enabled")) {
+            prefs.edit().remove("flow_reorder_mode_enabled").apply()
+        }
         isTwoFlowLandscapeEnabled = prefs.getBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, false)
         cardTypeface = cardFontPath?.let { loadCardTypeface(it) }
         if (cardTypeface == null) {
@@ -647,6 +647,15 @@ class MainActivity : AppCompatActivity() {
         flowChipGroup = findViewById(R.id.flowChips)
         flowChipScroll = findViewById(R.id.flowChipScroll)
         flowLibraryButton = findViewById(R.id.buttonFlowLibrary)
+        flowChipDragController = FlowChipDragController(
+            flowChipGroup, flowChipScroll, findViewById(R.id.flowDragHint),
+            onReorder = ::moveFlowToIndex,
+            onMerge = ::confirmMergeFlows,
+            onInteraction = { active ->
+                if (active) beginFlowLabelsWidgetInteraction() else endFlowLabelsWidgetInteraction()
+            },
+            onFailure = { snackbar(getString(R.string.flow_drag_unavailable)) }
+        )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window.statusBarColor = Color.TRANSPARENT
@@ -669,7 +678,6 @@ class MainActivity : AppCompatActivity() {
         drawerCopyWatchEndpointButton = header.findViewById(R.id.buttonDrawerCopyWatchEndpoint)
         drawerWatchSyncHelpButton = header.findViewById(R.id.buttonDrawerWatchSyncHelp)
         drawerImportNotesButton = header.findViewById(R.id.buttonDrawerImportNotes)
-        drawerToggleReorderFlowsButton = header.findViewById(R.id.buttonDrawerToggleReorderFlows)
         drawerVideoMuteToggleButton = header.findViewById(R.id.buttonDrawerVideoMute)
         drawerRecyclerImages = header.findViewById(R.id.drawerRecyclerImages)
         drawerAddImagesButton = header.findViewById(R.id.buttonDrawerAddImages)
@@ -783,10 +791,6 @@ class MainActivity : AppCompatActivity() {
                 .setMessage(getString(R.string.drawer_watch_sync_help_message))
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
-        }
-        drawerToggleReorderFlowsButton.setOnClickListener {
-            toggleFlowReorderMode()
-            drawerLayout.closeDrawer(GravityCompat.START)
         }
         drawerVideoMuteToggleButton.setOnClickListener {
             setGlobalVideoMuted(!isGlobalVideoMuted, persist = true)
@@ -999,6 +1003,7 @@ class MainActivity : AppCompatActivity() {
         if (showTwoFlows) {
             flowPager.offscreenPageLimit = 1
             flowPager.setPageTransformer { page, position ->
+                FlowWindPageTransformer.resetPage(page)
                 page.pivotX = 0f
                 page.pivotY = page.height / 2f
                 page.scaleX = 1f
@@ -1027,27 +1032,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } else {
-            val density = resources.displayMetrics.density
-            val transformer = CompositePageTransformer().apply {
-                addTransformer(MarginPageTransformer((24 * density).roundToInt()))
-                addTransformer { page, position ->
-                    page.pivotX = page.width / 2f
-                    page.pivotY = page.height / 2f
-                    page.scaleX = 1f
-                    page.translationX = 0f
-                    page.scaleY = 0.9f + (1 - abs(position)) * 0.1f
-                    page.alpha = 0.6f + (1 - abs(position)) * 0.4f
-                    page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let {
-                        setFlowPaneWidth(it, ViewGroup.LayoutParams.MATCH_PARENT)
-                        setFlowPaneTopPadding(it, 0)
-                    }
-                    page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
-                        setFlowPaneWidth(overlay, ViewGroup.LayoutParams.MATCH_PARENT)
-                        overlay.isVisible = false
-                    }
+            val wind = FlowWindPageTransformer()
+            flowPager.setPageTransformer { page, position ->
+                page.pivotX = page.width / 2f
+                page.pivotY = page.height / 2f
+                page.findViewById<RecyclerView>(R.id.recyclerFlowCards)?.let {
+                    setFlowPaneWidth(it, ViewGroup.LayoutParams.MATCH_PARENT)
+                    setFlowPaneTopPadding(it, 0)
                 }
+                page.findViewById<View>(R.id.inactiveFlowOverlay)?.let { overlay ->
+                    setFlowPaneWidth(overlay, ViewGroup.LayoutParams.MATCH_PARENT)
+                    overlay.isVisible = false
+                }
+                wind.transformPage(page, position)
             }
-            flowPager.setPageTransformer(transformer)
         }
         flowPager.requestTransform()
     }
@@ -1091,7 +1089,6 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.menu_main, toolbar.menu)
         setupSearchAction(toolbar.menu.findItem(R.id.action_search_cards))
         updateShuffleMenuState()
-        updateFlowReorderModeMenuState()
         updateTwoFlowLandscapeMenuState()
         toolbar.setOnMenuItemClickListener { mi ->
             when (mi.itemId) {
@@ -1576,17 +1573,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun updateFlowReorderModeMenuState() {
-        val titleRes = if (isFlowReorderModeEnabled) {
-            R.string.menu_reorder_flows_on
-        } else {
-            R.string.menu_reorder_flows_off
-        }
-        if (::drawerToggleReorderFlowsButton.isInitialized) {
-            drawerToggleReorderFlowsButton.text = getString(titleRes)
-        }
-    }
-
     private fun setGlobalVideoMuted(muted: Boolean, persist: Boolean) {
         isGlobalVideoMuted = muted
         if (::drawerVideoMuteToggleButton.isInitialized) {
@@ -1605,18 +1591,6 @@ class MainActivity : AppCompatActivity() {
         if (::toolbar.isInitialized) {
             updateShuffleMenuState()
         }
-    }
-
-    private fun toggleFlowReorderMode() {
-        isFlowReorderModeEnabled = !isFlowReorderModeEnabled
-        updateFlowReorderModeMenuState()
-        prefs.edit().putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled).apply()
-        snackbar(
-            getString(
-                if (isFlowReorderModeEnabled) R.string.snackbar_reorder_flows_enabled
-                else R.string.snackbar_reorder_flows_disabled
-            )
-        )
     }
 
     private fun updateChipSelection(position: Int) {
@@ -1642,26 +1616,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderFlowChips(selectedIndex: Int = selectedFlowIndex) {
+        flowChipDragController.cancel()
         val safeIndex = selectedIndex.coerceIn(0, max(0, flows.lastIndex))
         flowChipGroup.removeAllViews()
-        val density = resources.displayMetrics.density
-        val dragThresholdPx = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
         val dragListener = View.OnDragListener { view, event ->
             val targetChip = view as? Chip ?: return@OnDragListener false
             val targetId = targetChip.tag as? Long ?: return@OnDragListener false
             val label = event.clipDescription?.label?.toString()
-            val isFlowMerge = label == FLOW_MERGE_DRAG_LABEL
             val isCardMove = label == CARD_MOVE_DRAG_LABEL
-            if (!isFlowMerge && !isCardMove) return@OnDragListener false
-            val mergeSourceId = if (isFlowMerge) event.localState as? Long else null
-            val moveData = if (isCardMove) event.localState as? CardMoveDragData else null
-            if (isFlowMerge && mergeSourceId == null) return@OnDragListener false
-            if (isCardMove && moveData == null) return@OnDragListener false
-            val isSelf = when {
-                isFlowMerge -> mergeSourceId == targetId
-                isCardMove -> moveData?.sourceFlowId == targetId
-                else -> false
-            }
+            if (!isCardMove) return@OnDragListener false
+            val moveData = event.localState as? CardMoveDragData ?: return@OnDragListener false
+            val isSelf = moveData.sourceFlowId == targetId
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> !isSelf
                 DragEvent.ACTION_DRAG_ENTERED -> {
@@ -1678,11 +1643,7 @@ class MainActivity : AppCompatActivity() {
                 DragEvent.ACTION_DROP -> {
                     targetChip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
                     if (!isSelf) {
-                        if (isFlowMerge) {
-                            mergeSourceId?.let { confirmMergeFlows(it, targetId) }
-                        } else if (isCardMove) {
-                            moveData?.let { moveCardToFlow(it.cardId, it.sourceFlowId, targetId) }
-                        }
+                        moveCardToFlow(moveData.cardId, moveData.sourceFlowId, targetId)
                     }
                     true
                 }
@@ -1694,97 +1655,15 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
-        val reorderGroupDragListener = View.OnDragListener { _, event ->
-            val isFlowReorder = event.clipDescription?.label?.toString() == FLOW_REORDER_DRAG_LABEL
-            if (!isFlowReorder) return@OnDragListener false
-            val sourceId = event.localState as? Long ?: return@OnDragListener false
-            when (event.action) {
-                DragEvent.ACTION_DRAG_STARTED -> {
-                    beginFlowLabelsWidgetInteraction()
-                    true
-                }
-                DragEvent.ACTION_DRAG_LOCATION -> {
-                    val requestedIndex = flowInsertIndexForPosition(event.x)
-                    if (requestedIndex != null && activeFlowReorderHoverIndex != requestedIndex) {
-                        moveFlowToIndex(sourceId, requestedIndex, shouldPersist = false)
-                        activeFlowReorderHoverIndex = requestedIndex
-                    }
-                    true
-                }
-                DragEvent.ACTION_DROP -> true
-                DragEvent.ACTION_DRAG_ENDED -> {
-                    endFlowLabelsWidgetInteraction()
-                    if (activeFlowReorderDragId != null) saveState()
-                    resetFlowChipDragState()
-                    true
-                }
-                else -> true
-            }
-        }
-        flowChipGroup.setOnDragListener(reorderGroupDragListener)
         flows.forEachIndexed { index, flow ->
-            val chip = Chip(this).apply {
-                text = flow.name
-                isCheckable = true
-                isCheckedIconVisible = false
-                setEnsureMinTouchTargetSize(false)
-                minHeight = (36 * density).roundToInt()
-                textSize = 14f
-                setPadding((12 * density).roundToInt(), 0, (12 * density).roundToInt(), 0)
-                isChecked = index == safeIndex
-                tag = flow.id
-                setOnTouchListener(object : View.OnTouchListener {
-                    private var downX = 0f
-                    private var downY = 0f
-                    private var interactionHandled = false
-                    private var mergeRunnable: Runnable? = null
-
-                    override fun onTouch(v: View, event: MotionEvent): Boolean {
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_DOWN -> {
-                                beginFlowLabelsWidgetInteraction()
-                                downX = event.rawX
-                                downY = event.rawY
-                                interactionHandled = false
-                                v.parent?.requestDisallowInterceptTouchEvent(true)
-                                if (!isFlowReorderModeEnabled) {
-                                    mergeRunnable = Runnable {
-                                        interactionHandled = startFlowMergeDrag(this@apply, flow.id)
-                                    }.also {
-                                        v.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong())
-                                    }
-                                }
-                                return true
-                            }
-
-                            MotionEvent.ACTION_MOVE -> {
-                                if (isFlowReorderModeEnabled && !interactionHandled) {
-                                    val distance = hypot(event.rawX - downX, event.rawY - downY)
-                                    if (distance >= dragThresholdPx) {
-                                        mergeRunnable?.let(v::removeCallbacks)
-                                        mergeRunnable = null
-                                        interactionHandled = startFlowReorderDrag(this@apply, flow.id)
-                                    }
-                                }
-                                return true
-                            }
-
-                            MotionEvent.ACTION_UP,
-                            MotionEvent.ACTION_CANCEL -> {
-                                endFlowLabelsWidgetInteraction()
-                                mergeRunnable?.let(v::removeCallbacks)
-                                mergeRunnable = null
-                                v.parent?.requestDisallowInterceptTouchEvent(false)
-                                if (event.actionMasked == MotionEvent.ACTION_UP && !interactionHandled) {
-                                    handleFlowChipTap(flow.id, index)
-                                }
-                                interactionHandled = false
-                                return true
-                            }
-                        }
-                        return true
+            val chip = flowChipGroup.createChip(flow.id, flow.name, index == safeIndex).apply {
+                flowChipDragController.bind(this, flow.id) {
+                    val position = flows.indexOfFirst { it.id == flow.id }
+                    if (position >= 0) {
+                        handleFlowChipTap(flow.id, position)
+                        updateChipSelection(selectedFlowIndex)
                     }
-                })
+                }
                 setOnDragListener(dragListener)
             }
             flowChipGroup.addView(chip)
@@ -1793,22 +1672,10 @@ class MainActivity : AppCompatActivity() {
         centerSelectedChip(safeIndex)
     }
 
-    private fun flowInsertIndexForPosition(positionX: Float): Int? {
-        if (flows.isEmpty()) return null
-        val chips = (0 until flowChipGroup.childCount)
-            .mapNotNull { flowChipGroup.getChildAt(it) as? Chip }
-        if (chips.isEmpty()) return null
-        if (positionX <= chips.first().left) return 0
-        if (positionX >= chips.last().right) return chips.size
-        chips.forEachIndexed { index, chip ->
-            val midpoint = chip.left + chip.width / 2f
-            if (positionX < midpoint) return index
-        }
-        return chips.size
-    }
-
     private fun updateFlowBarVisibility() {
-        flowBar.isVisible = flows.size > 1 && isFlowLabelsTemporarilyVisible
+        val persistent = resources.configuration.smallestScreenWidthDp >= 600
+        flowBar.isVisible = flows.size > 1 && (persistent || isFlowLabelsTemporarilyVisible)
+        flowBar.setEmphasized(isFlowLabelsTemporarilyVisible || isFlowLabelsWidgetInteractionActive)
     }
 
     private fun showFlowLabelsWidgetTemporarily() {
@@ -1825,11 +1692,13 @@ class MainActivity : AppCompatActivity() {
         }
         isFlowLabelsWidgetInteractionActive = true
         flowBar.removeCallbacks(hideFlowLabelsRunnable)
+        updateFlowBarVisibility()
     }
 
     private fun endFlowLabelsWidgetInteraction() {
         isFlowLabelsWidgetInteractionActive = false
         flowLabelsInteractionStartedAtMs = 0L
+        updateFlowBarVisibility()
         if (isFlowLabelsTemporarilyVisible) {
             flowBar.removeCallbacks(hideFlowLabelsRunnable)
             flowBar.postDelayed(hideFlowLabelsRunnable, FLOW_LABELS_VISIBLE_DURATION_MS)
@@ -1846,8 +1715,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resetFlowChipDragState() {
-        activeFlowReorderDragId = null
-        activeFlowReorderHoverIndex = null
         for (i in 0 until flowChipGroup.childCount) {
             val chip = flowChipGroup.getChildAt(i) as? Chip ?: continue
             chip.animate().scaleX(1f).scaleY(1f).setDuration(80).start()
@@ -1855,50 +1722,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startFlowMergeDrag(chip: Chip, flowId: Long): Boolean {
-        if (flows.size <= 1) {
-            snackbar(getString(R.string.snackbar_need_another_flow_to_merge))
-            return false
-        }
-        val dragData = ClipData.newPlainText(FLOW_MERGE_DRAG_LABEL, flowId.toString())
-        val shadow = View.DragShadowBuilder(chip)
-        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            chip.startDragAndDrop(dragData, shadow, flowId, View.DRAG_FLAG_OPAQUE)
-        } else {
-            @Suppress("DEPRECATION")
-            chip.startDrag(dragData, shadow, flowId, 0)
-        }
-        if (started) {
-            chip.alpha = 0.6f
-        }
-        return started
-    }
-
-    private fun startFlowReorderDrag(chip: Chip, flowId: Long): Boolean {
-        if (flows.size <= 1) return false
-        // Clear any stale drag-tracking state so a new reorder can always start.
-        activeFlowReorderDragId = null
-        activeFlowReorderHoverIndex = null
-        val dragData = ClipData.newPlainText(FLOW_REORDER_DRAG_LABEL, flowId.toString())
-        val shadow = View.DragShadowBuilder(chip)
-        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            chip.startDragAndDrop(dragData, shadow, flowId, View.DRAG_FLAG_OPAQUE)
-        } else {
-            @Suppress("DEPRECATION")
-            chip.startDrag(dragData, shadow, flowId, 0)
-        }
-        if (started) {
-            activeFlowReorderDragId = flowId
-            activeFlowReorderHoverIndex = null
-            chip.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
-            chip.alpha = 0.7f
-        }
-        return started
-    }
-
-    private fun moveFlowToIndex(sourceFlowId: Long, targetIndex: Int, shouldPersist: Boolean = true) {
+    private fun moveFlowToIndex(sourceFlowId: Long, targetIndex: Int) {
         val sourceIndex = flows.indexOfFirst { it.id == sourceFlowId }
-        if (sourceIndex < 0) return
+        if (sourceIndex < 0) {
+            snackbar(getString(R.string.flow_drag_target_unavailable))
+            return
+        }
         val clampedTargetIndex = targetIndex.coerceIn(0, flows.size)
         val adjustedTargetIndex = if (sourceIndex < clampedTargetIndex) {
             clampedTargetIndex - 1
@@ -1907,16 +1736,17 @@ class MainActivity : AppCompatActivity() {
         }.coerceIn(0, flows.lastIndex)
         if (sourceIndex == adjustedTargetIndex) return
 
+        val selectedId = currentFlow()?.id
         val sourceFlow = flows.removeAt(sourceIndex)
         flows.add(adjustedTargetIndex, sourceFlow)
         flowAdapter.notifyItemMoved(sourceIndex, adjustedTargetIndex)
 
-        selectedFlowIndex = flows.indexOfFirst { it.id == sourceFlow.id }.coerceAtLeast(0)
+        selectedFlowIndex = flows.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
         renderFlowChips(selectedFlowIndex)
         flowPager.setCurrentItem(selectedFlowIndex, false)
         updateToolbarSubtitle()
         updateShuffleMenuState()
-        if (shouldPersist) saveState()
+        saveState()
     }
 
     private fun startCardMoveDrag(cardView: View, flow: CardFlow, card: CardItem): Boolean {
@@ -1993,13 +1823,25 @@ class MainActivity : AppCompatActivity() {
     private fun confirmMergeFlows(sourceId: Long, targetId: Long) {
         val sourceIndex = flows.indexOfFirst { it.id == sourceId }
         val targetIndex = flows.indexOfFirst { it.id == targetId }
-        if (sourceIndex < 0 || targetIndex < 0 || sourceIndex == targetIndex) return
+        if (sourceIndex < 0 || targetIndex < 0) {
+            snackbar(getString(R.string.flow_drag_target_unavailable))
+            return
+        }
+        if (sourceIndex == targetIndex) return
         val source = flows[sourceIndex]
         val target = flows[targetIndex]
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_merge_flows_title, source.name, target.name))
             .setMessage(getString(R.string.dialog_merge_flows_message, source.name, target.name))
-            .setPositiveButton(R.string.dialog_merge) { _, _ -> mergeFlows(sourceIndex, targetIndex) }
+            .setPositiveButton(R.string.dialog_merge) { _, _ ->
+                val currentSource = flows.indexOfFirst { it.id == sourceId }
+                val currentTarget = flows.indexOfFirst { it.id == targetId }
+                if (currentSource < 0 || currentTarget < 0) {
+                    snackbar(getString(R.string.flow_drag_target_unavailable))
+                } else {
+                    mergeFlows(currentSource, currentTarget)
+                }
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
@@ -2524,7 +2366,7 @@ class MainActivity : AppCompatActivity() {
         val availableWidth = (viewportWidthPx - horizontalInsetPx).coerceAtLeast(minSidePx)
         val baseSide = availableWidth
         val focusSide = availableWidth
-        val pitch = (availableWidth * 0.34f).coerceIn(108 * density, 148 * density)
+        val pitch = (availableWidth * 0.28f).coerceIn(92 * density, 124 * density)
             .times(resources.configuration.fontScale.coerceAtLeast(1f)).roundToInt()
         return RightRailFlowLayoutManager(
             baseSidePx = baseSide,
@@ -5782,8 +5624,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyAppBackground(): Boolean {
-        val defaultRes = R.drawable.bg_app_light_optimistic
+        val defaultRes = R.drawable.bg_app_cosmic_flow
         val bg = appBackground
+        applyAppBackgroundChrome(bg == null || bg == BgImage.Res(defaultRes))
         if (bg == null) {
             rootLayout.setBackgroundResource(defaultRes)
             appBackgroundPreview.setImageResource(defaultRes)
@@ -5791,25 +5634,51 @@ class MainActivity : AppCompatActivity() {
         }
         when (bg) {
             is BgImage.Res -> {
-                rootLayout.setBackgroundResource(bg.id)
-                appBackgroundPreview.setImageResource(bg.id)
+                val drawable = ContextCompat.getDrawable(this, bg.id)
+                if (drawable is BitmapDrawable) {
+                    val wallpaper = WallpaperDrawable(drawable.bitmap)
+                    rootLayout.background = wallpaper
+                    appBackgroundPreview.setImageBitmap(wallpaper.bitmap)
+                } else {
+                    rootLayout.background = drawable
+                    appBackgroundPreview.setImageResource(bg.id)
+                }
                 return true
             }
             is BgImage.UriRef -> {
                 val metrics = resources.displayMetrics
                 val target = max(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(720)
-                val bitmap = decodeBitmapSafe(bg, target) ?: run {
+                val wallpaper = try {
+                    WallpaperDrawable.fromUri(this, bg.uri, target)
+                } catch (error: java.io.IOException) {
+                    Log.w("AppBackground", "Unable to decode selected wallpaper", error)
+                    null
+                } catch (error: SecurityException) {
+                    Log.w("AppBackground", "Selected wallpaper is not accessible", error)
+                    null
+                } ?: run {
                     appBackground = null
+                    applyAppBackgroundChrome(true)
                     rootLayout.setBackgroundResource(defaultRes)
                     appBackgroundPreview.setImageResource(defaultRes)
                     return false
                 }
-                rootLayout.background = BitmapDrawable(resources, bitmap)
-                appBackgroundPreview.setImageBitmap(bitmap)
+                rootLayout.background = wallpaper
+                appBackgroundPreview.setImageBitmap(wallpaper.bitmap)
                 return true
             }
         }
         return true
+    }
+
+    private fun applyAppBackgroundChrome(isDefault: Boolean) {
+        val color = if (isDefault) Color.WHITE else Color.rgb(17, 17, 17)
+        toolbar.setTitleTextColor(color)
+        toolbar.setNavigationIconTint(color)
+        WindowCompat.getInsetsController(window, rootLayout).apply {
+            isAppearanceLightStatusBars = !isDefault
+            isAppearanceLightNavigationBars = !isDefault
+        }
     }
 
     private fun makeCircularPreview(img: BgImage, sizePx: Int): Bitmap? = try {
@@ -8008,7 +7877,6 @@ class MainActivity : AppCompatActivity() {
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
             if (cardFontDisplayName != null) putString(KEY_CARD_FONT_NAME, cardFontDisplayName) else remove(KEY_CARD_FONT_NAME)
-            putBoolean(KEY_FLOW_REORDER_MODE_ENABLED, isFlowReorderModeEnabled)
             putBoolean(KEY_TWO_FLOW_LANDSCAPE_ENABLED, isTwoFlowLandscapeEnabled)
             remove(KEY_CARDS)
             apply()
@@ -8052,6 +7920,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        if (::flowChipDragController.isInitialized) flowChipDragController.cancel()
         samsungSpenRemoteBridge?.disconnect()
         super.onStop()
         videoProgressPersistJob?.cancel()
@@ -8059,6 +7928,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (::flowChipDragController.isInitialized) flowChipDragController.dispose()
         samsungSpenRemoteBridge?.disconnect()
         samsungSpenRemoteBridge = null
         dismissSearchResultsDialog()
@@ -8576,8 +8446,7 @@ class MainActivity : AppCompatActivity() {
             this@MainActivity,
             object : GestureDetector.SimpleOnGestureListener() {
                 override fun onSingleTapUp(e: MotionEvent): Boolean {
-                    val child = recycler.findChildViewUnder(e.x, e.y)
-                    if (child != null) return false
+                    if (layoutManager.hasCardUnder(e.x, e.y)) return false
                     onEmptyAreaTapped()
                     return true
                 }
@@ -9097,7 +8966,6 @@ private const val KEY_NOTIFICATION_FREQUENCY_PER_HOUR = "notification_frequency_
 private const val KEY_CARD_FONT_SIZE = "card_font_size_sp"
 private const val KEY_CARD_FONT_PATH = "card_font_path"
 private const val KEY_CARD_FONT_NAME = "card_font_name"
-private const val KEY_FLOW_REORDER_MODE_ENABLED = "flow_reorder_mode_enabled"
 private const val KEY_TWO_FLOW_LANDSCAPE_ENABLED = "two_flow_landscape_enabled"
 private const val KEY_HANDWRITING_DEFAULT_BACKGROUND = "handwriting/default_background"
 private const val KEY_HANDWRITING_DEFAULT_BRUSH = "handwriting/default_brush"
@@ -9143,8 +9011,6 @@ private const val STICKY_NOTE_NOTIFICATION_CHANNEL_ID = "sticky_notes"
 private const val STICKY_NOTE_NOTIFICATION_BASE_ID = 1000
 private const val STYLUS_BUTTON_DEDUP_WINDOW_MS = 250L
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 4001
-private const val FLOW_MERGE_DRAG_LABEL = "flow_merge_drag"
-private const val FLOW_REORDER_DRAG_LABEL = "flow_reorder_drag"
 private const val CARD_MOVE_DRAG_LABEL = "card_move_drag"
 private const val CARD_MOVE_DRAG_EDGE_THRESHOLD_FRACTION = 0.22f
 private const val CARD_MOVE_DRAG_SWITCH_COOLDOWN_MS = 320L

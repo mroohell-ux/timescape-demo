@@ -157,16 +157,6 @@
             app:iconGravity="textStart"/>
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/buttonDrawerToggleReorderFlows"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="@string/menu_reorder_flows_off"
-            app:iconGravity="textStart"
-            app:iconTint="@color/flow_bar_stroke"/>
-
-        <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonDrawerVideoMute"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="match_parent"
@@ -307,6 +297,7 @@
             android:layout_marginTop="12dp"
             android:adjustViewBounds="true"
             android:scaleType="centerCrop"
+            android:src="@drawable/bg_app_cosmic_flow"
             android:contentDescription="@string/drawer_app_background_preview_desc"/>
 
         <com.google.android.material.button.MaterialButton
