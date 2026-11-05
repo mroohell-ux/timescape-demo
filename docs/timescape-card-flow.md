@@ -57,8 +57,8 @@ the next layout without resetting selection, scroll or reader offsets:
 | `cornerWidthLead` / `cornerHeightLead` | .55 / .30 | Share of horizontal/vertical scale growth delayed at each corner |
 | `cornerDirectionBlendDepth` | .15 | Continuous direction-blend radius near focus, in card pitches |
 | `pitchDepthVariation` | .15 | Small fractional pitch variation with distance; 0 makes distant angles uniform |
-| `letteringFacingPitchDegrees` | 0 | Lettering's facing angle after countering the card pitch |
-| `letteringLiftDp` | 8 | Small separation above the card, easing to zero during opening |
+| `letteringFacingPitchDegrees` | 0 | Screen-space lettering pitch after correcting the complete card projection |
+| `letteringLiftDp` | 14 | Raised separation above the card, easing to zero during opening |
 | `cardOverlapFraction` | .10 | Slight compact-card overlap; adjustable from 0 to .25 |
 
 The implementation is View/RecyclerView, so native `rotationX`, `rotationY`,
@@ -109,12 +109,19 @@ White lettering, icon tints and user-customized text colors remain unchanged;
 the existing cool glyph bevel and cast shadow preserve separation from the photo.
 Lettering is a separate sibling plane, not clipped inside the photograph. It
 slightly overhangs the leading edge and sits above the face with scroll-linked
-parallax. It counters both the card pitch and yaw, pivoting from its lower
-edge like lettering standing on the card rather than lying on the photograph.
-The default facing pitch is zero and the small 8dp lift eases away as the card
-opens; both are tunable in `CardFlowGeometry`. Its camera uses the same calibrated
-width ratio and safe corner radius as the card, avoiding exaggerated enlargement
-of the upper rows when showing four lines. The text plane reserves a 38dp trailing
+parallax. Its bottom-center hinge follows each card, while a native animation
+matrix cancels the complete screen-space card/ancestor projection, including
+pitch, yaw, roll, perspective, four-corner morph and temporary Flow wind motion.
+The default glyph plane stays rectangular and directly faces the viewer at every
+scroll position; its local correction changes continuously instead of merely
+negating X/Y Euler angles. No text reflow, extra raster snapshot or animator is used.
+The default facing pitch is zero and the more visible 14dp lift eases away as the
+card opens; both are tunable in `CardFlowGeometry`. Its camera uses the same calibrated
+width ratio and safe corner radius as the card. Uniform scale is bounded analytically
+by the projected card edges using actual shaped-glyph bounds, not unused container
+padding, and includes a glyph-shadow margin, so upright four-line
+text does not get clipped or stretched under extreme legal poses.
+The text plane reserves a 38dp trailing
 inset so upright glyphs stay inside the projected right edge; the
 text layout gains the same 16dp of width and is fitted back into the existing
 card plane, preserving the previous paragraph wrapping instead of introducing
@@ -239,13 +246,28 @@ paragraph lines and ellipsized word suffixes stay on the original reading plane,
 behind the moving shared glyphs, fading and clipping as the card recedes. They
 do not inherit the summary's scaling, translation or line packing; only glyphs
 retained in the summary join that continuous morph.
+Each foreground strip has a cached, soft-edged footprint at its actual moving
+position. It clears text behind it before its glyphs are drawn, so surplus prose
+retreats locally instead of showing through the moving lettering. Reflow fragments
+are composited back-to-front in reading order, with the title in front of the body:
+crossing strips pass behind earlier text rather than adding unrelated glyphs
+together. Cached ink bounds anticipate those contacts, fading whole rear fragments
+and unmatched line segments before they collide, rather than cutting letters in
+half. These bounds come from the shaped snapshots, including fallback glyphs and
+custom fonts; the drag adds no text layout or rasterization. Horizontal strip clips stop at adjacent glyph advances to avoid carrying
+pieces of neighboring characters into another line. Unmatched preview text and
+ellipses also clear the text behind them as they appear, including when a scrolled
+reading window no longer contains any of the summary's matching glyphs.
 
 `CardTextTransition` caches transparent text-only snapshots while transitioning,
 bounded to a 1536px edge and one megapixel per text view. Mapping and rasterization
 are reused until text layout, dimensions, color or depth style change; caches are
-released at endpoints, on detachment and before media reuse. A single transparent
-shared-text layer blends matching glyph materials additively, avoiding an opacity
-dip or two independently positioned copies. Image/handwriting/video fitting,
+released at endpoints, on detachment and before media reuse. A single transparent,
+viewport-bounded text layer isolates these occlusions from the photograph and glass.
+The two materials of each matching run still blend additively at identical positions,
+avoiding an opacity dip; different runs no longer accumulate their strokes.
+Occlusion gradients are cached with the snapshots, with no new per-frame bitmap
+or animation clock. Image/handwriting/video fitting,
 gesture ownership, photographic treatment and card geometry are unchanged.
 The first/last card remains open at the ends. Collapse or Back exits reading and
 returns to overview scrolling. Existing
@@ -284,6 +306,10 @@ Text previews cache their intrinsic height at that fixed lettering width. Openin
 and continuous reading resize only the photographic face instead of measuring
 the same preview twice with alternating unspecified/exact heights on every frame.
 Content, font, text-width and media-mode changes invalidate the intrinsic sizing.
+The collapsed reading subtree is neither measured nor laid out. Laying out that
+unmeasured subtree would consume pending remeasurement requests after a rebind or
+an asynchronous image load, preserving zero-height images or a previous long
+article's height. Opening measures its current content before its first layout.
 Inactive and whole-image readers retain the latest viewport settings without
 requesting another reading-card layout on each animation tick. Width-fit readers
 still remeasure their viewport, including when a pending long image finishes loading.
@@ -403,6 +429,8 @@ with large text in an isolated debug host. It also measures receding pitch, the
 single stack bend, slight overlap across varying card heights, monotonic incoming
 lower-edge expansion, bounded coverage of tall viewports, offset dates, metadata/body
 separation, compact icon dimensions and unchanged action targets/callbacks.
+Collapsed long-to-short and text-to-image rebinds check first-opening text height,
+height stability across two turns, and actual software/native image pixels.
 `CardEdgeDrawableTest`
 checks the lit rim/dark lip contrast, transparent face, rounded corners, resize
 and alpha behavior. Portrait, landscape, handwriting and

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -11,6 +12,9 @@ import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.SystemClock
 import android.text.TextUtils
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.Gravity
@@ -535,14 +539,12 @@ class TimescapeFlowTest {
             assertEquals(manager.geometry.maximumYawDegrees, next.rotationY, .001f)
             assertTrue(next.left + next.width / 2f < text.itemView.left + text.itemView.width / 2f)
             assertTrue(next.rotation < 0f)
-            assertTrue(holder(1).previewText.translationX > 0f)
-            assertEquals(0f, text.itemView.rotationY + text.previewText.rotationY, .001f)
-            assertEquals(0f, text.itemView.rotationX + text.previewText.rotationX, 0.001f)
+            assertScreenFacingCardLettering(text.presentation)
             assertEquals(
                 (text.previewText.height - text.previewText.paddingBottom).toFloat(),
                 text.previewText.pivotY, 0.001f
             )
-            assertTrue(text.previewText.translationY < 0f)
+            assertNotNull(text.previewText.animationMatrix)
             assertTrue(text.previewTitle.shadowRadius > 0f)
             assertEquals(4, text.previewSnippet.maxLines)
             assertTrue(text.previewTime.bottom <= text.preview.height)
@@ -566,13 +568,11 @@ class TimescapeFlowTest {
                 val bottom = kotlin.math.hypot(corners[4] - corners[6], corners[5] - corners[7])
                 assertTrue("Card $index has its far/top edge nearer than the lower edge", top < bottom)
                 if (!card.presentation.isMediaPreview) {
-                    assertTrue(card.previewText.rotationX < 0f)
-                    assertEquals(0f, card.itemView.rotationX + card.previewText.rotationX, .001f)
-                    assertEquals(0f, card.itemView.rotationY + card.previewText.rotationY, .001f)
+                    assertScreenFacingCardLettering(card.presentation)
                     assertEquals((card.previewText.height - card.previewText.paddingBottom).toFloat(),
                         card.previewText.pivotY, .001f)
                     assertEquals(manager.geometry.cameraDistance(card.previewText.width, card.previewText.height,
-                        root.resources.displayMetrics.densityDpi, 0f, 1f), card.previewText.cameraDistance, .001f)
+                        root.resources.displayMetrics.densityDpi, .5f, 1f), card.previewText.cameraDistance, .001f)
                 }
             }
             assertTrue(kotlin.math.abs(holder(7).itemView.rotationX) > kotlin.math.abs(holder(6).itemView.rotationX))
@@ -582,12 +582,74 @@ class TimescapeFlowTest {
             manager.geometry = manager.geometry.copy(letteringFacingPitchDegrees = 6f, letteringLiftDp = 12f)
         }
         s.await {
-            kotlin.math.abs(s.holder(6).itemView.rotationX + s.holder(6).previewText.rotationX - 6f) < .001f
+            val corners = projectedCardLetteringCorners(s.holder(6).presentation)
+            kotlin.math.abs((corners[2] - corners[0]) - (corners[4] - corners[6])) > .5f &&
+                s.holder(6).previewText.translationZ == 12f * s.root.resources.displayMetrics.density
         }
         s.onMain {
             assertEquals(12f * root.resources.displayMetrics.density, holder(6).previewText.translationZ, .001f)
             assertEquals(5, manager.nearestIndex())
         }
+    }
+
+    @Test
+    fun standingLetteringFacesTheScreenAtEveryScrollPositionWithoutRewrapping() = scene { s ->
+        s.onMain { manager.restoreState(5, false) }
+        s.await { (3..7).all { s.recycler.findViewHolderForAdapterPosition(it) != null } }
+        lateinit var original: FloatArray
+        var layout: android.text.Layout? = null
+        s.onMain {
+            original = FloatArray(9).also { checkNotNull(holder(6).previewText.animationMatrix).getValues(it) }
+            layout = holder(6).previewSnippet.layout
+            val card = holder(6)
+            assertTrue(card.previewTitle.text.isEmpty())
+            val natural = Matrix()
+            card.previewSurface.renderedMatrixToAncestor(null, natural)
+            natural.preTranslate(card.previewText.left.toFloat(), card.previewText.top.toFloat())
+            val footY = (card.previewText.height - card.previewText.paddingBottom).toFloat()
+            val baseline = floatArrayOf(0f, footY, card.presentation.width.toFloat(), footY)
+            natural.mapPoints(baseline)
+            val nominalWidth = kotlin.math.hypot(baseline[2] - baseline[0], baseline[3] - baseline[1])
+            val upright = projectedCardLetteringCorners(card.presentation)
+            assertTrue("Unused padding must not unnecessarily shrink short lettering",
+                upright[2] - upright[0] >= nominalWidth * .9f)
+        }
+        for (step in 0..12) {
+            s.onMain {
+                if (step > 0) recycler.scrollBy(0, dp(138) / 12)
+                for (index in 0 until recycler.childCount) {
+                    val card = recycler.getChildAt(index) as TimescapeCardLayout
+                    if (!card.isMediaPreview) assertScreenFacingCardLettering(card)
+                }
+                assertSame("Facing the user must not rewrap the summary", layout, holder(6).previewSnippet.layout)
+            }
+        }
+        s.onMain {
+            val updated = FloatArray(9).also { checkNotNull(holder(6).previewText.animationMatrix).getValues(it) }
+            assertFalse("The local lettering correction remained fixed during scrolling", original.contentEquals(updated))
+            assertFalse(manager.hasSelection())
+        }
+        capturePerspective(s, "screen-facing-scrolled", 5..7)
+    }
+
+    @Test
+    fun uprightLetteringFitsExtremeCardPerspectiveAndLargeFonts() = scene { s ->
+        s.onMain {
+            adapter.setBodyTextSize(26f)
+            manager.geometry = manager.geometry.copy(maximumPitchDegrees = 60f,
+                maximumYawDegrees = -30f, maximumRollDegrees = 12f,
+                cameraDistanceInCardWidths = .6f, distantScaleY = .8f,
+                letteringLiftDp = 24f)
+            manager.restoreState(5, false)
+        }
+        s.await { (3..7).all { s.recycler.findViewHolderForAdapterPosition(it) != null } }
+        s.onMain {
+            for (index in 0 until recycler.childCount) {
+                val card = recycler.getChildAt(index) as TimescapeCardLayout
+                if (!card.isMediaPreview) assertScreenFacingCardLettering(card)
+            }
+        }
+        capturePerspective(s, "screen-facing-extreme", 5..7)
     }
 
     @Test
@@ -1184,6 +1246,134 @@ class TimescapeFlowTest {
     }
 
     @Test
+    fun shortTextFitsItsContentsOnFirstOpeningWithoutTurningTheCard() = scene { s ->
+        s.longText(7)
+        s.await {
+            s.holder(7).presentation.expansionProgress == 1f &&
+                s.holder(7).textScroll.canScrollVertically(1) &&
+                !s.holder(7).presentation.isLayoutRequested
+        }
+        s.onMain { manager.restoreState(7, false) }
+        s.await { s.holder(7).presentation.expansionProgress == 0f }
+        s.onMain {
+            val item = checkNotNull(adapter.getItemAt(7))
+            item.snippet = "First line.\nSecond line."
+            item.backSnippet = "The reverse face."
+            adapter.notifyItemChanged(7)
+        }
+        s.await {
+            s.holder(7).snippet.text.toString() == "First line.\nSecond line." &&
+                !s.holder(7).presentation.isLayoutRequested
+        }
+        for (index in listOf(7, 0, 7, 1, 7, 8, 7)) {
+            s.onMain { manager.restoreState(index, false) }
+            s.await {
+                s.recycler.findViewHolderForAdapterPosition(index) != null &&
+                    s.holder(index).presentation.expansionProgress == 0f
+            }
+            s.onMain { manager.focus(index) }
+            s.await {
+                s.recycler.findViewHolderForAdapterPosition(index) != null &&
+                    s.holder(index).presentation.expansionProgress == 1f &&
+                    !s.holder(index).presentation.isLayoutRequested
+            }
+            if (index != 7) continue
+            s.onMain {
+                val card = holder(index)
+                val text = boundsInAncestor(card.snippet, card.card)
+                val textBottom = text.top + card.snippet.totalPaddingTop + checkNotNull(card.snippet.layout).height
+                assertTrue("First opening reserved empty space: card=${card.card.height}, textBottom=$textBottom",
+                    card.card.height <= textBottom + card.cardContent.paddingBottom + 1)
+            }
+        }
+        var firstHeight = 0
+        s.onMain { firstHeight = holder(7).card.height }
+        capturePerspective(s, "first-open-short-text", 7..7)
+        for (face in listOf(HandwritingFace.BACK, HandwritingFace.FRONT)) {
+            s.onMain { assertTrue(holder(7).flip.flip()) }
+            s.await { s.adapter.currentFaceFor(7) == face && !s.holder(7).flip.isFlipping }
+        }
+        s.onMain { assertEquals("Turning twice changed the original text height", firstHeight, holder(7).card.height) }
+    }
+
+    @Test
+    fun firstOpeningAndRebindingImagesPreserveTheActualPicturePixels() = scene { s ->
+        for (index in listOf(1, 2, 8, 1, 2)) {
+            lateinit var source: CardImage
+            s.onMain {
+                val item = checkNotNull(adapter.getItemAt(index))
+                source = checkNotNull(item.image)
+                item.image = null
+                item.snippet = "A previously expanded long article. ".repeat(120)
+                adapter.notifyItemChanged(index)
+                manager.restoreState(index, true)
+            }
+            s.await { s.holder(index).textScroll.canScrollVertically(1) }
+            s.onMain {
+                checkNotNull(adapter.getItemAt(index)).image = source
+                adapter.notifyItemChanged(index)
+            }
+            s.onMain { manager.restoreState(index, false) }
+            s.await {
+                s.recycler.findViewHolderForAdapterPosition(index) != null &&
+                    s.holder(index).presentation.expansionProgress == 0f
+            }
+            s.onMain { manager.focus(index) }
+            s.await {
+                val card = s.recycler.findViewHolderForAdapterPosition(index) as? CardsAdapter.VH
+                card != null && card.presentation.expansionProgress == 1f &&
+                    card.imageCard.drawable != null && !card.presentation.isLayoutRequested
+            }
+            s.onMain {
+                val card = holder(index)
+                val image = boundsInAncestor(card.imageCard, card.card)
+                assertTrue("The expanded image has no visible area: $image", image.width() > 0 && image.height() > 0)
+                val frame = Bitmap.createBitmap(card.card.width, card.card.height, Bitmap.Config.ARGB_8888)
+                try {
+                    card.card.draw(Canvas(frame))
+                    val x = frame.width * 3 / 4
+                    val y = frame.height / 2
+                    val pixel = frame.getPixel(x, y)
+                    assertEquals("Expanded card lost the blue picture pixels at $index",
+                        Color.rgb(32, 113, 185), pixel)
+                } finally {
+                    frame.recycle()
+                }
+            }
+            awaitPresented(s)
+            val native = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+            try {
+                s.onMain {
+                    val image = boundsInAncestor(holder(index).card, root)
+                    val location = IntArray(2)
+                    root.getLocationOnScreen(location)
+                    val x = (location[0] + image.left + image.width() * .75f).toInt()
+                    val y = (location[1] + image.centerY()).toInt()
+                    val pixel = native.getPixel(x, y)
+                    assertTrue("Native expanded card lost its blue image pixels at $index: $pixel",
+                        Color.blue(pixel) - Color.red(pixel) >= 100 &&
+                            Color.blue(pixel) - Color.green(pixel) >= 40)
+                    val orange = native.getPixel(
+                        (location[0] + image.left + image.width() * .25f).toInt(),
+                        (location[1] + image.top + image.height() * .25f).toInt()
+                    )
+                    assertTrue("Native expanded card lost its orange picture region at $index: $orange",
+                        Color.red(orange) - Color.green(orange) >= 50 &&
+                            Color.green(orange) - Color.blue(orange) >= 50)
+                }
+            } finally {
+                native.recycle()
+            }
+            capturePerspective(s, "first-open-image-$index", index..index)
+            s.onMain { adapter.notifyItemChanged(index) }
+            s.await {
+                val card = s.holder(index)
+                card.imageCard.drawable != null && !card.presentation.isLayoutRequested
+            }
+        }
+    }
+
+    @Test
     fun portraitAndLandscapeImagesStayWholeNotSideThumbnails() = scene { s ->
         for ((index, aspect) in listOf(1 to 0.5f, 2 to 2f)) {
             s.onMain { manager.restoreState(index, false) }
@@ -1388,10 +1578,17 @@ class TimescapeFlowTest {
         s.onMain { manager.focus(8) }
         s.await { s.manager.isFocused(8) && s.holder(8).imageScroll.scrollY == offset }
         s.onMain {
-            val card = holder(8)
-            card.imageScroll.bind(100, true)
-            assertEquals(0, card.imageScroll.scrollY)
+            adapter.submitList((0 until adapter.itemCount).map {
+                val item = checkNotNull(adapter.getItemAt(it))
+                if (it == 8) item.copy(id = 100) else item
+            })
         }
+        s.await {
+            val card = s.recycler.findViewHolderForAdapterPosition(8) as? CardsAdapter.VH
+            card != null && card.itemView.getTag(R.id.tag_card_id) == 100L &&
+                card.imageScroll.usesWidthFitViewport && !card.imageScroll.isLayoutRequested
+        }
+        s.onMain { assertEquals(0, holder(8).imageScroll.scrollY) }
     }
 
     @Test
@@ -1608,10 +1805,7 @@ class TimescapeFlowTest {
                 assertTrue(holder(1).itemView.rotationX > 0f)
                 for (index in 0..1) {
                     val card = holder(index)
-                    assertEquals(
-                        s.manager.geometry.letteringFacingPitchDegrees * (1f - card.presentation.expansionProgress),
-                        card.itemView.rotationX + card.previewText.rotationX, 0.001f
-                    )
+                    if (!card.presentation.isMediaPreview) assertScreenFacingCardLettering(card.presentation)
                     assertEquals(card.itemView.height, card.itemView.clipBounds?.bottom)
                     assertEquals(1f, card.preview.alpha, 0f)
                     if (!card.presentation.isMediaPreview) {
@@ -1950,6 +2144,236 @@ class TimescapeFlowTest {
     }
 
     @Test
+    fun movingSharedTextClearsSurplusInkInsteadOfOverprintingIt() = scene { s ->
+        s.collisionText(Color.BLUE, truncate = true)
+        s.onMain {
+            val card = holder(7)
+            val source = textRangeBounds(card.snippet, card.presentation, 0, 6)
+            val surplus = textRangeBounds(card.snippet, card.presentation, 7, 13)
+            val target = textRangeBounds(card.previewSnippet, card.presentation, 0, 6)
+            val advance = card.snippet.paint.measureText("M")
+            card.previewText.translationX += 2f * (surplus.centerX() + advance / 2f) -
+                source.centerX() - target.centerX()
+            card.previewText.translationY += 2f * surplus.centerY() - source.centerY() - target.centerY()
+            val region = RectF(surplus).apply {
+                inset(advance * 1.5f, height() * .25f)
+            }
+            val renderer = CardTextTransition(card.presentation)
+            val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                Bitmap.Config.ARGB_8888)
+            try {
+                assertTrue(renderer.prepare(.5f, false))
+                assertEquals(1, renderer.sharedRunCount)
+                renderer.draw(Canvas(frame), .5f)
+                checkTextReference(frame, "overlap-moving")
+                val blue = countTextPixels(frame, region) { Color.blue(it) > 24 }
+                assertEquals("Surplus ink remains under the moving foreground: $blue pixels", 0, blue)
+                assertEquals("An occluded surplus line must fade as a whole, not get sliced", 0,
+                    countTextPixels(frame, surplus) { Color.blue(it) > 24 })
+                assertTrue(countTextPixels(frame, region) { Color.red(it) > 128 } > 20)
+            } finally {
+                renderer.clear()
+                frame.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun reflowingSharedRunsOccludeInsteadOfMixingTheirGlyphs() = scene { s ->
+        s.collisionText(Color.GREEN, truncate = false)
+        s.onMain {
+            val card = holder(7)
+            val source = textRangeBounds(card.snippet, card.presentation, 0, 6)
+            val target = textRangeBounds(card.previewSnippet, card.presentation, 0, 6)
+            card.previewText.translationX += source.left - target.left
+            card.previewText.translationY += source.top - target.top
+            val renderer = CardTextTransition(card.presentation)
+            val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                Bitmap.Config.ARGB_8888)
+            try {
+                assertTrue(renderer.prepare(.35f, false))
+                assertEquals(2, renderer.sharedRunCount)
+                renderer.draw(Canvas(frame), .35f)
+                checkTextReference(frame, "overlap-reflow")
+                val bounds = RectF(0f, 0f, frame.width.toFloat(), frame.height.toFloat())
+                val mixed = countTextPixels(frame, bounds) { Color.red(it) > 24 && Color.green(it) > 24 }
+                assertEquals("Crossing shared runs overprint each other: $mixed mixed pixels", 0, mixed)
+                assertTrue(countTextPixels(frame, bounds) { Color.red(it) > 128 } > 20)
+                assertEquals("The rear fragment must retreat whole instead of showing chopped glyphs", 0,
+                    countTextPixels(frame, bounds) { Color.green(it) > 24 })
+                frame.eraseColor(Color.TRANSPARENT)
+                assertTrue(renderer.prepare(.99f, false))
+                renderer.draw(Canvas(frame), .99f)
+                assertTrue("Separated glyphs must remain visible near the reading endpoint",
+                    countTextPixels(frame, bounds) { Color.green(it) > 230 } > 20)
+            } finally {
+                renderer.clear()
+                frame.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun scrolledUnmatchedPreviewClearsOnlyTheReadingTextBehindIt() = scene { s ->
+        s.collisionText(Color.BLUE, truncate = true, lines = 60)
+        s.onMain {
+            val card = holder(7)
+            val layout = checkNotNull(card.snippet.layout)
+            card.textScroll.scrollTo(0, layout.getLineTop(7))
+            val visibleStart = layout.getLineStart(7)
+            val surplus = textRangeBounds(card.snippet, card.presentation, visibleStart, visibleStart + 6)
+            val untouched = textRangeBounds(card.snippet, card.presentation, visibleStart + 7, visibleStart + 13)
+            val target = textRangeBounds(card.previewSnippet, card.presentation, 0, 6)
+            val advance = card.snippet.paint.measureText("M")
+            card.previewText.translationX += surplus.left + advance / 2f - target.left
+            card.previewText.translationY += surplus.top - target.top
+            val region = RectF(surplus).apply { inset(advance * 1.5f, height() * .25f) }
+            val renderer = CardTextTransition(card.presentation)
+            val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                Bitmap.Config.ARGB_8888)
+            try {
+                assertTrue(renderer.prepare(.5f, false))
+                assertEquals(0, renderer.sharedRunCount)
+                renderer.draw(Canvas(frame), .5f)
+                checkTextReference(frame, "overlap-scrolled")
+                assertEquals("Unmatched preview overprints the scrolled reading window", 0,
+                    countTextPixels(frame, region) { Color.blue(it) > 24 })
+                assertTrue(countTextPixels(frame, region) { Color.red(it) > 64 } > 20)
+                assertTrue("Uncovered reading text must keep fading at its own position",
+                    countTextPixels(frame, untouched) { Color.blue(it) > 64 } > 20)
+            } finally {
+                renderer.clear()
+                frame.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun hardwareTextOcclusionSeparatesGlyphsWithoutErasingTheCardFace() = scene { s ->
+        s.collisionText(Color.GREEN, truncate = false)
+        lateinit var renderer: CardTextTransition
+        lateinit var overlay: View
+        val region = RectF()
+        val blank = IntArray(2)
+        s.onMain {
+            val card = holder(7)
+            val source = textRangeBounds(card.snippet, card.presentation, 0, 6)
+            val target = textRangeBounds(card.previewSnippet, card.presentation, 0, 6)
+            card.previewText.translationX += source.left - target.left
+            card.previewText.translationY += source.top - target.top
+            renderer = CardTextTransition(card.presentation)
+            assertTrue(renderer.prepare(.35f, false))
+            val position = IntArray(2)
+            card.presentation.getLocationOnScreen(position)
+            region.set(position[0].toFloat(), position[1].toFloat(),
+                (position[0] + card.presentation.width).toFloat(),
+                (position[1] + card.presentation.height).toFloat())
+            blank[0] = (region.left + source.left + card.snippet.paint.measureText("M") * 2.5f).toInt()
+            blank[1] = (region.top + source.top + 2f).toInt()
+            val inRoot = IntArray(2)
+            root.getLocationOnScreen(inRoot)
+            overlay = object : View(root.context) {
+                override fun onDraw(canvas: Canvas) = renderer.draw(canvas, .35f)
+            }
+            overlay.layoutParams = FrameLayout.LayoutParams(card.presentation.width, card.presentation.height).apply {
+                leftMargin = position[0] - inRoot[0]
+                topMargin = position[1] - inRoot[1]
+            }
+        }
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        var before: Bitmap? = null
+        var after: Bitmap? = null
+        try {
+            awaitPresented(s)
+            val underlay = checkNotNull(automation.takeScreenshot()).also { before = it }
+            s.onMain { root.addView(overlay) }
+            awaitPresented(s)
+            val frame = checkNotNull(automation.takeScreenshot()).also { after = it }
+            if (InstrumentationRegistry.getArguments().getString("capturePerspective") == "true") {
+                File(s.root.context.cacheDir, "card-text-hardware-overlap.png").outputStream().use {
+                    assertTrue(frame.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+            assertEquals("Hardware blending mixed foreground and rear glyphs", 0,
+                countTextPixels(frame, region) { Color.red(it) > 24 && Color.green(it) > 24 && Color.blue(it) < 24 })
+            assertTrue("Foreground glyphs disappeared on the hardware canvas",
+                countTextPixels(frame, region) { Color.red(it) > 128 && Color.green(it) < 24 && Color.blue(it) < 24 } > 20)
+            assertEquals("Hardware occlusion leaked into the card face",
+                underlay.getPixel(blank[0], blank[1]), frame.getPixel(blank[0], blank[1]))
+        } finally {
+            s.onMain {
+                root.removeView(overlay)
+                renderer.clear()
+            }
+            before?.recycle()
+            after?.recycle()
+        }
+    }
+
+    private fun Scene.collisionText(secondColor: Int, truncate: Boolean, lines: Int = 2) {
+        onMain { manager.restoreState(7, true) }
+        await { holder(7).presentation.expansionProgress == 1f }
+        onMain {
+            val card = holder(7)
+            val source = List(lines) { "MMMMMM" }.joinToString("\n")
+            fun colored(text: String) = SpannableString(text).apply {
+                setSpan(ForegroundColorSpan(Color.RED), 0, 6, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(ForegroundColorSpan(secondColor), 7, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            for (view in listOf(card.title, card.previewTitle, card.time, card.previewTime, card.previewHeading)) {
+                view.visibility = View.GONE
+            }
+            for (view in listOf(card.snippet, card.previewSnippet)) {
+                (view as TimescapeTextView).depthAmount = 0f
+                view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+                view.typeface = Typeface.MONOSPACE
+                view.textSize = 24f
+            }
+            card.snippet.text = colored(source)
+            card.previewSnippet.text = if (truncate) source.replace('\n', ' ')
+                else colored(source.replace('\n', ' '))
+            card.previewSnippet.setTextColor(Color.RED)
+            card.previewSnippet.maxLines = 1
+            card.previewSnippet.ellipsize = TextUtils.TruncateAt.END
+            if (truncate) {
+                card.previewSnippet.layoutParams = card.previewSnippet.layoutParams.apply {
+                    width = (card.previewSnippet.paint.measureText("M") * 7f).roundToInt()
+                }
+            }
+        }
+        await {
+            val card = holder(7)
+            card.snippet.layout?.lineCount == lines && card.previewSnippet.layout?.lineCount == 1 &&
+                !card.presentation.isLayoutRequested
+        }
+    }
+
+    private fun textRangeBounds(view: TextView, ancestor: View, start: Int, end: Int): RectF {
+        val layout = checkNotNull(view.layout)
+        val path = android.graphics.Path()
+        layout.getSelectionPath(start, end, path)
+        val bounds = RectF()
+        path.computeBounds(bounds, true)
+        bounds.offset((view.compoundPaddingLeft - view.scrollX).toFloat(),
+            (view.baseline - layout.getLineBaseline(0) - view.scrollY).toFloat())
+        val matrix = Matrix()
+        view.renderedMatrixToAncestor(ancestor, matrix)
+        matrix.mapRect(bounds)
+        return bounds
+    }
+
+    private fun countTextPixels(frame: Bitmap, bounds: RectF, matches: (Int) -> Boolean): Int {
+        var count = 0
+        for (y in bounds.top.toInt().coerceAtLeast(0) until bounds.bottom.toInt().coerceAtMost(frame.height)) {
+            for (x in bounds.left.toInt().coerceAtLeast(0) until bounds.right.toInt().coerceAtMost(frame.width)) {
+                val pixel = frame.getPixel(x, y)
+                if (Color.alpha(pixel) > 24 && matches(pixel)) count++
+            }
+        }
+        return count
+    }
+
+    @Test
     fun ellipsizedWordSuffixFadesOnTheReadingPlaneInsteadOfFollowingItsPrefix() = scene { s ->
         s.onMain {
             val item = checkNotNull(adapter.getItemAt(7))
@@ -2162,13 +2586,19 @@ class TimescapeFlowTest {
             val renderer = CardTextTransition(card.presentation)
             val frame = Bitmap.createBitmap(card.itemView.width, card.itemView.height, Bitmap.Config.ARGB_8888)
             try {
-                assertTrue(renderer.prepare(.18f, false))
-                assertTrue(renderer.sharedRunCount > 0)
-                renderer.draw(Canvas(frame), .18f)
-                checkTextReference(frame, "unicode")
+                var snapshots: Int? = null
                 val pixels = IntArray(frame.width * frame.height)
-                frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
-                assertTrue(pixels.any { Color.alpha(it) > 230 })
+                for (progress in listOf(.99f, .75f, .5f, .18f, .01f)) {
+                    frame.eraseColor(Color.TRANSPARENT)
+                    assertTrue(renderer.prepare(progress, false))
+                    assertTrue(renderer.sharedRunCount > 0)
+                    if (snapshots == null) snapshots = renderer.snapshotCount
+                    assertEquals(snapshots, renderer.snapshotCount)
+                    renderer.draw(Canvas(frame), progress)
+                    if (progress == .18f) checkTextReference(frame, "unicode")
+                    frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
+                    assertTrue("Shaped lettering disappeared at $progress", pixels.any { Color.alpha(it) > 230 })
+                }
             } finally {
                 renderer.clear()
                 frame.recycle()
@@ -2244,10 +2674,7 @@ class TimescapeFlowTest {
     private fun capturePerspective(scene: Scene, label: String, indices: IntRange = 0..1) {
         if (InstrumentationRegistry.getArguments().getString("capturePerspective") != "true") return
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val displayed = CountDownLatch(1)
-        scene.onMain { root.postOnAnimation { root.postOnAnimation { displayed.countDown() } } }
-        assertTrue("Transition frame was not presented", displayed.await(5, TimeUnit.SECONDS))
-        instrumentation.waitForIdleSync()
+        awaitPresented(scene)
         val frame = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
         try {
             File(scene.root.context.cacheDir, "card-perspective-$label.png").outputStream().use {
@@ -2280,6 +2707,13 @@ class TimescapeFlowTest {
             }
             File(root.context.cacheDir, "card-perspective-$label.json").writeText(cards.toString())
         }
+    }
+
+    private fun awaitPresented(scene: Scene) {
+        val displayed = CountDownLatch(1)
+        scene.onMain { root.postOnAnimation { root.postOnAnimation { displayed.countDown() } } }
+        assertTrue("Transition frame was not presented", displayed.await(5, TimeUnit.SECONDS))
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
     }
 
     private class Scene(activity: TimescapeFlowTestActivity, allActions: Boolean) {

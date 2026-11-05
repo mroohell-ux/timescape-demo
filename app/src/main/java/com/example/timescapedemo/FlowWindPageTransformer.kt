@@ -113,6 +113,7 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
             matrix.postTranslate(pivotX + pose.x * viewportWidth, pivotY + pose.y * viewportHeight)
             card.setAnimationMatrix(matrix)
             card.setTransitionAlpha(pose.alpha)
+            (card as? TimescapeCardLayout)?.updateLetteringProjection()
             active = true
         }
 
@@ -120,6 +121,7 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
             if (!active) return
             card.setAnimationMatrix(null)
             card.setTransitionAlpha(1f)
+            (card as? TimescapeCardLayout)?.updateLetteringProjection()
             active = false
         }
     }

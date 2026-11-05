@@ -32,7 +32,7 @@ data class CardFlowGeometry(
     val cornerDirectionBlendDepth: Float = .15f,
     val pitchDepthVariation: Float = .15f,
     val letteringFacingPitchDegrees: Float = 0f,
-    val letteringLiftDp: Float = 8f,
+    val letteringLiftDp: Float = 14f,
     val cardOverlapFraction: Float = .10f
 ) {
     init {

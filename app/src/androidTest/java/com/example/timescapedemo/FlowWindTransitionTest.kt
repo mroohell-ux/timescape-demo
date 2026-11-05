@@ -23,6 +23,30 @@ import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class FlowWindTransitionTest {
+    @Test fun standingLettersFaceTheScreenThroughoutWindAndReversal() = scene { s ->
+        for (fraction in listOf(.2f, .5f, .8f, .5f, .2f)) {
+            s.moveTo(fraction)
+            s.onMain {
+                for (page in 0..1) {
+                    val moving = cards(page)
+                    assertTrue(moving.any { it.animationMatrix != null })
+                    for (card in moving) {
+                        if (!card.isMediaPreview && card.expansionProgress < 1f) {
+                            assertScreenFacingCardLettering(card)
+                        }
+                    }
+                }
+            }
+        }
+        s.moveTo(0f)
+        s.finish(0)
+        s.onMain {
+            for (card in cards(0)) {
+                if (card.expansionProgress < 1f) assertScreenFacingCardLettering(card)
+            }
+        }
+    }
+
     @Test fun cardsFollowDifferentPathsWithoutChangingTheirReadingLayout() = scene { s ->
         lateinit var card: TimescapeCardLayout
         var original = FloatArray(0)
