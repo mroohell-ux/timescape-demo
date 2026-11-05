@@ -46,6 +46,7 @@ class TimescapeCardLayout @JvmOverloads constructor(
     private lateinit var readingBackground: View
     private lateinit var imageReader: ImageCardScrollView
     private lateinit var handwritingReader: ImageCardScrollView
+    private lateinit var textReader: CardContentScrollView
     private lateinit var previewImage: ImageView
     private val previewImageMatrix = Matrix()
     private val cornerMatrix = Matrix()
@@ -252,6 +253,7 @@ class TimescapeCardLayout @JvmOverloads constructor(
         readingBackground = findViewById(R.id.bgImage)
         imageReader = findViewById(R.id.imageCardScroll)
         handwritingReader = findViewById(R.id.handwritingScroll)
+        textReader = findViewById(R.id.cardTextScroll)
         previewImage = findViewById(R.id.previewImage)
         readingHandwriting = findViewById(R.id.handwritingImage)
         cardFlip = findViewById(R.id.cardFlip)
@@ -356,6 +358,7 @@ class TimescapeCardLayout @JvmOverloads constructor(
         val nativeCap = (viewportCap / readingScale).roundToInt()
         imageReader.setReadingViewport(nativeCap, expansionProgress)
         handwritingReader.setReadingViewport(nativeCap, expansionProgress)
+        textReader.setReadingViewport(nativeCap, expansionProgress)
         readingFace.measureMediaAtNaturalSize =
             readingImage.visibility == VISIBLE || readingHandwriting.visibility == VISIBLE
         if (expansionProgress > 0f) {

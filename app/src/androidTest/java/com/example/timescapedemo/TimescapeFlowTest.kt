@@ -72,7 +72,7 @@ class TimescapeFlowTest {
 
     @Test
     fun readingDateSharesCompactIconsAndKeepsAllActionTargets() = scene(allActions = true) { s ->
-        for (index in listOf(0, 6)) {
+        for (index in listOf(0, 5, 6, 7)) {
             s.onMain { manager.restoreState(index, true) }
             s.await {
                 s.manager.isFocused(index) && s.holder(index).presentation.expansionProgress == 1f &&
@@ -83,9 +83,14 @@ class TimescapeFlowTest {
                 assertSame(card.time.parent, card.stickyNotesButton.parent)
                 assertEquals(Gravity.END or Gravity.CENTER_VERTICAL, card.time.gravity)
                 val date = boundsInAncestor(card.time, card.card)
-                val body = boundsInAncestor(if (index == 0) card.titleContainer else card.snippet, card.card)
+                val body = boundsInAncestor(
+                    if (checkNotNull(adapter.getItemAt(index)).title.isNotBlank()) {
+                        card.titleContainer
+                    } else card.snippet,
+                    card.card
+                )
                 val targetPixels = TypedValue.applyDimension(
-                    TypedValue.COMPLEX_UNIT_DIP, 40f, root.resources.displayMetrics
+                    TypedValue.COMPLEX_UNIT_DIP, 28f, root.resources.displayMetrics
                 ).roundToInt()
                 for (button in listOf(card.collectionButton, card.receiptButton, card.stickyNotesButton)) {
                     assertTrue(button.isShown)
@@ -100,7 +105,21 @@ class TimescapeFlowTest {
                 assertTrue(card.time.textSize <= TypedValue.applyDimension(
                     TypedValue.COMPLEX_UNIT_SP, 12f, root.resources.displayMetrics
                 ) + .1f)
-                if (index == 6) assertTrue(body.top < dp(72))
+                if (index != 0) {
+                    val maximumTop = if (index == 6) dp(38) else dp(34)
+                    assertTrue("Card $index header is still oversized: $body", body.top <= maximumTop)
+                }
+                if (index != 6) {
+                    assertEquals(dp(24), card.titleSpeakButton.width)
+                    assertEquals(dp(24), card.titleSpeakButton.height)
+                    assertEquals(dp(16).toFloat(), (card.titleSpeakButton.width -
+                        card.titleSpeakButton.paddingLeft - card.titleSpeakButton.paddingRight).toFloat(), 1f)
+                    assertFalse(card.title.includeFontPadding)
+                    assertEquals(
+                        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 20f, root.resources.displayMetrics),
+                        card.title.textSize, .1f
+                    )
+                }
                 if (index == 0) {
                     for (button in listOf(card.collectionButton, card.receiptButton,
                         card.stickyNotesButton, card.titleSpeakButton)) tap(button)
@@ -110,6 +129,282 @@ class TimescapeFlowTest {
         s.onMain {
             assertEquals(listOf("collection" to 1L, "receipt" to 1L,
                 "sticky" to 1L, "speak" to 1L), actionClicks)
+        }
+    }
+
+    @Test
+    fun shortReadingTitleAndThreeLineBodyUseTheReducedHeaderSpace() = scene(allActions = true) { s ->
+        s.onMain {
+            val item = checkNotNull(adapter.getItemAt(5))
+            item.title = "555"
+            item.snippet = "The window is a heat pump.\n月亮与六便士，老人与海。\nA quiet moment before sunset."
+            adapter.notifyItemChanged(5)
+            manager.restoreState(5, true)
+        }
+        s.await {
+            s.manager.isFocused(5) && s.holder(5).presentation.expansionProgress == 1f &&
+                !s.holder(5).presentation.isLayoutRequested
+        }
+        s.onMain {
+            val card = holder(5)
+            val title = boundsInAncestor(card.titleContainer, card.card)
+            val body = boundsInAncestor(card.snippet, card.card)
+            assertEquals("555", card.title.text.toString())
+            assertEquals(dp(32).toFloat(), title.top, 2f)
+            assertEquals(dp(24).toFloat(), title.height(), 2f)
+            assertEquals(dp(56).toFloat(), title.bottom, 2f)
+            assertEquals(dp(4).toFloat(), body.top - title.bottom, 2f)
+            assertEquals(3, card.snippet.lineCount)
+            assertTrue("Short card still reserves excessive space: ${card.card.height}",
+                card.card.height <= dp(162))
+        }
+        capturePerspective(s, "compact-short-reading-title", 5..5)
+    }
+
+    @Test
+    fun compactTitleKeepsTwoMultilingualLinesWithoutFontPadding() = scene(allActions = true) { s ->
+        s.onMain {
+            val item = checkNotNull(adapter.getItemAt(5))
+            item.title = "ÉÅ gyp 中文\nمرحبا بالعالم"
+            adapter.notifyItemChanged(5)
+            manager.restoreState(5, true)
+        }
+        s.await {
+            s.manager.isFocused(5) && s.holder(5).presentation.expansionProgress == 1f &&
+                !s.holder(5).presentation.isLayoutRequested
+        }
+        s.onMain {
+            val card = holder(5)
+            assertEquals("ÉÅ gyp 中文\nمرحبا بالعالم", card.title.text.toString())
+            assertFalse(card.title.includeFontPadding)
+            assertEquals(2, card.title.maxLines)
+            assertEquals(2, card.title.lineCount)
+            assertTrue(card.title.layout.height <= card.title.height)
+            val title = boundsInAncestor(card.titleContainer, card.card)
+            val body = boundsInAncestor(card.snippet, card.card)
+            assertEquals(dp(32).toFloat(), title.top, 2f)
+            assertTrue(body.top >= title.bottom + dp(4))
+        }
+        capturePerspective(s, "compact-multilingual-title", 5..5)
+    }
+
+    @Test
+    fun longTextScrollsInsideItsViewportAndAFreshEdgeSwipeBrowsesTheFlow() = scene(allActions = true) { s ->
+        s.longText()
+        s.await {
+            s.manager.isFocused(5) && s.holder(5).presentation.expansionProgress == 1f &&
+                s.holder(5).textScroll.canScrollVertically(1)
+        }
+        s.onMain {
+            val card = holder(5)
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            val title = boundsInAncestor(card.titleContainer, recycler)
+            val controls = boundsInAncestor(card.stickyNotesButton, recycler)
+            assertTrue(card.snippet.height > card.textScroll.height)
+            assertTrue(card.card.height <= card.presentation.readingHeightCap)
+            swipe(recycler, frame.centerX(), frame.top + frame.height() * .75f,
+                frame.centerX(), frame.top + frame.height() * .35f, MotionEvent.ACTION_CANCEL)
+            assertTrue(card.textScroll.scrollY > dp(40))
+            assertEquals(5, manager.currentSelectionIndex())
+            assertEquals(1f, card.presentation.expansionProgress, 0f)
+            assertEquals(title, boundsInAncestor(card.titleContainer, recycler))
+            assertEquals(controls, boundsInAncestor(card.stickyNotesButton, recycler))
+            val bottom = card.snippet.height - card.textScroll.height
+            card.textScroll.scrollTo(0, bottom - dp(40))
+            swipe(recycler, frame.centerX(), frame.top + frame.height() * .75f,
+                frame.centerX(), frame.top + frame.height() * .35f, MotionEvent.ACTION_CANCEL)
+            assertEquals(bottom, card.textScroll.scrollY)
+            assertFalse(card.textScroll.canScrollVertically(1))
+            assertEquals(5, manager.currentSelectionIndex())
+        }
+        capturePerspective(s, "long-text-bottom", 5..5)
+        s.onMain {
+            val frame = boundsInAncestor(holder(5).textScroll, recycler)
+            swipe(recycler, frame.centerX(), frame.top + frame.height() * .75f,
+                frame.centerX(), frame.top + frame.height() * .25f)
+        }
+        s.await {
+            val selected = s.manager.currentSelectionIndex()
+            selected != null && selected > 5 && s.manager.isFocused(selected)
+        }
+        s.onMain { manager.restoreState(5, true) }
+        s.await { s.manager.isFocused(5) && s.holder(5).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(5)
+            card.textScroll.scrollTo(0, 0)
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            swipe(recycler, frame.centerX(), frame.top + frame.height() * .25f,
+                frame.centerX(), frame.top + frame.height() * .75f)
+        }
+        s.await {
+            val selected = s.manager.currentSelectionIndex()
+            selected != null && selected < 5 && s.manager.isFocused(selected)
+        }
+    }
+
+    @Test
+    fun plainLongTextScrollsToItsLastParagraphWithoutMovingTheCard() = scene { s ->
+        s.longText(7)
+        s.await { s.manager.isFocused(7) && s.holder(7).presentation.expansionProgress == 1f &&
+            s.holder(7).textScroll.canScrollVertically(1) }
+        s.onMain {
+            val card = holder(7)
+            val title = boundsInAncestor(card.titleContainer, recycler)
+            assertNull(card.bg.drawable)
+            assertEquals(0f, card.snippet.depthAmount, 0f)
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            swipe(recycler, frame.centerX(), frame.top + frame.height() * .75f,
+                frame.centerX(), frame.top + frame.height() * .35f, MotionEvent.ACTION_CANCEL)
+            assertTrue(card.textScroll.scrollY > dp(40))
+            assertEquals(7, manager.currentSelectionIndex())
+            card.textScroll.scrollTo(0, Int.MAX_VALUE)
+            val textLayout = checkNotNull(card.snippet.layout)
+            assertTrue(card.snippet.text.contains("Front 100"))
+            assertTrue(textLayout.getLineBottom(textLayout.lineCount - 1) + card.snippet.totalPaddingTop -
+                card.textScroll.scrollY <= card.textScroll.height)
+            assertFalse(card.textScroll.canScrollVertically(1))
+            assertEquals(title, boundsInAncestor(card.titleContainer, recycler))
+            assertEquals(7, manager.currentSelectionIndex())
+        }
+    }
+
+    @Test
+    fun longTextTurnsRebindingAndReopeningKeepIndependentFaceOffsets() = scene { s ->
+        s.longText()
+        s.await { s.holder(5).textScroll.canScrollVertically(1) &&
+            s.holder(5).presentation.expansionProgress == 1f }
+        var frontOffset = 0
+        var backOffset = 0
+        s.onMain {
+            val card = holder(5)
+            card.textScroll.scrollTo(0, dp(240))
+            frontOffset = card.textScroll.scrollY
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            swipe(recycler, frame.left + frame.width() * .1f, frame.centerY(),
+                frame.right - frame.width() * .1f, frame.centerY())
+        }
+        s.await { s.adapter.currentFaceFor(5) == HandwritingFace.BACK &&
+            !s.holder(5).flip.isFlipping && s.holder(5).textScroll.canScrollVertically(1) }
+        s.onMain {
+            val card = holder(5)
+            assertEquals(0, card.textScroll.scrollY)
+            assertTrue(card.snippet.text.startsWith("Back 1"))
+            card.textScroll.scrollTo(0, dp(420))
+            backOffset = card.textScroll.scrollY
+            assertTrue(card.flip.flip())
+        }
+        s.await { s.adapter.currentFaceFor(5) == HandwritingFace.FRONT &&
+            !s.holder(5).flip.isFlipping && s.holder(5).textScroll.scrollY == frontOffset }
+        s.onMain { assertTrue(holder(5).flip.flip()) }
+        s.await { s.adapter.currentFaceFor(5) == HandwritingFace.BACK &&
+            !s.holder(5).flip.isFlipping && s.holder(5).textScroll.scrollY == backOffset }
+        s.onMain { assertTrue(holder(5).flip.flip()) }
+        s.await { s.adapter.currentFaceFor(5) == HandwritingFace.FRONT &&
+            !s.holder(5).flip.isFlipping && s.holder(5).textScroll.scrollY == frontOffset }
+        s.onMain { adapter.notifyItemChanged(5) }
+        s.await { s.holder(5).textScroll.scrollY == frontOffset && !s.holder(5).textScroll.isLayoutRequested }
+        s.onMain { manager.restoreState(5, false) }
+        s.await { s.holder(5).presentation.expansionProgress == 0f }
+        s.onMain { manager.focus(5) }
+        s.await { s.manager.isFocused(5) && s.holder(5).presentation.expansionProgress == 1f &&
+            s.holder(5).textScroll.scrollY == frontOffset }
+        s.onMain {
+            val card = holder(5)
+            adapter.onBindViewHolder(card, 1)
+            assertFalse(card.textScroll.readerEnabled)
+            assertEquals(0, card.textScroll.scrollY)
+            adapter.onBindViewHolder(card, 5)
+            assertEquals(0, card.textScroll.scrollY)
+        }
+    }
+
+    @Test
+    fun shortTextDoesNotCaptureVerticalCardBrowsing() = scene { s ->
+        s.onMain { manager.restoreState(5, true) }
+        s.await { s.manager.isFocused(5) && s.holder(5).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(5)
+            assertFalse(card.textScroll.canScrollVertically(-1))
+            assertFalse(card.textScroll.canScrollVertically(1))
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            swipe(recycler, frame.centerX(), frame.centerY(), frame.centerX(), frame.centerY() - dp(220))
+        }
+        s.await {
+            val selected = s.manager.currentSelectionIndex()
+            selected != null && selected > 5 && s.manager.isFocused(selected)
+        }
+    }
+
+    @Test
+    fun longTextGlyphSnapshotsCoverOnlyTheVisibleWindowAtReadableResolution() = scene { s ->
+        s.longText()
+        s.await { s.holder(5).textScroll.canScrollVertically(1) &&
+            s.holder(5).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(5)
+            assertTrue(card.snippet.height > card.textScroll.height * 8)
+            card.textScroll.scrollTo(0, dp(360))
+            val renderer = CardTextTransition(card.presentation)
+            try {
+                assertTrue(renderer.prepare(.8f, false))
+                val bounds = renderer.readingSnapshotBounds
+                val size = checkNotNull(renderer.readingSnapshotSize)
+                assertEquals(card.textScroll.scrollY.toFloat(), bounds.top, 0f)
+                assertEquals(card.textScroll.height.toFloat(), bounds.height(), 0f)
+                assertTrue(size.first.toLong() * size.second <= 1_048_576)
+                assertTrue(maxOf(size.first, size.second) <= 1536)
+                assertTrue("Visible glyphs were scaled to unreadable whole-document resolution",
+                    size.first / bounds.width() >= .5f)
+                val previousCount = renderer.snapshotCount
+                card.textScroll.scrollBy(0, dp(30))
+                assertTrue(renderer.prepare(.7f, false))
+                assertEquals(previousCount + 1, renderer.snapshotCount)
+                assertEquals(card.textScroll.scrollY.toFloat(), renderer.readingSnapshotBounds.top, 0f)
+            } finally {
+                renderer.clear()
+            }
+            val reader = card.textScroll
+            val bottom = reader.bottom
+            reader.layout(reader.left, reader.top, reader.right, reader.top)
+            assertFalse(renderer.prepare(.8f, false))
+            reader.layout(reader.left, reader.top, reader.right, bottom)
+            val otherText = listOf(card.time, card.title, card.previewTime, card.previewTitle, card.previewSnippet)
+                .associateWith { it.visibility }
+            try {
+                otherText.keys.forEach { it.visibility = View.GONE }
+                fun pixels(progress: Float): IntArray {
+                    assertTrue(renderer.prepare(progress, false))
+                    val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                        Bitmap.Config.ARGB_8888)
+                    try {
+                        renderer.draw(Canvas(frame), progress)
+                        return IntArray(frame.width * frame.height).also {
+                            frame.getPixels(it, 0, frame.width, 0, 0, frame.width, frame.height)
+                        }
+                    } finally {
+                        frame.recycle()
+                    }
+                }
+                val first = pixels(.7f)
+                pixels(.3f)
+                assertArrayEquals(first, pixels(.7f))
+                val viewport = boundsInAncestor(card.textScroll, card.presentation)
+                var visibleInk = 0
+                for (index in first.indices) {
+                    val alpha = Color.alpha(first[index])
+                    val y = index / card.presentation.width
+                    if (y < viewport.top || y >= viewport.bottom) {
+                        assertEquals("Scrolled text painted outside its fixed body viewport", 0, alpha)
+                    } else if (alpha > 64) {
+                        visibleInk++
+                    }
+                }
+                assertTrue("The cropped snapshot lost the visible paragraphs", visibleInk > 500)
+            } finally {
+                renderer.clear()
+                otherText.forEach { (view, visibility) -> view.visibility = visibility }
+            }
+            assertEquals(5, manager.currentSelectionIndex())
         }
     }
 
@@ -1466,7 +1761,8 @@ class TimescapeFlowTest {
         s.onMain { manager.restoreState(0, true) }
         s.await { s.holder(0).presentation.expansionProgress == 1f }
         val now = SystemClock.uptimeMillis()
-        val startY = s.recycler.height * 0.55f
+        var startY = 0f
+        s.onMain { startY = boundsInAncestor(holder(0).time, recycler).centerY() }
         fun event(action: Int, y: Float) {
             s.onMain {
                 val e = MotionEvent.obtain(now, SystemClock.uptimeMillis(), action, recycler.width / 2f, y, 0)
@@ -1598,6 +1894,112 @@ class TimescapeFlowTest {
                 renderer.clear()
                 assertEquals(1f, card.snippet.alpha, 0f)
                 assertEquals(1f, card.previewSnippet.alpha, 0f)
+            } finally {
+                renderer.clear()
+                frame.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun surplusTextStaysOnItsReadingPlaneWhileOnlySummaryGlyphsMove() = scene { s ->
+        s.longText()
+        s.await { s.holder(5).presentation.expansionProgress == 1f &&
+            s.holder(5).textScroll.canScrollVertically(1) }
+        s.onMain {
+            val card = holder(5)
+            val body = boundsInAncestor(card.textScroll, card.presentation)
+            val x = body.left.roundToInt()
+            val y = (body.top + body.height() * .55f).roundToInt()
+            val width = body.width().roundToInt()
+            val height = dp(48)
+            val renderer = CardTextTransition(card.presentation)
+            val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                Bitmap.Config.ARGB_8888)
+            fun pixels(progress: Float): IntArray {
+                frame.eraseColor(Color.TRANSPARENT)
+                assertTrue(renderer.prepare(progress, false))
+                assertTrue(renderer.sharedRunCount > 0)
+                renderer.draw(Canvas(frame), progress)
+                return IntArray(width * height).also {
+                    frame.getPixels(it, 0, width, x, y, width, height)
+                }
+            }
+            try {
+                val original = pixels(.7f)
+                assertTrue(original.any { Color.alpha(it) > 100 })
+                val snapshots = renderer.snapshotCount
+                card.previewText.scaleX = .7f
+                card.previewText.scaleY = .7f
+                card.previewText.translationX -= dp(40)
+                card.previewText.translationY -= dp(60)
+                assertArrayEquals("Surplus paragraphs inherited the summary's shrink/translation",
+                    original, pixels(.7f))
+                assertEquals(snapshots, renderer.snapshotCount)
+                var previousInk = Long.MAX_VALUE
+                for (progress in listOf(.85f, .6f, .35f, .1f)) {
+                    val ink = pixels(progress).sumOf { Color.alpha(it).toLong() }
+                    assertTrue("Surplus paragraphs stopped fading at $progress", ink < previousInk)
+                    previousInk = ink
+                }
+            } finally {
+                renderer.clear()
+                frame.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun ellipsizedWordSuffixFadesOnTheReadingPlaneInsteadOfFollowingItsPrefix() = scene { s ->
+        s.onMain {
+            val item = checkNotNull(adapter.getItemAt(7))
+            item.title = ""
+            item.snippet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".repeat(12)
+            adapter.notifyItemChanged(7)
+            manager.restoreState(7, true)
+        }
+        s.await { s.holder(7).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(7)
+            val preview = checkNotNull(card.previewSnippet.layout)
+            val lastLine = preview.lineCount - 1
+            assertTrue(preview.getEllipsisCount(lastLine) > 0)
+            val end = preview.getLineStart(lastLine) + preview.getEllipsisStart(lastLine)
+            val matches = matchedCardTextOffsets(card.snippet.text, card.previewSnippet.text, end)
+            val sourceEnd = matches[matches.size - 2] + 1
+            val layout = checkNotNull(card.snippet.layout)
+            val line = layout.getLineForOffset(sourceEnd)
+            val tailStart = sourceEnd + 2
+            val tailEnd = layout.getLineEnd(line) - 2
+            assertTrue("Fixture must truncate within a reading word", tailEnd > tailStart)
+            val origin = boundsInAncestor(card.snippet, card.presentation)
+            val x = (origin.left + card.snippet.compoundPaddingLeft +
+                layout.getPrimaryHorizontal(tailStart)).roundToInt()
+            val width = (layout.getPrimaryHorizontal(tailEnd) - layout.getPrimaryHorizontal(tailStart))
+                .roundToInt()
+            val y = (origin.top + card.snippet.totalPaddingTop + layout.getLineTop(line) + dp(10))
+                .roundToInt()
+            val height = layout.getLineBottom(line) - layout.getLineTop(line) - dp(14)
+            assertTrue(width > 0 && height > 0)
+            val renderer = CardTextTransition(card.presentation)
+            val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                Bitmap.Config.ARGB_8888)
+            fun pixels(): IntArray {
+                frame.eraseColor(Color.TRANSPARENT)
+                assertTrue(renderer.prepare(.95f, false))
+                renderer.draw(Canvas(frame), .95f)
+                return IntArray(width * height).also {
+                    frame.getPixels(it, 0, width, x, y, width, height)
+                }
+            }
+            try {
+                val original = pixels()
+                assertTrue("Unshared suffix disappeared at the reading anchor",
+                    original.any { Color.alpha(it) > 220 })
+                card.previewText.translationX -= dp(60)
+                card.previewText.translationY -= dp(60)
+                card.previewText.scaleX = .7f
+                assertArrayEquals("Unshared suffix followed the moving shared prefix", original, pixels())
             } finally {
                 renderer.clear()
                 frame.recycle()
@@ -1964,6 +2366,19 @@ class TimescapeFlowTest {
             val options = checkNotNull(adapter.getItemAt(4)?.handwriting).options.copy(canvasHeight = 2400)
             return HandwritingContent(copyPage().name, options,
                 back = HandwritingSide(copyPage().name, options.copy()))
+        }
+
+        fun longText(position: Int = 5) {
+            onMain {
+                val item = checkNotNull(adapter.getItemAt(position))
+                fun paragraphs(face: String) = (1..100).joinToString("\n\n") {
+                    "$face $it · 清晨的城市慢慢醒来。Read this paragraph, then continue down the same card."
+                }
+                item.snippet = paragraphs("Front")
+                item.backSnippet = paragraphs("Back")
+                adapter.notifyItemChanged(position)
+                manager.restoreState(position, true)
+            }
         }
 
         fun dp(value: Int) = (value * root.resources.displayMetrics.density).toInt()
