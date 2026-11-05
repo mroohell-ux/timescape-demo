@@ -20,7 +20,8 @@ internal object TextCardPhotoStyle {
     fun applyTo(image: ImageView) {
         if (image is PhotographImageView) {
             image.setFadingEdges(true)
-            image.setSoftening(3.5f * image.resources.displayMetrics.density)
+            val density = image.resources.displayMetrics.density
+            image.setSoftening(3.5f * density, centerRadiusPx = 2f * density)
         }
         image.setRenderEffect(null)
         image.scaleType = ImageView.ScaleType.CENTER_CROP

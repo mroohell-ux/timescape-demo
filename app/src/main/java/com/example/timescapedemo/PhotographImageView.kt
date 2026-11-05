@@ -25,6 +25,7 @@ class PhotographImageView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : ImageView(context, attrs, defStyleAttr) {
     private var softness = 0f
+    private var centerSoftness = 0f
     private var fadingEdges = false
     private var source: Bitmap? = null
     private var texture: BitmapShader? = null
@@ -52,10 +53,12 @@ class PhotographImageView @JvmOverloads constructor(
         invalidate()
     }
 
-    fun setSoftening(radiusPx: Float) {
+    fun setSoftening(radiusPx: Float, centerRadiusPx: Float = 0f) {
         require(radiusPx.isFinite() && radiusPx >= 0f)
-        if (softness == radiusPx) return
+        require(centerRadiusPx.isFinite() && centerRadiusPx in 0f..radiusPx)
+        if (softness == radiusPx && centerSoftness == centerRadiusPx) return
         softness = radiusPx
+        centerSoftness = centerRadiusPx
         clearShader()
         updateSofteningEffect()
         invalidate()
@@ -101,6 +104,7 @@ class PhotographImageView @JvmOverloads constructor(
         val shader = softener ?: RuntimeShader(SOFTENING_SHADER).apply {
             // This kernel's per-axis variance is one quarter of its sampling offset squared.
             setFloatUniform("radius", softness * 2f)
+            setFloatUniform("centerRadius", centerSoftness * 2f)
             setFloatUniform("fading", if (fadingEdges) 1f else 0f)
             setFloatUniform("sideFadeWidth", SIDE_FADE_FRACTION)
             setFloatUniform("edgeOpacity", EDGE_OPACITY)
@@ -162,11 +166,11 @@ class PhotographImageView @JvmOverloads constructor(
             if (softness == 0f) {
                 canvas.drawRect(left, top, right, bottom, imagePaint)
             } else {
-                canvas.drawRect(left + edgeWidth, top, right - edgeWidth, bottom, imagePaint)
+                imagePaint.blendMode = BlendMode.PLUS
+                drawSoftenedStrip(canvas, sampling, left + edgeWidth, top, right - edgeWidth, bottom,
+                    centerSoftness * 2f, image.alpha)
                 // Bounded strips approximate the kernel for API 31/32 and software flip snapshots.
                 val bands = minOf(edgeWidth, 24)
-                val sideAlpha = (image.alpha / 8f).roundToInt()
-                imagePaint.blendMode = BlendMode.PLUS
                 for (side in 0..1) for (band in 0 until bands) {
                     val start = edgeWidth * band / bands
                     val end = edgeWidth * (band + 1) / bands
@@ -174,16 +178,8 @@ class PhotographImageView @JvmOverloads constructor(
                     val x1 = if (side == 0) left + end else right - start
                     val x = ((x0 + x1) / 2f - left) / extent
                     val weight = 1f - (minOf(x, 1f - x) / SIDE_FADE_FRACTION).coerceIn(0f, 1f)
-                    val offset = softness * 2f * weight
-                    for (tap in 0..4) {
-                        val dx = when (tap) { 1 -> offset; 2 -> -offset; else -> 0f }
-                        val dy = when (tap) { 3 -> offset; 4 -> -offset; else -> 0f }
-                        sampleMatrix.set(imageToView)
-                        sampleMatrix.postTranslate(dx, dy)
-                        sampling.setLocalMatrix(sampleMatrix)
-                        imagePaint.alpha = if (tap == 0) image.alpha - 4 * sideAlpha else sideAlpha
-                        canvas.drawRect(x0, top, x1, bottom, imagePaint)
-                    }
+                    val offset = (centerSoftness + (softness - centerSoftness) * weight) * 2f
+                    drawSoftenedStrip(canvas, sampling, x0, top, x1, bottom, offset, image.alpha)
                 }
             }
             drawFadingMask(canvas, left, top, right, bottom)
@@ -191,6 +187,28 @@ class PhotographImageView @JvmOverloads constructor(
             imagePaint.blendMode = null
             sampling.setLocalMatrix(imageToView)
             canvas.restoreToCount(saved)
+        }
+    }
+
+    private fun drawSoftenedStrip(
+        canvas: Canvas, sampling: BitmapShader, left: Float, top: Float, right: Float, bottom: Float,
+        offset: Float, alpha: Int
+    ) {
+        if (offset == 0f) {
+            sampling.setLocalMatrix(imageToView)
+            imagePaint.alpha = alpha
+            canvas.drawRect(left, top, right, bottom, imagePaint)
+            return
+        }
+        val sideAlpha = (alpha / 8f).roundToInt()
+        for (tap in 0..4) {
+            val dx = when (tap) { 1 -> offset; 2 -> -offset; else -> 0f }
+            val dy = when (tap) { 3 -> offset; 4 -> -offset; else -> 0f }
+            sampleMatrix.set(imageToView)
+            sampleMatrix.postTranslate(dx, dy)
+            sampling.setLocalMatrix(sampleMatrix)
+            imagePaint.alpha = if (tap == 0) alpha - 4 * sideAlpha else sideAlpha
+            canvas.drawRect(left, top, right, bottom, imagePaint)
         }
     }
 
@@ -212,6 +230,7 @@ class PhotographImageView @JvmOverloads constructor(
         private const val SOFTENING_SHADER = """
             uniform shader photo;
             uniform float radius;
+            uniform float centerRadius;
             uniform float fading;
             uniform float sideFadeWidth;
             uniform float edgeOpacity;
@@ -220,7 +239,7 @@ class PhotographImageView @JvmOverloads constructor(
             half4 main(float2 p) {
                 float x = (p.x - origin.x) / extent.x;
                 float sideWeight = 1.0 - clamp(min(x, 1.0 - x) / sideFadeWidth, 0.0, 1.0);
-                float offset = radius * mix(1.0, sideWeight, fading);
+                float offset = mix(radius, mix(centerRadius, radius, sideWeight), fading);
                 half4 face = photo.eval(p);
                 if (offset > 0.0) {
                     face = face * 0.5 +

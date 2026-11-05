@@ -89,10 +89,11 @@ capacity is doubled without shrinking the font or truncating the underlying
 text used by the continuous glyph transition. Photographs fill the rectangular face
 with CenterCrop, lightly reduced saturation (90%) and contrast (96%) to retain
 vivid source colors. The photograph
-retains 72% alpha in its sharp central region over a lightly translucent blue glass
+retains 72% alpha in its lightly softened central region over a lightly translucent blue glass
 base. Each outer 24% side band progressively softens and becomes more transparent,
 reaching 20% of the central photo opacity at the very edge. Maximum side softening
-is 3.5dp; the central 52% stays unblurred. The profile depends only on horizontal
+is 3.5dp; the central 52% uses 2dp softening, increasing continuously to 3.5dp
+across each side band. The profile depends only on horizontal
 position, never height, so the photo remains rectangular rather than forming an oval.
 There is no milky overlay, vertical fade, oval vignette, dark scrim or artificial
 pixel noise. Only the photograph's alpha changes, not the lettering or action
@@ -172,9 +173,10 @@ ordinary text and media retain their original reading style. Lighting preserves
 custom text colors, fonts, ellipsis and accessibility text.
 Resource and URI photographs share a worker-decoded background-only cache,
 bounded to a 768px long edge. Filtered downsampling and normal bilinear display
-provide mild source softening. A five-tap kernel progressively softens only the
-side bands; there is no whole-card Gaussian blur. Android 13+ uses one runtime-shader
-pass; bounded sampled strips provide the same side treatment for software flip
+provide mild source softening. A five-tap kernel adds 2dp central softening and
+progressively increases it to 3.5dp in the side bands; there is no whole-card Gaussian
+blur. Android 13+ uses one runtime-shader pass; bounded sampled strips provide
+the same center and side treatment for software flip
 snapshots and Android 12. People, objects and central detail remain recognizable.
 Original media has separate cache
 entries and no photo treatment. Lettering and controls remain sharp; original files
@@ -328,10 +330,10 @@ not the larger cached layout boxes.
 
 On Android 13 and later photographic softening and edge transparency share a
 lightweight direct image shader, without intermediate blur or masking surfaces
-whenever a reading face changes size. A five-sample kernel adds slight softening
-only within the left/right fading strips; the center samples the lightly cached
-photo directly. Android 12/12L and software flip snapshots use the same horizontal
-alpha mask and cached light blur, without an additional whole-face RenderEffect.
+whenever a reading face changes size. A five-sample kernel adds 2dp softening in
+the center and ramps to 3.5dp in the left/right fading strips. Android 12/12L and
+software flip snapshots use the same sampling profile and horizontal alpha mask,
+without an additional whole-face RenderEffect.
 Non-fading softening retains its existing RenderEffect fallback.
 Switching back to original media disables
 both effects and releases shader references.
@@ -445,7 +447,8 @@ label-strip layout in an isolated host, including cancellation, confirmation,
 edge scrolling and unchanged tap behavior. It also checks glass/edge alpha,
 both-side fades for short and overflowing LTR/RTL strips, and lifted-label contrast.
 `PhotographImageViewTest` compares hardware pixels against the prior photographic
-softening kernel and checks sharp bright centers, opaque top/bottom, subtle
+softening kernel and measures 2dp central softening with an impulse response,
+unchanged opacity, opaque top/bottom, subtle
 left/right-only transparency without an oval silhouette,
 hardware/software alpha agreement, effect reset and unmodified media snapshots.
 `WallpaperDrawableTest` checks portrait/landscape centered coverage, changed bounds,

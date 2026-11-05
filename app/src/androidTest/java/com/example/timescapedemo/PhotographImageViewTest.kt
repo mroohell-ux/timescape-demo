@@ -26,6 +26,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 @RunWith(AndroidJUnit4::class)
 class PhotographImageViewTest {
@@ -74,12 +75,12 @@ class PhotographImageViewTest {
     @Test fun glassPhotoFadesOnlySideBandsWithoutAMilkyVerticalGradient() {
         val source = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888).apply {
             setPixels(IntArray(128 * 128) {
-                if (it % 128 / 16 % 2 == 0) Color.rgb(240, 240, 240) else Color.rgb(16, 16, 16)
+                if (it % 128 / 32 % 2 == 0) Color.rgb(240, 240, 240) else Color.rgb(16, 16, 16)
             }, 0, 128, 0, 0, 128, 128)
         }
         val rendered = renderGlass(source, 128, 128)
         try {
-            fun detail(y: Int) = Color.red(rendered.getPixel(96, y)) - Color.red(rendered.getPixel(80, y))
+            fun detail(y: Int) = Color.red(rendered.getPixel(80, y)) - Color.red(rendered.getPixel(48, y))
             val top = detail(12)
             val middle = detail(64)
             val bottom = detail(115)
@@ -99,30 +100,29 @@ class PhotographImageViewTest {
         }
     }
 
-    @Test fun glassPhotoKeepsFineEdgesInTheUnblurredCenter() {
+    @Test fun glassPhotoSoftensTheCenterByTwoDpInSoftwareSnapshots() {
         val source = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888).apply {
-            setPixels(IntArray(128 * 128) {
-                if (it % 128 / 4 % 2 == 0) Color.BLACK else Color.WHITE
-            }, 0, 128, 0, 0, 128, 128)
+            eraseColor(Color.BLACK)
+            Canvas(this).drawRect(64f, 0f, 65f, 128f, Paint().apply { color = Color.WHITE })
         }
         val rendered = renderGlass(source, 128, 128, glassBase = false)
         try {
-            assertColorNear(rendered.getPixel(61, 64), rendered.getPixel(63, 64), 2)
-            val contrast = abs(Color.red(rendered.getPixel(64, 64)) - Color.red(rendered.getPixel(63, 64)))
-            assertTrue("Fine photo edges were blurred: $contrast", contrast >= 220)
+            val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+            val radius = sqrt(horizontalVariance(rendered, 64, 64, 16)).toFloat()
+            assertEquals("The central softening must be 2dp", 2f * density, radius, .25f)
         } finally {
             rendered.recycle()
             source.recycle()
         }
     }
 
-    @Test fun glassPhotoSoftensTheSidesButNeverTheReadableCenter() {
+    @Test fun glassPhotoSoftensBothCenterAndSidesWithoutChangingTheirOpacity() {
         val source = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888).apply {
             setPixels(IntArray(128 * 128) {
                 if (it % 128 / 2 % 2 == 0) Color.BLACK else Color.WHITE
             }, 0, 128, 0, 0, 128, 128)
         }
-        val sharp = renderGlass(source, 256, 128, glassBase = false, softenSides = false)
+        val sharp = renderGlass(source, 256, 128, glassBase = false, soften = false)
         val softened = renderGlass(source, 256, 128, glassBase = false)
         try {
             fun detail(bitmap: Bitmap, range: IntRange) = range.sumOf {
@@ -131,8 +131,12 @@ class PhotographImageViewTest {
             val edge = detail(softened, 4..40)
             val original = detail(sharp, 4..40)
             assertTrue("Side detail was not softened: $edge / $original", edge < original * .9f)
-            assertEquals(detail(sharp, 104..150), detail(softened, 104..150))
-            for (x in 104..151) assertColorNear(sharp.getPixel(x, 64), softened.getPixel(x, 64), 0)
+            assertTrue("The central detail was not softened",
+                detail(softened, 104..150) < detail(sharp, 104..150) * .95f)
+            for (x in 0 until softened.width) {
+                assertTrue("Softening changed opacity beyond 8-bit rounding at $x",
+                    abs(Color.alpha(sharp.getPixel(x, 64)) - Color.alpha(softened.getPixel(x, 64))) <= 1)
+            }
             assertTrue(Color.alpha(softened.getPixel(3, 64)) < Color.alpha(softened.getPixel(30, 64)))
             assertTrue(Color.alpha(softened.getPixel(30, 64)) < Color.alpha(softened.getPixel(80, 64)))
         } finally {
@@ -200,7 +204,7 @@ class PhotographImageViewTest {
         }
     }
 
-    @Test fun patternedSideSofteningMatchesHardwareAndSoftwareSnapshots() = scene { s ->
+    @Test fun patternedSofteningMatchesHardwareAndSoftwareSnapshots() = scene { s ->
         s.onMain {
             source.setPixels(IntArray(source.width * source.height) {
                 if (it % source.width / 3 % 2 == 0) Color.BLACK else Color.WHITE
@@ -231,6 +235,54 @@ class PhotographImageViewTest {
         }
     }
 
+    @Test fun glassPhotoSoftensTheCenterByTwoDpOnHardware() = scene { s ->
+        s.onMain {
+            source.eraseColor(Color.BLACK)
+            Canvas(source).drawRect(48f, 0f, 49f, source.height.toFloat(),
+                Paint().apply { color = Color.WHITE })
+            for (image in listOf(photo, sharp)) {
+                image.imageAlpha = 255
+                image.alpha = 1f
+                TextCardPhotoStyle.applyTo(image)
+                image.invalidate()
+            }
+        }
+        val frame = s.capture()
+        try {
+            s.onMain {
+                val density = photo.resources.displayMetrics.density
+                fun variance(image: ImageView): Double {
+                    val location = IntArray(2)
+                    image.getLocationInWindow(location)
+                    return horizontalVariance(frame, location[0] + image.width / 2,
+                        location[1] + image.height / 2, (12 * density).roundToInt())
+                }
+                val addedVariance = variance(photo) - variance(sharp)
+                assertTrue("The hardware center has no additional softening", addedVariance > 0)
+                assertEquals("The hardware central softening must be 2dp", 2f * density,
+                    sqrt(addedVariance).toFloat(), .25f)
+            }
+        } finally {
+            frame.recycle()
+        }
+    }
+
+    private fun horizontalVariance(bitmap: Bitmap, x: Int, y: Int, radius: Int): Double {
+        val baseline = Color.red(bitmap.getPixel(x - radius, y))
+        var mass = 0.0
+        var firstMoment = 0.0
+        var secondMoment = 0.0
+        for (offset in -radius..radius) {
+            val weight = (Color.red(bitmap.getPixel(x + offset, y)) - baseline).coerceAtLeast(0)
+            mass += weight
+            firstMoment += weight * offset
+            secondMoment += weight * offset.toDouble() * offset
+        }
+        assertTrue("The test impulse is not visible", mass > 100)
+        val mean = firstMoment / mass
+        return secondMoment / mass - mean * mean
+    }
+
     private fun glassAlpha(x: Int, width: Int): Int {
         val distance = minOf(x + .5f, width - x - .5f) / width
         val photo = .72f * (.20f + .80f * (distance / .24f).coerceIn(0f, 1f))
@@ -238,7 +290,7 @@ class PhotographImageViewTest {
     }
 
     private fun renderGlass(
-        source: Bitmap, width: Int, height: Int, glassBase: Boolean = true, softenSides: Boolean = true
+        source: Bitmap, width: Int, height: Int, glassBase: Boolean = true, soften: Boolean = true
     ): Bitmap {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val rendered = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -246,7 +298,7 @@ class PhotographImageViewTest {
             val image = PhotographImageView(instrumentation.targetContext)
             image.setImageBitmap(source)
             TextCardPhotoStyle.applyTo(image)
-            if (!softenSides) image.setSoftening(0f)
+            if (!soften) image.setSoftening(0f)
             if (!glassBase) image.background = null
             image.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
