@@ -150,9 +150,15 @@ restored after page recycling and app restarts, and reapplied within bounds when
 the viewport changes size. Taps still navigate/save bookmarks and long presses
 still replace the bookmark; moving the button does not activate either action.
 The body starts below that strip rather than reserving a separate icon gap and
-date line. Action glyphs are 16dp with no inter-button gaps; their existing 40dp
-touch targets and all callbacks remain intact. The title-speech glyph is also
-16dp in its existing 36dp target. Overview type marks and the collapse glyph are
+date line. Metadata and titles remain two separate rows. The strip has a 4dp top
+margin, 28dp action buttons and no body top padding, placing titles about 32dp
+below the card edge instead of 56dp. A one-line title row is about 24dp high.
+Title-free body text retains its 4dp paragraph margin and starts about 36dp down.
+Action glyphs remain 16dp with no inter-button gaps; actual button bounds are
+reduced, not just their artwork. All callbacks remain intact. The title-speech
+glyph is also 16dp in a 24dp target. Reading titles use 20sp without extra font
+padding and still allow two lines. Body text/font padding is unchanged.
+Overview type marks and the collapse glyph are
 smaller without changing the collapse button's 48dp target.
 Photographic reading cards keep a quieter version of the same glyph depth;
 ordinary text and media retain their original reading style. Lighting preserves
@@ -192,6 +198,19 @@ Reading offsets are retained separately for each bound face through collapsing,
 refreshes and turns; flip preparation copies those offsets and scrolling invalidates
 cached snapshots. Ordinary images and video keep their existing whole-card fitting.
 
+Text cards use the same gesture/face-offset controller when their full body exceeds
+the available reading height. The body scrolls inside a bounded viewport while
+the title, date, actions and photographic glass remain fixed. Short text still
+hands vertical motion to the card flow. At a long body's top or bottom, a fresh
+outward drag browses cards, just as with long images; horizontal motion still flips
+the card. Front/back reading offsets survive turns, same-card refreshes and
+collapsing/reopening, and reset when the holder binds a different card. These
+viewport offsets are in-memory, matching existing media behavior.
+Text-transition snapshots capture only the visible body window at its current
+offset, not a reduced-resolution bitmap of the entire document. The existing
+1536px/1,048,576-pixel limits, shared-glyph clips and material blending are retained.
+Only visible matching glyphs join the overview transition.
+
 Tap once to center and open a card; it grows and faces the reader while adjacent
 cards move aside. Once open, scrolling enters continuous reading: the departing
 card folds back into the ribbon while its neighbor unfolds in proportion to scroll
@@ -216,9 +235,10 @@ ellipses fade in instead of replacing the entire paragraph.
 Reversing the drag retraces that transition, including the former 18% boundary.
 Both materials use font-relative bounds so their baselines stay aligned; line
 clips prevent adjacent glyph rows from leaking into moving strips. Surplus
-paragraph lines follow the same interpolated font plane rather than crossing
-through the summary, and a partly ellipsized word keeps its fading suffix
-attached to the shared prefix.
+paragraph lines and ellipsized word suffixes stay on the original reading plane,
+behind the moving shared glyphs, fading and clipping as the card recedes. They
+do not inherit the summary's scaling, translation or line packing; only glyphs
+retained in the summary join that continuous morph.
 
 `CardTextTransition` caches transparent text-only snapshots while transitioning,
 bounded to a 1536px edge and one megapixel per text view. Mapping and rasterization
@@ -296,7 +316,14 @@ translucent peaks, fine inner filaments and a soft surrounding glow. The source
 screenshot, clock, launcher icons and other UI are not bundled or copied.
 The upper and lower space fades smoothly into near-black. These dark regions
 remain fully painted background, not letterboxing; card photographs are not darkened.
-The app-background drawer offers blue, gold, purple, green and rose thumbnails.
+The drawer keeps global search directly accessible and groups the remaining
+controls into four independently collapsible sections: Appearance, Reading &
+sound, Reminders & sync, and Data management. All sections start collapsed on a
+fresh launch. Expanded sections survive drawer closing and activity recreation,
+without changing user preferences. Headers expose expanded/collapsed state and
+matching accessibility actions. Existing controls and their behavior are retained;
+clear/reset actions sit at the bottom of their sections.
+Appearance offers blue, gold, purple, green and rose wallpaper thumbnails.
 All five palettes share the same vector geometry, alpha and light core; only
 RGB channels are remapped. Presets persist by stable string keys, not resource
 numbers. Selecting a custom photo clears the preset highlight; resetting selects
@@ -400,6 +427,8 @@ integrity/EXIF orientation.
 geometry/alpha, independent drawable instances and full portrait/landscape coverage.
 `CosmicFlowBackgroundTest` checks default startup/root/drawer consistency and the
 dark framing around the luminous wave.
+`DrawerSectionsTest` checks collapsed defaults, independent expansion, control
+grouping, retained values/actions, recreation state and accessibility actions.
 `PhotographBackgroundBlurTest` checks measurable fine-detail suppression, color and
 aspect preservation, transparency, bounded dimensions, separate media cache entries
 and unchanged source files.

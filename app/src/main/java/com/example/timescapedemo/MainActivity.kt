@@ -165,6 +165,7 @@ class MainActivity : AppCompatActivity() {
     private var globalSearchQueryNormalized: String = ""
     private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
     private lateinit var drawerGlobalSearchButton: MaterialButton
+    private lateinit var drawerSections: DrawerSections
     private var isUpdatingFlowSearchInput: Boolean = false
     private var isUpdatingGlobalSearchInput: Boolean = false
     private var searchResultsDialog: Dialog? = null
@@ -673,6 +674,9 @@ class MainActivity : AppCompatActivity() {
         toolbar.title = ""
 
         val header = navigationView.getHeaderView(0)
+        val drawerBasePaddingTop = header.paddingTop
+        val drawerBasePaddingBottom = header.paddingBottom
+        drawerSections = DrawerSections(header, savedInstanceState)
         drawerGlobalSearchButton = header.findViewById(R.id.buttonDrawerGlobalSearch)
         drawerExportNotesButton = header.findViewById(R.id.buttonDrawerExportNotes)
         drawerExportStickyNotesButton = header.findViewById(R.id.buttonDrawerExportStickyNotes)
@@ -850,6 +854,10 @@ class MainActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            header.updatePadding(
+                top = drawerBasePaddingTop + systemBars.top,
+                bottom = drawerBasePaddingBottom + systemBars.bottom
+            )
             toolbar.updateLayoutParams<ViewGroup.LayoutParams> {
                 height = toolbarBaseHeight + systemBars.top
             }
@@ -2337,6 +2345,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val target = when {
+
             currentItem > remainingLastIndex -> remainingLastIndex
             index <= currentItem && currentItem > 0 -> currentItem - 1
             else -> currentItem.coerceIn(0, remainingLastIndex)
@@ -7943,6 +7952,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        drawerSections.saveState(outState)
         pendingPdfImportFlowId?.let { outState.putLong(STATE_PENDING_PDF_IMPORT_FLOW_ID, it) }
         pendingExportFlowId?.let { outState.putLong(STATE_PENDING_EXPORT_FLOW_ID, it) }
         pendingExportFileName?.let { outState.putString(STATE_PENDING_EXPORT_FILE_NAME, it) }

@@ -39,6 +39,15 @@
     <string name="drawer_global_search_label">Global search</string>
     <string name="drawer_global_search_button">Open global search</string>
     <string name="drawer_global_search_hint">Search all cards</string>
+    <string name="drawer_section_appearance">Appearance</string>
+    <string name="drawer_section_appearance_summary">Flow wallpaper, card backgrounds</string>
+    <string name="drawer_section_reading">Reading &amp; sound</string>
+    <string name="drawer_section_reading_summary">Text size, font, video sound</string>
+    <string name="drawer_section_sync">Reminders &amp; sync</string>
+    <string name="drawer_section_sync_summary">Notifications, watch connection</string>
+    <string name="drawer_section_data">Data management</string>
+    <string name="drawer_section_data_summary">Import and export cards and notes</string>
+    <string name="drawer_section_description">%1$s, %2$s</string>
     <string name="search_results_title">Search results</string>
     <string name="search_results_summary">%1$d results across %2$d flows for "%3$s"</string>
     <string name="search_results_empty">No cards matched "%1$s".</string>

@@ -39,7 +39,6 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
     private val inverse = Matrix()
     private val sourceCorners = FloatArray(8)
     private val targetCorners = FloatArray(8)
-    private val movingCorners = FloatArray(8)
     private val bottomPoint = FloatArray(2)
     private val layerBounds = RectF()
     private var ready = false
@@ -47,6 +46,9 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
         private set
     internal var sharedRunCount = 0
         private set
+    internal val readingSnapshotBounds: RectF get() = RectF(faces.getValue(reading[2]).bounds)
+    internal val readingSnapshotSize: Pair<Int, Int>?
+        get() = faces.getValue(reading[2]).bitmap?.let { it.width to it.height }
 
     fun clear() {
         faces.values.forEach { it.release() }
@@ -66,7 +68,11 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
         faces.values.forEach {
             if (it.view.visibility != View.GONE && it.view.text.isNotEmpty()) usable.add(it)
         }
-        if (usable.any { it.view.layout == null || it.view.width == 0 || it.view.height == 0 }) {
+        if (usable.any {
+                it.view.layout == null || it.view.width == 0 || it.view.height == 0 ||
+                    (it.view.parent as? CardContentScrollView)?.height == 0
+            }
+        ) {
             if (ready) clear()
             return false
         }
@@ -79,10 +85,7 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
         }
         if (changed) {
             runs.clear()
-            faces.values.forEach {
-                it.shared.reset()
-                it.extraTarget = null
-            }
+            faces.values.forEach { it.shared.reset() }
             connect(reading[2], preview[2])
             connect(reading[1], preview[1])
             sharedRunCount = runs.size
@@ -131,25 +134,12 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
             val sourceRect = from.textRect(sourceStart, sourceEnd)
             val targetRect = to.textRect(targetStart, targetEnd)
             if (sourceRect.width() <= 0f || targetRect.width() <= 0f) continue
+            if (!RectF.intersects(sourceRect, from.bounds) || !RectF.intersects(targetRect, to.bounds)) continue
             val sourceLine = from.lineRect(sourceStart)
             val targetLine = to.lineRect(targetStart)
             from.addMask(sourceRect, sourceLine)
             to.addMask(targetRect, targetLine)
-            if (from.extraTarget == null) {
-                from.extraTarget = to
-                from.extraScale = targetRect.height() / sourceRect.height()
-                from.extraX = targetRect.left - sourceRect.left * from.extraScale
-                from.extraY = targetRect.top - sourceRect.top * from.extraScale
-            }
-            var tailEnd = sourceEnd
-            if (cursor == matches.size) {
-                while (tailEnd < source.text.length && !source.text[tailEnd].isWhitespace() &&
-                    sourceLayout.getLineForOffset(tailEnd) == sourceLayout.getLineForOffset(sourceStart)
-                ) tailEnd++
-            }
-            val tail = if (tailEnd > sourceEnd) from.textRect(sourceEnd, tailEnd) else null
-            if (tail != null) from.addMask(tail, sourceLine)
-            runs += Run(from, to, sourceRect, tail, sourceLine, targetLine,
+            runs += Run(from, to, sourceLine, targetLine,
                 expandedStrip(sourceRect), expandedStrip(targetRect),
                 FloatArray(8).also { corners(sourceRect, it) },
                 FloatArray(8).also { corners(targetRect, it) })
@@ -163,7 +153,6 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
         val material = smoothstep(collapse)
         reading.forEach {
             val face = faces.getValue(it)
-            face.updateExtraMatrix(collapse)
             val alpha = if (it === reading[0]) metadataAlpha(progress) else smoothstep(progress)
             drawExtras(canvas, face, alpha, collapse)
         }
@@ -190,19 +179,6 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
             }
         }
         if (runs.isEmpty()) return
-        // A partly ellipsized word keeps its fading suffix attached to the moving prefix.
-        for (run in runs) {
-            val tail = run.sourceTail ?: continue
-            corners(run.sourceRect, sourceCorners)
-            check(projection.setPolyToPoly(sourceCorners, 0, run.corners, 0, 4))
-            paint.alpha = ((1f - material) * 255f).roundToInt()
-            val saved = canvas.save()
-            canvas.concat(projection)
-            canvas.clipRect(tail)
-            canvas.clipRect(run.sourceLine)
-            canvas.drawBitmap(requireNotNull(run.source.bitmap), null, run.source.bounds, paint)
-            canvas.restoreToCount(saved)
-        }
         val halo = 4f * root.resources.displayMetrics.density
         layerBounds.inset(-halo, -halo)
         // Add the two materials on a transparent plane, avoiding a mid-crossfade opacity dip.
@@ -244,7 +220,7 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
         paint.alpha = opacity
         paint.blendMode = null
         val shader = requireNotNull(face.shader)
-        val plane = if (face.extraTarget != null) face.extraMatrix else face.matrix
+        val plane = face.matrix
         if (collapse > 0f) {
             check(plane.invert(inverse)) { "Text plane is not invertible" }
             bottomPoint[0] = root.width / 2f
@@ -283,36 +259,38 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
         var shader: BitmapShader? = null
         val shared = Path()
         val matrix = Matrix()
-        val extraMatrix = Matrix()
-        var extraTarget: Face? = null
-        var extraScale = 1f
-        var extraX = 0f
-        var extraY = 0f
         val bounds = RectF()
         private var layout: Layout? = null
         private var color = 0
         private var depth = 0f
+        private val visibleBounds = RectF()
 
         fun ensureSnapshot(): Boolean {
+            val reader = view.parent as? CardContentScrollView
+            val height = min(view.height, reader?.height ?: view.height)
+            val top = reader?.scrollY?.coerceIn(0, (view.height - height).coerceAtLeast(0)) ?: 0
+            visibleBounds.set(0f, top.toFloat(), view.width.toFloat(), (top + height).toFloat())
             if (bitmap != null && layout === view.layout && color == view.currentTextColor &&
-                depth == view.depthAmount && bounds.width() == view.width.toFloat() &&
-                bounds.height() == view.height.toFloat()
+                depth == view.depthAmount && bounds == visibleBounds
             ) return false
             release()
-            val scale = min(1f, min(1536f / max(view.width, view.height),
-                sqrt(1_048_576f / (view.width.toFloat() * view.height))))
-            val image = Bitmap.createBitmap(max(1, (view.width * scale).roundToInt()),
-                max(1, (view.height * scale).roundToInt()), Bitmap.Config.ARGB_8888)
+            val scale = min(1f, min(1536f / max(visibleBounds.width(), visibleBounds.height()),
+                sqrt(1_048_576f / (visibleBounds.width() * visibleBounds.height()))))
+            val image = Bitmap.createBitmap(max(1, (visibleBounds.width() * scale).roundToInt()),
+                max(1, (visibleBounds.height() * scale).roundToInt()), Bitmap.Config.ARGB_8888)
             val recording = Canvas(image)
-            recording.scale(image.width.toFloat() / view.width, image.height.toFloat() / view.height)
+            recording.scale(image.width.toFloat() / visibleBounds.width(),
+                image.height.toFloat() / visibleBounds.height())
+            recording.translate(-visibleBounds.left, -visibleBounds.top)
             view.draw(recording)
             bitmap = image
             shader = BitmapShader(image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
                 val pixelsToView = Matrix()
-                pixelsToView.setScale(view.width.toFloat() / image.width, view.height.toFloat() / image.height)
+                pixelsToView.setScale(visibleBounds.width() / image.width, visibleBounds.height() / image.height)
+                pixelsToView.postTranslate(visibleBounds.left, visibleBounds.top)
                 setLocalMatrix(pixelsToView)
             }
-            bounds.set(0f, 0f, view.width.toFloat(), view.height.toFloat())
+            bounds.set(visibleBounds)
             layout = view.layout
             color = view.currentTextColor
             depth = view.depthAmount
@@ -364,41 +342,18 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
             if (mask.intersect(line)) shared.addRect(mask, Path.Direction.CW)
         }
 
-        fun updateExtraMatrix(collapse: Float) {
-            val target = extraTarget ?: return
-            corners(bounds, sourceCorners)
-            matrix.mapPoints(sourceCorners)
-            corners(bounds, targetCorners)
-            for (point in 0..3) {
-                targetCorners[point * 2] = targetCorners[point * 2] * extraScale + extraX
-                targetCorners[point * 2 + 1] = targetCorners[point * 2 + 1] * extraScale + extraY
-            }
-            target.matrix.mapPoints(targetCorners)
-            for (index in movingCorners.indices) {
-                movingCorners[index] = sourceCorners[index] +
-                    (targetCorners[index] - sourceCorners[index]) * collapse
-            }
-            corners(bounds, sourceCorners)
-            check(extraMatrix.setPolyToPoly(sourceCorners, 0, movingCorners, 0, 4)) {
-                "Invalid fading text projection"
-            }
-        }
-
         fun release() {
             bitmap?.recycle()
             bitmap = null
             shader = null
             layout = null
             shared.reset()
-            extraTarget = null
         }
     }
 
     private class Run(
         val source: Face,
         val target: Face,
-        val sourceRect: RectF,
-        val sourceTail: RectF?,
         val sourceLine: RectF,
         val targetLine: RectF,
         val sourceClip: RectF,

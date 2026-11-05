@@ -180,6 +180,7 @@ class CardsAdapter(
         val previewHeading: View = v.findViewById(R.id.previewHeading)
         val imageScroll: ImageCardScrollView = v.findViewById(R.id.imageCardScroll)
         val handwritingScroll: ImageCardScrollView = v.findViewById(R.id.handwritingScroll)
+        val textScroll: CardContentScrollView = v.findViewById(R.id.cardTextScroll)
         val previewTitle: TextView = v.findViewById(R.id.previewTitle)
         val previewSnippet: TextView = v.findViewById(R.id.previewSnippet)
         val previewTime: TextView = v.findViewById(R.id.previewTime)
@@ -449,6 +450,8 @@ class CardsAdapter(
         vh.imageScroll.onViewportChanged = { vh.flip.invalidatePreparedFaces() }
         vh.handwritingScroll.onCardTouch = { vh.gestureDetector.onTouchEvent(it) }
         vh.handwritingScroll.onViewportChanged = { vh.flip.invalidatePreparedFaces() }
+        vh.textScroll.onCardTouch = { vh.gestureDetector.onTouchEvent(it) }
+        vh.textScroll.onViewportChanged = { vh.flip.invalidatePreparedFaces() }
         ViewCompat.replaceAccessibilityAction(
             vh.previewSurface, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
             parent.context.getString(R.string.card_expand)
@@ -675,9 +678,9 @@ class CardsAdapter(
         holder.textScrim.isVisible = holder.cardContent.isVisible && !photoText
         holder.textScrim.alpha = 0.45f
         holder.cardContent.setPadding((20 * density).roundToInt(),
-            (4 * density).roundToInt(),
+            0,
             (20 * density).roundToInt(), (20 * density).roundToInt())
-        holder.title.textSize = if (photoText) 28f else 20f
+        holder.title.textSize = 20f
         holder.bg.alpha = 1f
         (holder.bg as? PhotographImageView)?.setFadingEdges(false)
         if (photoText) {
@@ -743,6 +746,8 @@ class CardsAdapter(
                 bindTextCard(holder, item, face)
             }
         }
+        holder.textScroll.bind(item.id, holder.cardContent.isVisible, face = face)
+        if (holder.cardContent.isVisible) holder.textScroll.markContentReady()
     }
 
     private fun oppositeFace(face: HandwritingFace) =
@@ -763,6 +768,7 @@ class CardsAdapter(
             bindCard(back, item, holder.bindingAdapterPosition, oppositeFace(holder.boundFace), false)
             back.imageScroll.copyReadingOffsetsFrom(holder.imageScroll)
             back.handwritingScroll.copyReadingOffsetsFrom(holder.handwritingScroll)
+            back.textScroll.copyReadingOffsetsFrom(holder.textScroll)
             back.presentation.setViewportCap(holder.presentation.readingHeightCap)
             back.card.setHeightCap(holder.presentation.readingHeightCap)
             back.cardContent.setMaxHeightPx(holder.cardContent.heightCap)
