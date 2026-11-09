@@ -28,10 +28,13 @@ class TimescapeCardLayout @JvmOverloads constructor(
         private set
     var isMediaPreview = false
         private set
+    private var isVideoPreview = false
     private var mediaAspect = 1.5f
     private var viewportCap = Int.MAX_VALUE
     val readingHeightCap: Int get() = viewportCap
     private val surfaceClip = Rect()
+    internal var windAlpha = 1f
+        private set
     private var compactHeight = 0
     private var intrinsicPreviewHeight = 0
     private var intrinsicPreviewWidth = -1
@@ -97,6 +100,8 @@ class TimescapeCardLayout @JvmOverloads constructor(
     private val recordDiagnostics = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     init {
+        // Hardware display lists must call draw() for whole-card wind opacity.
+        setWillNotDraw(false)
         isChildrenDrawingOrderEnabled = true
         clipChildren = false
         clipToPadding = false
@@ -108,6 +113,8 @@ class TimescapeCardLayout @JvmOverloads constructor(
         flipLifted = lifted
         elevation = if (lifted) 24f * resources.displayMetrics.density else restingElevation
         updateSurfaceClip()
+        if (windAlpha != 1f) applyWindOpacity()
+        if (windRenderCaching) setRenderCaching(renderCachingEnabled)
     }
 
     private fun updateSurfaceClip() {
@@ -116,10 +123,11 @@ class TimescapeCardLayout @JvmOverloads constructor(
     override fun getChildDrawingOrder(childCount: Int, drawingPosition: Int): Int =
         childCount - 1 - drawingPosition
 
-    fun configurePreview(media: Boolean, aspect: Float = 1.5f) {
+    fun configurePreview(media: Boolean, aspect: Float = 1.5f, video: Boolean = false) {
         if (isMediaPreview != media) textTransition.clear()
         if (isMediaPreview != media) intrinsicPreviewHeight = 0
         isMediaPreview = media
+        isVideoPreview = video
         mediaAspect = aspect.takeIf { it.isFinite() && it > 0f } ?: 1.5f
         updatePreviewInset()
         requestLayout()
@@ -349,6 +357,34 @@ class TimescapeCardLayout @JvmOverloads constructor(
         }
     }
 
+    internal fun setWindAlpha(value: Float) {
+        require(value.isFinite() && value in 0f..1f)
+        if (windAlpha == value) return
+        windAlpha = value
+        applyWindOpacity()
+    }
+
+    private fun applyWindOpacity() {
+        setTransitionAlpha(if (isMediaPreview || flipLifted) windAlpha else 1f)
+        if (!isMediaPreview && !flipLifted) invalidate()
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (windAlpha == 0f && !isMediaPreview && !flipLifted) return
+        if (windAlpha == 1f || isMediaPreview || flipLifted) {
+            super.draw(canvas)
+            return
+        }
+        // Native transition alpha rebuilds the whole perspective layer as lettering moves.
+        val saved = canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(),
+            (windAlpha * 255f).roundToInt())
+        try {
+            super.draw(canvas)
+        } finally {
+            canvas.restoreToCount(saved)
+        }
+    }
+
     override fun dispatchDraw(canvas: Canvas) {
         updateLetteringProjection()
         val drawTextTransition = textTransition.prepare(expansionProgress, isMediaPreview)
@@ -382,7 +418,21 @@ class TimescapeCardLayout @JvmOverloads constructor(
         updateCornerMatrix()
     }
 
+    private var renderCachingEnabled = false
+    private var windRenderCaching = false
+
+    internal fun setWindRenderCaching(enabled: Boolean) {
+        if (windRenderCaching == enabled) return
+        windRenderCaching = enabled
+        setRenderCaching(renderCachingEnabled)
+    }
+
     internal fun setRenderCaching(enabled: Boolean) {
+        renderCachingEnabled = enabled
+        val mediaType = if (enabled && windRenderCaching && isMediaPreview && !isVideoPreview && !flipLifted &&
+            (expansionProgress == 0f || expansionProgress == 1f)
+        ) View.LAYER_TYPE_HARDWARE else View.LAYER_TYPE_NONE
+        if (layerType != mediaType) setLayerType(mediaType, null)
         val type = if (enabled && expansionProgress == 0f && !isMediaPreview) {
             View.LAYER_TYPE_HARDWARE
         } else View.LAYER_TYPE_NONE
@@ -392,7 +442,7 @@ class TimescapeCardLayout @JvmOverloads constructor(
         } else View.LAYER_TYPE_NONE
         if (previewText.layerType != textType) previewText.setLayerType(textType, null)
         val readingType = if (enabled && !isMediaPreview &&
-            expansionProgress > 0f && expansionProgress < 1f
+            expansionProgress > 0f && (expansionProgress < 1f || windRenderCaching)
         ) View.LAYER_TYPE_HARDWARE else View.LAYER_TYPE_NONE
         if (readingFace.layerType != readingType) readingFace.setLayerType(readingType, null)
     }

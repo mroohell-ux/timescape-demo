@@ -2,7 +2,9 @@ package com.example.timescapedemo
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.SystemClock
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import androidx.appcompat.view.ContextThemeWrapper
@@ -14,7 +16,7 @@ import org.junit.runner.RunWith
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
-class BookmarkButtonPositionTest {
+class FloatingButtonPositionTest {
     @Test fun noSavedPositionKeepsTheOriginalXmlPlacement() = scene {
         val page = page()
         val button = button(page)
@@ -23,7 +25,8 @@ class BookmarkButtonPositionTest {
         positions.attach(button)
         resize(page, 600, 900)
         assertEquals(originalX, button.x, .01f)
-        assertEquals((900 - button.height) / 2f, button.y, 1f)
+        val margin = (button.layoutParams as FrameLayout.LayoutParams).topMargin
+        assertEquals((900 - button.height) / 2f + margin, button.y, 1f)
         assertNotEquals(originalY, button.y)
         assertTrue(prefs.all.isEmpty())
     }
@@ -57,7 +60,7 @@ class BookmarkButtonPositionTest {
         positions.attach(button(first))
         moveAndSave(first, .63f, .81f)
         positions.detach(button(first))
-        val restored = BookmarkButtonPosition(prefs)
+        val restored = FloatingButtonPosition(prefs, keyPrefix)
         val second = page(layout = false)
         val button = button(second)
         restored.attach(button)
@@ -114,27 +117,105 @@ class BookmarkButtonPositionTest {
         assertPosition(second, .8f, .2f)
     }
 
-    private fun scene(test: Scene.() -> Unit) {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val context = ContextThemeWrapper(instrumentation.targetContext, R.style.Theme_TimescapeDemo)
-        val name = "bookmark-position-test-${UUID.randomUUID()}"
-        val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+    @Test fun dragAndCancellationSaveWithoutActivatingTheButtonAndTapsStillClick() = scene {
+        val page = page()
+        val button = button(page)
+        var clicks = 0
+        var longClicks = 0
+        button.setOnClickListener { clicks++ }
+        button.setOnLongClickListener { longClicks++; true }
+        positions.attach(button)
+        val startX = button.x
+        val startY = button.y
+        touch(button, MotionEvent.ACTION_DOWN, 20f, 20f)
+        touch(button, MotionEvent.ACTION_MOVE, 220f, -80f)
+        touch(button, MotionEvent.ACTION_UP, 220f, -80f)
+        assertEquals(startX + 200f, button.x, .01f)
+        assertEquals(startY - 100f, button.y, .01f)
+        assertEquals(0, clicks)
+        assertEquals(0, longClicks)
+        assertEquals(button.x / (page.width - button.width),
+            prefs.getFloat("${keyPrefix}_button_position_x", -1f), .001f)
+        touch(button, MotionEvent.ACTION_DOWN, 20f, 20f)
+        touch(button, MotionEvent.ACTION_MOVE, -2000f, 2000f)
+        touch(button, MotionEvent.ACTION_CANCEL, -2000f, 2000f)
+        assertPosition(page, 0f, 1f)
+        assertEquals(0, clicks)
+        assertEquals(0, longClicks)
+        touch(button, MotionEvent.ACTION_DOWN, 20f, 20f)
+        touch(button, MotionEvent.ACTION_UP, 20f, 20f)
+        assertEquals(1, clicks)
+    }
+
+    @Test fun bookmarkAndFlipPositionsRemainIndependentOnTheSameAndNewPages() = scene {
+        val page = page()
+        val otherPrefix = if (keyPrefix == "bookmark") "flip" else "bookmark"
+        val otherId = if (otherPrefix == "flip") R.id.buttonFlowFlip else R.id.buttonFlowBookmark
+        val other = page.findViewById<View>(otherId).apply { visibility = View.VISIBLE }
+        resize(page, 800, 1200)
+        val otherPositions = FloatingButtonPosition(prefs, otherPrefix)
+        positions.attach(button(page))
+        otherPositions.attach(other)
         try {
-            instrumentation.runOnMainSync {
-                val scene = Scene(context, prefs)
-                try {
-                    scene.test()
-                } finally {
-                    scene.pages.forEach { scene.positions.detach(scene.button(it)) }
-                }
+            val originalOtherX = other.x
+            val originalOtherY = other.y
+            moveAndSave(page, .75f, .2f)
+            assertEquals(originalOtherX, other.x, .01f)
+            assertEquals(originalOtherY, other.y, .01f)
+            other.x = .15f * (page.width - other.width)
+            other.y = .8f * (page.height - other.height)
+            otherPositions.save(other)
+            assertPosition(page, .75f, .2f)
+            val newPage = page(600, 900)
+            val newOther = newPage.findViewById<View>(otherId).apply { visibility = View.VISIBLE }
+            resize(newPage, 600, 900)
+            positions.attach(button(newPage))
+            otherPositions.attach(newOther)
+            try {
+                assertPosition(newPage, .75f, .2f)
+                assertEquals(.15f * (newPage.width - newOther.width), newOther.x, .01f)
+                assertEquals(.8f * (newPage.height - newOther.height), newOther.y, .01f)
+            } finally {
+                otherPositions.detach(newOther)
             }
         } finally {
-            assertTrue(context.deleteSharedPreferences(name))
+            otherPositions.detach(other)
         }
     }
 
-    private class Scene(private val context: Context, val prefs: SharedPreferences) {
-        val positions = BookmarkButtonPosition(prefs)
+    private fun touch(button: View, action: Int, x: Float, y: Float) {
+        val now = SystemClock.uptimeMillis()
+        val event = MotionEvent.obtain(now, now, action, x, y, 0)
+        try {
+            assertTrue(button.dispatchTouchEvent(event))
+        } finally {
+            event.recycle()
+        }
+    }
+
+    private fun scene(test: Scene.() -> Unit) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = ContextThemeWrapper(instrumentation.targetContext, R.style.Theme_TimescapeDemo)
+        for (keyPrefix in listOf("bookmark", "flip")) {
+            val name = "floating-position-test-${UUID.randomUUID()}"
+            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+            try {
+                instrumentation.runOnMainSync {
+                    val scene = Scene(context, prefs, keyPrefix)
+                    try {
+                        scene.test()
+                    } finally {
+                        scene.pages.forEach { scene.positions.detach(scene.button(it)) }
+                    }
+                }
+            } finally {
+                assertTrue(context.deleteSharedPreferences(name))
+            }
+        }
+    }
+
+    private class Scene(private val context: Context, val prefs: SharedPreferences, val keyPrefix: String) {
+        val positions = FloatingButtonPosition(prefs, keyPrefix)
         val pages = mutableListOf<FrameLayout>()
 
         fun page(width: Int = 800, height: Int = 1200, layout: Boolean = true): FrameLayout {
@@ -145,7 +226,8 @@ class BookmarkButtonPositionTest {
             return page
         }
 
-        fun button(page: FrameLayout): View = page.findViewById(R.id.buttonFlowBookmark)
+        fun button(page: FrameLayout): View = page.findViewById(
+            if (keyPrefix == "flip") R.id.buttonFlowFlip else R.id.buttonFlowBookmark)
 
         fun resize(page: FrameLayout, width: Int, height: Int) {
             page.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),

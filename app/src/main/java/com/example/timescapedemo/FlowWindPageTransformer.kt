@@ -12,12 +12,13 @@ import kotlin.math.max
 internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
     override fun transformPage(page: View, position: Float) {
         val rtl = page.layoutDirection == View.LAYOUT_DIRECTION_RTL
-        // Cancel the pager's rigid translation; only the individual cards travel.
-        page.translationX = -position * page.width * if (rtl) -1f else 1f
+        val visible = abs(position) < 1f
+        // Translating hidden pages into the viewport prevents RecyclerView from recycling them.
+        page.translationX = if (visible) -position * page.width * (if (rtl) -1f else 1f) else 0f
         page.scaleX = 1f
         page.scaleY = 1f
         page.alpha = 1f
-        page.visibility = if (abs(position) >= 1f) View.INVISIBLE else View.VISIBLE
+        page.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         val state = page.getTag(R.id.tag_flow_wind_page) as? PageState
             ?: PageState(page).also { page.setTag(R.id.tag_flow_wind_page, it) }
         state.update(position)
@@ -27,6 +28,7 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
         private val recycler = requireNotNull(page.findViewById<RecyclerView>(R.id.recyclerFlowCards))
         private val count = page.findViewById<View>(R.id.cardCountIndicator)
         private val bookmark = page.findViewById<View>(R.id.buttonFlowBookmark)
+        private val flip = page.findViewById<View>(R.id.buttonFlowFlip)
         private var observer: ViewTreeObserver? = null
         private var position = 0f
 
@@ -43,10 +45,12 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
             val chrome = 1f - distance * distance * (3f - 2f * distance)
             count?.alpha = chrome
             bookmark?.alpha = chrome
+            flip?.alpha = chrome
             if (value == 0f || distance >= 1f) {
                 stopObserving()
                 clearCards()
             } else {
+                applyCards()
                 val current = page.viewTreeObserver
                 if (observer !== current) {
                     stopObserving()
@@ -57,6 +61,11 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
         }
 
         override fun onPreDraw(): Boolean {
+            applyCards()
+            return true
+        }
+
+        private fun applyCards() {
             val rtl = page.layoutDirection == View.LAYOUT_DIRECTION_RTL
             for (index in 0 until recycler.childCount) {
                 val card = recycler.getChildAt(index) as? TimescapeCardLayout ?: continue
@@ -68,7 +77,6 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
                 val row = (card.top + card.height / 2f) / recycler.height
                 state.apply(card, position, holder.itemId, row, rtl, page.width, recycler.height)
             }
-            return true
         }
 
         fun reset() {
@@ -76,6 +84,7 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
             position = 0f
             count?.alpha = 1f
             bookmark?.alpha = 1f
+            flip?.alpha = 1f
             clearCards()
         }
 
@@ -94,10 +103,33 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
         private val matrix = Matrix()
         private val pose = FlowWindPose()
         private var active = false
+        private var lastPosition = Float.NaN
+        private var lastId = 0L
+        private var lastRow = Float.NaN
+        private var lastRtl = false
+        private var lastWidth = 0
+        private var lastHeight = 0
+        private var lastViewportWidth = 0
+        private var lastViewportHeight = 0
 
-        fun apply(card: View, position: Float, id: Long, row: Float, rtl: Boolean,
+        fun apply(card: TimescapeCardLayout, position: Float, id: Long, row: Float, rtl: Boolean,
             viewportWidth: Int, viewportHeight: Int
         ) {
+            if (active && lastPosition == position && lastId == id && lastRow == row &&
+                lastRtl == rtl && lastWidth == card.width && lastHeight == card.height &&
+                lastViewportWidth == viewportWidth && lastViewportHeight == viewportHeight
+            ) return
+            lastPosition = position
+            lastId = id
+            lastRow = row
+            lastRtl = rtl
+            lastWidth = card.width
+            lastHeight = card.height
+            lastViewportWidth = viewportWidth
+            lastViewportHeight = viewportHeight
+            if (!active) {
+                card.setWindRenderCaching(true)
+            }
             FlowWindMotion.sample(position, id, row, rtl, pose)
             val pivotX = card.width * pose.pivotX
             val pivotY = card.height * pose.pivotY
@@ -112,15 +144,16 @@ internal class FlowWindPageTransformer : ViewPager2.PageTransformer {
             matrix.postScale(pose.scale, pose.scale)
             matrix.postTranslate(pivotX + pose.x * viewportWidth, pivotY + pose.y * viewportHeight)
             card.setAnimationMatrix(matrix)
-            card.setTransitionAlpha(pose.alpha)
-            (card as? TimescapeCardLayout)?.updateLetteringProjection()
+            card.setWindAlpha(pose.alpha)
+            card.updateLetteringProjection()
             active = true
         }
 
         fun clear(card: View) {
             if (!active) return
             card.setAnimationMatrix(null)
-            card.setTransitionAlpha(1f)
+            (card as? TimescapeCardLayout)?.setWindAlpha(1f)
+            (card as? TimescapeCardLayout)?.setWindRenderCaching(false)
             (card as? TimescapeCardLayout)?.updateLetteringProjection()
             active = false
         }

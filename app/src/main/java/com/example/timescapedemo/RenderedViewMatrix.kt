@@ -2,6 +2,7 @@ package com.example.timescapedemo
 
 import android.graphics.Matrix
 import android.graphics.RectF
+import android.text.Layout
 import android.view.View
 import android.widget.TextView
 
@@ -13,19 +14,21 @@ internal fun View.postRenderedTransform(target: Matrix) {
 
 internal fun TextView.renderedGlyphBounds(ancestor: View, bounds: RectF, transform: Matrix) {
     val textLayout = checkNotNull(layout)
-    var left = Float.POSITIVE_INFINITY
-    var right = Float.NEGATIVE_INFINITY
-    for (line in 0 until textLayout.lineCount) {
-        left = minOf(left, textLayout.getLineLeft(line))
-        right = maxOf(right, textLayout.getLineRight(line))
-    }
+    if (this is TimescapeTextView) copyLayoutGlyphBounds(bounds) else textLayout.copyGlyphBounds(bounds)
     val top = baseline - textLayout.getLineBaseline(0) - scrollY
-    bounds.set(left + compoundPaddingLeft - scrollX,
-        (top + textLayout.getLineTop(0)).toFloat(),
-        right + compoundPaddingLeft - scrollX,
-        (top + textLayout.getLineBottom(textLayout.lineCount - 1)).toFloat())
+    bounds.offset((compoundPaddingLeft - scrollX).toFloat(), top.toFloat())
     renderedMatrixToAncestor(ancestor, transform)
     transform.mapRect(bounds)
+}
+
+internal fun Layout.copyGlyphBounds(bounds: RectF) {
+    var left = Float.POSITIVE_INFINITY
+    var right = Float.NEGATIVE_INFINITY
+    for (line in 0 until lineCount) {
+        left = minOf(left, getLineLeft(line))
+        right = maxOf(right, getLineRight(line))
+    }
+    bounds.set(left, getLineTop(0).toFloat(), right, getLineBottom(lineCount - 1).toFloat())
 }
 
 internal fun View.renderedMatrixToAncestor(ancestor: View?, target: Matrix) {

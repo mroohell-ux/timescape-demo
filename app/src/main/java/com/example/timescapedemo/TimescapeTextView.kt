@@ -6,7 +6,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Shader
+import android.text.Layout
 import android.text.TextPaint
 import android.util.AttributeSet
 import androidx.appcompat.widget.AppCompatTextView
@@ -20,6 +22,8 @@ class TimescapeTextView @JvmOverloads constructor(
     private val savedPaint = TextPaint()
     private var faceLight: Shader? = null
     private var faceColor = Color.TRANSPARENT
+    private var glyphBoundsLayout: Layout? = null
+    private val glyphBounds = RectF()
     internal var drawPassCount = 0
         private set
     private val recordDiagnostics = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
@@ -35,6 +39,25 @@ class TimescapeTextView @JvmOverloads constructor(
     init {
         val density = resources.displayMetrics.density
         setShadowLayer(0.6f * density, 0f, 0f, 0x8ACDEBFF.toInt())
+    }
+
+    override fun requestLayout() {
+        glyphBoundsLayout = null
+        super.requestLayout()
+    }
+
+    override fun onTextChanged(text: CharSequence?, start: Int, lengthBefore: Int, lengthAfter: Int) {
+        glyphBoundsLayout = null
+        super.onTextChanged(text, start, lengthBefore, lengthAfter)
+    }
+
+    internal fun copyLayoutGlyphBounds(bounds: RectF) {
+        val textLayout = checkNotNull(layout)
+        if (glyphBoundsLayout !== textLayout) {
+            textLayout.copyGlyphBounds(glyphBounds)
+            glyphBoundsLayout = textLayout
+        }
+        bounds.set(glyphBounds)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {

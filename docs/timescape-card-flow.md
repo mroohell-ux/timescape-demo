@@ -157,6 +157,14 @@ all flows. Its position is stored as fractions of the available movement area,
 restored after page recycling and app restarts, and reapplied within bounds when
 the viewport changes size. Taps still navigate/save bookmarks and long presses
 still replace the bookmark; moving the button does not activate either action.
+A matching floating flip control starts 64dp below the bookmark's default
+placement. Dragging it remembers its own global position independently of the
+bookmark, including across flows, page recycling, resizing and app restarts.
+It uses the existing current-card shortcut: the first tap opens a collapsed
+card; subsequent taps flip its available reverse side using the physical flip
+animation. Unavailable flips show an explicit message. Dragging or cancelling a
+drag never opens or flips a card. Both controls fade with their owning Flow,
+stay behind the inactive-pane overlay, and disappear for an empty card list.
 The body starts below that strip rather than reserving a separate icon gap and
 date line. Metadata and titles remain two separate rows. The strip has a 4dp top
 margin, 28dp action buttons and no body top padding, placing titles about 32dp
@@ -226,6 +234,15 @@ card folds back into the ribbon while its neighbor unfolds in proportion to scro
 distance. Dragging back reverses the transition. On release (after any fling), the
 nearest card snaps to the reading position, fully open. Expansion, perspective,
 depth and neighbor spacing all interpolate without switching at the midpoint.
+At the first and last cards, both overview and reading retain a bounded,
+progressively resistant pull instead of a hard stop. Only the ribbon's visual
+vertical offset changes: logical scroll, card count, expansion, perspective,
+text wrapping and inner reading offsets stay at the endpoint. Displacement
+approaches the smaller of 96dp and 12% of the viewport, so large pulls cannot
+drag the cards offscreen. Reversing unwinds the pull before browsing inward.
+Release and boundary flings return using the existing damped spring integration;
+a new vertical drag catches the current rebound without a position jump.
+Restoration, explicit selection and detachment clear this transient offset.
 Only one photographic glass face is rendered throughout the transition: the
 preview owns it until fully open, then the aligned reading background takes over.
 The reading background and rim are suppressed while the preview owns the face,
@@ -387,6 +404,16 @@ The label strip scrolls at its edges during a drag, without arming merges while
 scrolling. Ordinary taps, double taps and moving individual cards between flows
 retain their existing actions.
 
+While moving an individual card, hold it within the outer 12% of either pager
+edge for 650ms to switch to the adjacent flow. Brief edge crossings do not
+switch. Preparation and the full existing wind animation must finish before a
+new 650ms dwell starts, so holding an edge advances deliberately one flow at a
+time rather than chaining rapid switches. RTL mirrors the physical edges.
+Leaving the edge, dropping, cancelling, rebuilding labels or stopping the
+activity clears the pending dwell. A pager-area drop during a transition goes
+to its requested destination without cutting the animation short; dropping on
+an individual flow label still uses that label's explicit destination.
+
 The flow switcher is a compact, bottom-centered floating dock, sized to its
 contents with a 600dp maximum width. Its translucent blue-glass strip and fine
 horizontal highlights fade to transparent at both sides, matching `cards.png`,
@@ -411,18 +438,74 @@ horizontal travel, curved vertical drift, pitch/yaw/roll, slight depth shrink an
 fade. Stable card IDs and their row positions determine distinct paths and pivots;
 there is no per-frame randomness or independent per-card animator. Reversing the
 finger retraces the same paths, while incoming cards rotate back onto their own
-flow's existing layout. Native animation matrices and transition alpha compose
+flow's existing layout. Native animation matrices and whole-card group opacity compose
 with, rather than overwrite, the vertical ribbon's transforms and opacity.
 Pre-draw applies the latest gesture progress to newly attached/relaid-out cards.
 Settling, cancellation, recycling and detachment clear temporary transforms;
 reading positions, expanded faces, text wrapping and image fitting are unchanged.
 The wallpaper and Flow dock stay fixed. Label/keyboard smooth navigation uses the
-same transition; immediate state restoration stays immediate. Two-flow landscape
+same transition. `FlowPagerMotionController` waits for the first incoming Flow's committed
+card list, measured layout and tracked preview/reading images before starting an
+approximately 500ms eased scroll. A one-pixel pager prime commits the actual
+initial wind frame before starting that clock, including first-use GPU work.
+Preparation proceeds through the existing bounded adjacent-page window, checking
+each incoming page before advancing rather than attaching every intervening Flow.
+Hidden pages keep their native positions so transformed bounds do not prevent
+RecyclerView from recycling them.
+The offscreen-page limit remains unchanged. Image failures retain the existing
+explicit loader warnings; preparation lasting over
+1500ms logs a warning and continues with available content rather than leaving
+navigation blocked. Direct finger movement still uses the normal pager gesture;
+native fling targeting is retained, with a distance/velocity-aware 200–350ms
+ease-out after release. Slow releases use the same paced snap. The driver uses the
+pager's public fake-drag API, advances on vsync and caps each step to 12% of a page.
+Only the initial prime and final landing wait for a hardware frame commit; normal
+steps do not serialize the UI animation behind every GPU submission. Wind poses
+are applied during scroll updates, with pre-draw only correcting newly attached
+or relaid-out cards, avoiding redundant redraws of the same pose.
+Late callbacks cannot skip directly to the destination; distant jumps take longer without the
+default pager's invisible prepositioning. Pending labels highlight immediately,
+while the final selected Flow and its stored reading state remain pager-owned.
+New requests, touch takeover, data changes and immediate restoration cancel
+pending preparation. Repeated requests for the same pending target do not restart
+it, and activity stop aligns the requested Flow before saving.
+Wind matrices and lettering projections are not reapplied when all wind inputs
+are unchanged, so holding a gesture does not continuously invalidate the scene.
+Text-layout ink bounds are cached until layout/text changes rather than repeatedly
+reshaping the same lines; scroll offsets and world projections remain live.
+Static compact faces retain their native hardware caches during wind; expanded
+text faces temporarily cache the photograph, reading text and controls together
+at their actual view size. Standing preview lettering stays in its independent
+cache and its projection remains live. Text-card fade uses a single canvas group
+with canvas group alpha, instead of native transition alpha,
+which otherwise rebuilds a full perspective-card RenderNode layer on each
+lettering move. This keeps group opacity rather than fading overlapping children
+separately. Media cards have no moving lettering projection, so they temporarily
+cache the whole stable image/handwriting card and keep native transition alpha.
+Video cards retain uncached native rendering because their live `VideoView`
+surface cannot be captured in a whole-card raster cache. Lifted flips keep
+native opacity and do not cache the whole media card, preserving overflowing
+flip surfaces. Fully transparent
+text cards skip drawing; media display lists still record their original content
+so an initially invisible incoming cached image never remains blank.
+Blur, source images, opacity and geometry remain unchanged. Completion, rebinding,
+recycling, cancellation and detachment release temporary caches and restore normal
+interactive rendering.
+Immediate state restoration stays immediate. Two-flow landscape
 keeps its existing simultaneous-pane presentation and clears any wind transforms.
 `FlowWindMotionTest` checks deterministic, continuous and mirrored trajectories.
 `FlowWindTransitionTest` exercises the real pager, touch dispatch from empty space,
 reversed drags, interrupted smooth navigation, RTL, saved reading positions and
 cleanup without extra card measurements.
+It also checks actual click/release timing, delayed image readiness, bounded
+distant navigation in both directions, touch takeover, repeated requests,
+lifecycle alignment, native cached/original pixel equivalence, cache restoration
+and the absence of redraws for an unchanged wind pose. It checks actual committed
+intermediate poses and a 450–1000ms single-page click budget in the native fixture,
+including the faded/scaled reading-card source used during a card move,
+not only scroll callbacks, plus unchanged image pixels and fitting during media wind.
+Native reference screenshots guard whole-card opacity, allowing only small
+edge-antialiasing differences between layer-local and device-space compositing.
 
 `TimescapeFlowTest` covers full-bleed backgrounds, text depth, original image
 proportions, actual tap/collapse, forward/reverse reading transitions and snapping,

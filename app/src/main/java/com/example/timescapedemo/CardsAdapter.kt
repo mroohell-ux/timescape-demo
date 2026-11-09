@@ -143,6 +143,7 @@ class CardsAdapter(
         private var bindingVersion = 0
         private var pendingFaceLoads = 0
         private val faceReadyCallbacks = mutableListOf<() -> Unit>()
+        val isFaceReady: Boolean get() = pendingFaceLoads == 0
 
         fun beginFaceBinding(face: HandwritingFace) {
             bindingVersion++
@@ -489,6 +490,7 @@ class CardsAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
+        FlowWindPageTransformer.clearCard(holder.itemView)
         val item = getItem(position)
         holder.preparationVersion++
         clearPreparedHolder(holder)
@@ -852,7 +854,7 @@ class CardsAdapter(
         val context = holder.itemView.context
         val density = context.resources.displayMetrics.density
         val media = item.image != null || item.handwriting != null || item.video != null
-        holder.presentation.configurePreview(media, item.video?.aspectRatio ?: 1.5f)
+        holder.presentation.configurePreview(media, item.video?.aspectRatio ?: 1.5f, video = item.video != null)
         holder.preview.radius = (if (media) 20f else 2f) * density
         holder.preview.foreground = CardEdgeDrawable(density, holder.preview.radius, glass = !media)
         holder.preview.setCardBackgroundColor(
@@ -897,7 +899,8 @@ class CardsAdapter(
         val side = context.resources.displayMetrics.widthPixels.coerceAtMost(1280)
         fun applyBitmap(bitmap: Bitmap) {
             image.setImageBitmap(bitmap)
-            if (media) holder.presentation.configurePreview(true, bitmap.width.toFloat() / bitmap.height)
+            if (media) holder.presentation.configurePreview(
+                true, bitmap.width.toFloat() / bitmap.height, video = item.video != null)
         }
         val handwriting = item.handwriting
         if (handwriting != null && holder.boundFace == HandwritingFace.BACK && handwriting.back == null) {
@@ -907,6 +910,7 @@ class CardsAdapter(
         val handwrittenSide = handwriting?.side(holder.boundFace)
             ?: item.imageHandwriting?.takeIf { holder.boundFace == HandwritingFace.BACK }
         if (handwrittenSide != null) {
+            val loaded = holder.trackFaceLoad()
             HandwritingBitmapLoader.load(context, handwrittenSide.path, image, side, side) { bitmap ->
                 if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
                 if (bitmap != null) applyBitmap(bitmap)
@@ -914,6 +918,7 @@ class CardsAdapter(
                     image.setImageResource(PLACEHOLDER_RES_ID)
                     Log.w("TimescapePreview", "Handwriting preview unavailable for card ${item.id}")
                 }
+                loaded()
             }
             return
         }
@@ -930,6 +935,7 @@ class CardsAdapter(
             is BgImage.Res -> image.setImageResource(source.id)
             is BgImage.UriRef -> {
                 image.setImageResource(PLACEHOLDER_RES_ID)
+                val loaded = holder.trackFaceLoad()
                 BackgroundImageLoader.load(context, image, source.uri, side, side, photographicBackground = !media) { result ->
                     if (holder.itemView.getTag(R.id.tag_card_id) != item.id) return@load
                     when (result) {
@@ -941,6 +947,7 @@ class CardsAdapter(
                         BackgroundImageLoader.Result.NotFound ->
                             Log.w("TimescapePreview", "Preview not found for card ${item.id}")
                     }
+                    loaded()
                 }
             }
             null -> image.setImageDrawable(null)

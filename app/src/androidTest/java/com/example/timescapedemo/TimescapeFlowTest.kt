@@ -19,6 +19,7 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.Gravity
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -34,6 +35,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
@@ -1899,6 +1901,237 @@ class TimescapeFlowTest {
     }
 
     @Test
+    fun readingEndpointsPullWithIncreasingResistanceWithoutChangingTheirGeometry() = scene { s ->
+        for ((index, direction) in listOf(0 to -1, (s.adapter.itemCount - 1) to 1)) {
+            s.openCard(index)
+            s.onMain {
+                val card = holder(index).presentation
+                val original = projectedCorners(card)
+                val measures = card.measurePassCount
+                val width = card.width
+                val height = card.height
+                val textOffset = holder(index).textScroll.scrollY
+                val imageOffset = holder(index).imageScroll.scrollY
+                val distances = mutableListOf<Float>()
+                repeat(3) {
+                    recycler.scrollBy(0, direction * dp(80))
+                    val corners = projectedCorners(card)
+                    val distance = (corners[1] - original[1]) * -direction
+                    distances.add(distance)
+                    assertTrue(distance > dp(5))
+                    assertTrue(distance < minOf(dp(96).toFloat(), recycler.height * .12f))
+                    for (point in 0..3) {
+                        assertEquals(original[point * 2], corners[point * 2], .01f)
+                        assertEquals(corners[1] - original[1],
+                            corners[point * 2 + 1] - original[point * 2 + 1], .01f)
+                    }
+                    assertEquals(0, manager.offsetTo(index))
+                    assertEquals(index, manager.currentSelectionIndex())
+                    assertEquals(1f, card.expansionProgress, 0f)
+                }
+                assertTrue(distances[0] > distances[1] - distances[0])
+                assertTrue(distances[1] - distances[0] > distances[2] - distances[1])
+                assertEquals(width, card.width)
+                assertEquals(height, card.height)
+                assertEquals(measures, card.measurePassCount)
+                assertEquals(textOffset, holder(index).textScroll.scrollY)
+                assertEquals(imageOffset, holder(index).imageScroll.scrollY)
+                manager.settleScrollIfNeeded()
+            }
+            s.await { s.manager.isFocused(index) }
+            s.onMain { assertEquals(0, manager.offsetTo(index)) }
+        }
+    }
+
+    @Test
+    fun reversingAnEdgePullRetracesExactlyBeforeBrowsingInward() = scene { s ->
+        for ((index, direction) in listOf(0 to -1, (s.adapter.itemCount - 1) to 1)) {
+            s.openCard(index)
+            s.onMain {
+                val card = holder(index).presentation
+                val original = projectedCorners(card)
+                recycler.scrollBy(0, direction * dp(160))
+                val pulled = projectedCorners(card)
+                recycler.scrollBy(0, -direction * dp(40))
+                val returning = projectedCorners(card)
+                assertTrue(abs(returning[1] - original[1]) < abs(pulled[1] - original[1]))
+                assertEquals(0, manager.offsetTo(index))
+                recycler.scrollBy(0, -direction * (dp(160) - dp(40)))
+                assertArrayEquals(original, projectedCorners(card), .01f)
+                assertEquals(0, manager.offsetTo(index))
+                recycler.scrollBy(0, -direction * dp(138) / 3)
+                assertTrue(card.expansionProgress < 1f)
+                assertTrue(holder(index - direction).presentation.expansionProgress > 0f)
+                manager.settleScrollIfNeeded()
+            }
+            s.await { s.manager.isFocused(index) }
+        }
+    }
+
+    @Test
+    fun overviewAndSingleCardPullsAreBoundedWithoutPhantomCards() = scene { s ->
+        for (index in listOf(0, s.adapter.itemCount - 1)) {
+            s.onMain { manager.restoreState(index, false) }
+            s.await {
+                s.recycler.findViewHolderForAdapterPosition(index) != null &&
+                    s.holder(index).isFaceReady && !s.holder(index).itemView.isLayoutRequested &&
+                    s.holder(index).presentation.expansionProgress == 0f
+            }
+            var original = FloatArray(0)
+            s.onMain {
+                val card = holder(index).presentation
+                original = projectedCorners(card)
+                val direction = if (index == 0) -1 else 1
+                val children = recycler.childCount
+                recycler.scrollBy(0, direction * dp(20_000))
+                val distance = (projectedCorners(card)[1] - original[1]) * -direction
+                assertTrue(distance > dp(60))
+                assertTrue(distance <= dp(96) && distance <= recycler.height * .12f)
+                assertEquals(children, recycler.childCount)
+                assertEquals(index, manager.nearestIndex())
+                assertFalse(manager.hasSelection())
+                assertEquals(0f, card.expansionProgress, 0f)
+                manager.settleScrollIfNeeded()
+            }
+            s.await { abs(projectedCorners(s.holder(index).presentation)[1] - original[1]) < .1f }
+        }
+        s.onMain {
+            adapter.submitList(listOf(checkNotNull(adapter.getItemAt(5)))) { manager.restoreState(0, true) }
+        }
+        s.await { s.adapter.itemCount == 1 && s.manager.isFocused(0) }
+        s.openCard(0)
+        s.onMain {
+            val original = projectedCorners(holder(0).presentation)
+            for (direction in listOf(-1, 1)) {
+                recycler.scrollBy(0, direction * dp(180))
+                assertTrue((projectedCorners(holder(0).presentation)[1] - original[1]) * -direction > dp(10))
+                recycler.scrollBy(0, -direction * dp(180))
+                assertArrayEquals(original, projectedCorners(holder(0).presentation), .01f)
+            }
+            manager.settleScrollIfNeeded()
+        }
+        s.await { s.manager.isFocused(0) }
+    }
+
+    @Test
+    fun realOutwardDragsAndCancellationReboundAtBothReadingEndpoints() = scene { s ->
+        for ((index, direction) in listOf(0 to -1, (s.adapter.itemCount - 1) to 1)) {
+            s.openCard(index)
+            var original = FloatArray(0)
+            s.onMain {
+                original = projectedCorners(holder(index).presentation)
+                val now = SystemClock.uptimeMillis()
+                val x = dp(2).toFloat()
+                val y = recycler.height / 2f
+                assertFalse(manager.hasCardUnder(x, y))
+                for (step in 0..7) {
+                    val action = if (step == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE
+                    val event = MotionEvent.obtain(now, now + step * 30L, action,
+                        x, y - direction * dp(150) * step / 7f, 0)
+                    try {
+                        recycler.dispatchTouchEvent(event)
+                    } finally {
+                        event.recycle()
+                    }
+                }
+                assertEquals("Boundary $index did not accept the drag",
+                    RecyclerView.SCROLL_STATE_DRAGGING, recycler.scrollState)
+                assertTrue((projectedCorners(holder(index).presentation)[1] - original[1]) * -direction > dp(10))
+                val event = MotionEvent.obtain(now, now + 250,
+                    if (index == 0) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP,
+                    x, y - direction * dp(150), 0)
+                try {
+                    recycler.dispatchTouchEvent(event)
+                } finally {
+                    event.recycle()
+                }
+            }
+            s.await {
+                s.recycler.scrollState == RecyclerView.SCROLL_STATE_IDLE && s.manager.isFocused(index) &&
+                    abs(projectedCorners(s.holder(index).presentation)[1] - original[1]) < .01f
+            }
+            s.onMain { assertArrayEquals(original, projectedCorners(holder(index).presentation), .01f) }
+        }
+    }
+
+    @Test
+    fun catchingAndRestoringAnEdgeReboundPreservePositionAndDiscardItsCallback() = scene { s ->
+        s.openCard(0)
+        var staleCallback = false
+        s.onMain {
+            recycler.scrollBy(0, -dp(240))
+            manager.settleScrollIfNeeded { staleCallback = true }
+            val caught = projectedCorners(holder(0).presentation)
+            manager.onScrollStateChanged(RecyclerView.SCROLL_STATE_DRAGGING)
+            assertArrayEquals(caught, projectedCorners(holder(0).presentation), 0f)
+            recycler.scrollBy(0, -dp(40))
+            assertTrue(projectedCorners(holder(0).presentation)[1] > caught[1])
+            assertFalse(staleCallback)
+            manager.settleScrollIfNeeded { staleCallback = true }
+            manager.restoreState(5, true)
+        }
+        s.await { s.manager.isFocused(5) }
+        SystemClock.sleep(600)
+        s.onMain {
+            assertFalse(staleCallback)
+            assertEquals(0, manager.offsetTo(5))
+            assertEquals(1f, holder(5).presentation.expansionProgress, 0f)
+        }
+    }
+
+    @Test
+    fun outwardFlingsReturnToTheSameOpenBoundaryCard() = scene { s ->
+        for ((index, direction) in listOf(0 to -1, (s.adapter.itemCount - 1) to 1)) {
+            s.openCard(index)
+            var original = FloatArray(0)
+            var moved = false
+            val listener = ViewTreeObserver.OnPreDrawListener {
+                if (abs(projectedCorners(s.holder(index).presentation)[1] - original[1]) > s.dp(1)) moved = true
+                true
+            }
+            s.onMain {
+                original = projectedCorners(holder(index).presentation)
+                root.viewTreeObserver.addOnPreDrawListener(listener)
+                assertTrue(recycler.fling(0, direction * dp(2400)))
+            }
+            try {
+                s.await {
+                    moved && s.recycler.scrollState == RecyclerView.SCROLL_STATE_IDLE && s.manager.isFocused(index) &&
+                        abs(projectedCorners(s.holder(index).presentation)[1] - original[1]) < .01f
+                }
+                s.onMain {
+                    assertArrayEquals(original, projectedCorners(holder(index).presentation), .01f)
+                    assertEquals(0, manager.offsetTo(index))
+                }
+            } finally {
+                s.onMain { root.viewTreeObserver.removeOnPreDrawListener(listener) }
+            }
+        }
+    }
+
+    @Test
+    fun detachingDuringAReboundDoesNotLeaveAReattachedCardShiftedOrUnfocused() = scene { s ->
+        s.openCard(0)
+        var original = FloatArray(0)
+        var staleCallback = false
+        s.onMain {
+            original = projectedCorners(holder(0).presentation)
+            recycler.scrollBy(0, -dp(240))
+            manager.settleScrollIfNeeded { staleCallback = true }
+            root.removeView(recycler)
+            root.addView(recycler, FrameLayout.LayoutParams(-1, -1))
+        }
+        s.await {
+            s.manager.isFocused(0) && s.recycler.findViewHolderForAdapterPosition(0) != null &&
+                abs(projectedCorners(s.holder(0).presentation)[1] - original[1]) < .01f
+        }
+        s.onMain {
+            assertFalse(staleCallback)
+            assertEquals(0, manager.offsetTo(0))
+        }
+    }
+
+    @Test
     fun multiCardScrollSettlesWithOnlyOneOpenCardAndSignalsPlaybackReadiness() = scene { s ->
         val readiness = mutableListOf<Boolean>()
         s.onMain {
@@ -2766,6 +2999,7 @@ class TimescapeFlowTest {
                 10f, HandwritingEraserType.ROUND)
             recycler.layoutManager = manager
             recycler.itemAnimator = null
+            recycler.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
             recycler.adapter = adapter
             recycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
                 override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
@@ -2817,6 +3051,14 @@ class TimescapeFlowTest {
 
         fun dp(value: Int) = (value * root.resources.displayMetrics.density).toInt()
         fun holder(position: Int) = recycler.findViewHolderForAdapterPosition(position) as CardsAdapter.VH
+        fun openCard(index: Int) {
+            onMain { manager.restoreState(index, true) }
+            await {
+                manager.isFocused(index) && recycler.findViewHolderForAdapterPosition(index) != null &&
+                    holder(index).isFaceReady && !holder(index).itemView.isLayoutRequested &&
+                    holder(index).presentation.expansionProgress == 1f
+            }
+        }
         fun onMain(block: Scene.() -> Unit) {
             InstrumentationRegistry.getInstrumentation().runOnMainSync { block() }
         }

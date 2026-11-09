@@ -358,6 +358,8 @@
     <string name="flow_inactive_preview">Preview</string>
     <string name="activate_flow_preview">Activate this flow</string>
     <string name="flow_bookmark_save_content_desc">Bookmark the current card</string>
+    <string name="flow_flip_content_desc">Flip the current card. Tap once to open a collapsed card, then again to flip.</string>
+    <string name="snackbar_card_flip_unavailable">This card cannot be flipped right now.</string>
     <string name="flow_bookmark_go_content_desc">Go to bookmarked card. Long press to update bookmark.</string>
     <string name="snackbar_flow_bookmark_saved">Bookmark saved for this flow.</string>
     <string name="snackbar_flow_bookmark_missing">The bookmarked card is no longer in this flow.</string>

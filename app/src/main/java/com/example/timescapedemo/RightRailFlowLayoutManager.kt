@@ -3,6 +3,7 @@ package com.example.timescapedemo
 import android.animation.ValueAnimator
 import android.graphics.Matrix
 import android.graphics.PointF
+import android.os.SystemClock
 import android.view.View
 import android.widget.TextView
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
@@ -52,6 +53,33 @@ class RightRailFlowLayoutManager(
     private var pendingRestore: PendingRestore? = null
     private var settleAnimator: ValueAnimator? = null
     private var lastViewportHeight = 0
+    private var attachedRecycler: RecyclerView? = null
+    private var edgeLimitPx = 96f
+    private val edgePull = CardFlipSpring(26f, .95f, .25f)
+    private var edgeRebounding = false
+    private var edgeFrameTime = 0L
+    private var edgeSettled: (() -> Unit)? = null
+    private val edgeFrame = object : Runnable {
+        override fun run() {
+            val host = attachedRecycler ?: return
+            if (!edgeRebounding) return
+            val now = SystemClock.uptimeMillis()
+            edgePull.advance((now - edgeFrameTime) / 1000f)
+            edgeFrameTime = now
+            if (edgePull.isAtRest || !ValueAnimator.areAnimatorsEnabled()) {
+                edgePull.snap(0f)
+                edgeRebounding = false
+                val complete = edgeSettled
+                edgeSettled = null
+                finishReadingScroll()
+                requestLayout()
+                complete?.invoke()
+            } else {
+                requestLayout()
+                host.postOnAnimation(this)
+            }
+        }
+    }
 
     var selectionListener: ((Int?) -> Unit)? = null
         set(value) {
@@ -72,7 +100,20 @@ class RightRailFlowLayoutManager(
 
     override fun onAttachedToWindow(view: RecyclerView) {
         super.onAttachedToWindow(view)
+        attachedRecycler = view
+        edgeLimitPx = 96f * view.resources.displayMetrics.density
         minimumPreviewHeight = view.resources.getDimension(R.dimen.card_preview_min_height)
+    }
+
+    override fun onDetachedFromWindow(view: RecyclerView, recycler: RecyclerView.Recycler) {
+        val hadEdgePull = edgePull.value != 0f || edgeRebounding
+        stopEdgeRebound()
+        edgePull.snap(0f)
+        if (hadEdgePull) {
+            if (itemCount > 0) finishReadingScroll() else readingScrollActive = false
+        }
+        attachedRecycler = null
+        super.onDetachedFromWindow(view, recycler)
     }
 
     private data class PendingRestore(
@@ -157,6 +198,7 @@ class RightRailFlowLayoutManager(
         val clamped = index.coerceIn(0, max(0, itemCount - 1))
         if (isFocused(clamped) && readingMode) return
         cancelSettleAnimation()
+        edgePull.snap(0f)
         readingMode = true
         readingScrollActive = false
         scrollYPx = scrollForIndex(clamped)
@@ -172,6 +214,7 @@ class RightRailFlowLayoutManager(
     fun clearFocus(immediate: Boolean = false) {
         readingMode = false
         cancelSettleAnimation()
+        edgePull.snap(0f)
         pendingRestore = pendingRestore?.copy(focus = false)
         if (selectedIndex == null && focusProgress == 0f) return
         if (immediate) {
@@ -247,11 +290,13 @@ class RightRailFlowLayoutManager(
         return max(minScroll(), lastCentered)
     }
 
-    private val baseOverScrollLimitPx = max(48f, itemPitchPx * 1.1f)
-
     override fun onLayoutChildren(recycler: RecyclerView.Recycler, state: RecyclerView.State) {
         detachAndScrapAttachedViews(recycler)
-        if (itemCount == 0 || width == 0 || height == 0) return
+        if (itemCount == 0 || width == 0 || height == 0) {
+            stopEdgeRebound()
+            edgePull.snap(0f)
+            return
+        }
         if (minimumPreviewHeight == 0f) {
             // Auto-measure can precede attachment to the window.
             val child = recycler.getViewForPosition(nearestIndex())
@@ -353,6 +398,7 @@ class RightRailFlowLayoutManager(
         val cy = screenCenter()
         val baseX = railX()
         val yT = yTop()
+        val edgeOffset = -cardEdgeDisplacement(edgePull.value, min(edgeLimitPx, height * .12f).coerceAtLeast(1f))
 
         val layoutWindow = layoutWindow(scrollYPx)
         val firstIdx = layoutWindow.first
@@ -428,7 +474,7 @@ class RightRailFlowLayoutManager(
             val cache = ensureCache(child)
             val push = cache.extraOffset - anchorOffset
             val readingShift = if (selectedIndex != null) height * 0.25f * focusProgress else 0f
-            val py = cy + geometry.ribbonOffset(depth, compactPitch) + push + readingShift
+            val py = cy + geometry.ribbonOffset(depth, compactPitch) + push + readingShift + edgeOffset
             val pose = cache.pose
             val px = baseX + pose.bend * width
             val w = getDecoratedMeasuredWidth(child)
@@ -495,7 +541,7 @@ class RightRailFlowLayoutManager(
         if (direction == 0) return
 
         val currentWindow = layoutWindow(scrollYPx)
-        val targetWindow = layoutWindow(applyOverScrollResistance(scrollYPx + dy))
+        val targetWindow = layoutWindow((scrollYPx + dy).coerceIn(minScroll(), maxScroll()))
 
         if (direction > 0) {
             val start = (currentWindow.last + 1).coerceAtLeast(0)
@@ -532,10 +578,19 @@ class RightRailFlowLayoutManager(
             }
         }
 
+        var remaining = dy.toFloat()
+        var pull = edgePull.value
+        // Reverse the same raw pull before spending any motion on the next card.
+        if (pull * remaining < 0f) {
+            val unwound = remaining.coerceIn(-max(0f, pull), -min(0f, pull))
+            pull += unwound
+            remaining -= unwound
+        }
         val old = scrollYPx
-        val newY = if (readingMode) (old + dy).coerceIn(minScroll(), maxScroll()) else applyOverScrollResistance(old + dy)
+        val newY = (old + remaining).coerceIn(minScroll(), maxScroll())
         val consumed = (newY - old).toInt()
         scrollYPx = newY
+        edgePull.snap(pull + remaining - (newY - old))
         updateReadingSelection()
 
         layoutAll(recycler)
@@ -547,10 +602,24 @@ class RightRailFlowLayoutManager(
             onSettled?.invoke()
             return
         }
+        if (edgeRebounding) {
+            if (onSettled != null) edgeSettled = onSettled
+            return
+        }
         val target = if (readingMode) scrollForIndex(nearestIndex()) else scrollYPx.coerceIn(minScroll(), maxScroll())
         if (abs(target - scrollYPx) < 0.5f) {
             cancelSettleAnimation()
             scrollYPx = target
+            val host = attachedRecycler
+            if (abs(edgePull.value) >= .5f && host != null && ValueAnimator.areAnimatorsEnabled()) {
+                edgePull.target = 0f
+                edgeRebounding = true
+                edgeFrameTime = SystemClock.uptimeMillis()
+                edgeSettled = onSettled
+                host.postOnAnimation(edgeFrame)
+                return
+            }
+            edgePull.snap(0f)
             finishReadingScroll()
             requestLayout()
             onSettled?.invoke()
@@ -611,6 +680,7 @@ class RightRailFlowLayoutManager(
         val clamped = index.coerceIn(0, max(0, itemCount - 1))
         val desired = yTop() + clamped * itemPitchPx - screenCenter()
         cancelSettleAnimation()
+        edgePull.snap(0f)
         scrollYPx = desired.coerceIn(minScroll(), maxScroll())
         cancelFocusAnimation()
         readingMode = focus
@@ -633,28 +703,18 @@ class RightRailFlowLayoutManager(
         selectionListener?.invoke(currentSelectionIndex())
     }
 
-    private fun applyOverScrollResistance(candidate: Float): Float {
-        if (itemCount == 0) return candidate
-        val minBound = minScroll()
-        val maxBound = maxScroll()
-        val allowance = maxOverScrollPx()
-        if (allowance <= 0f) return candidate.coerceIn(minBound, maxBound)
-
-        val minLimit = minBound - allowance
-        val maxLimit = maxBound + allowance
-        return candidate.coerceIn(minLimit, maxLimit)
-    }
-
-    private fun maxOverScrollPx(): Float {
-        val screenAllowance = if (height > 0) height * 0.9f else 0f
-        val pitchAllowance = itemPitchPx * 3f
-        return max(baseOverScrollLimitPx, max(screenAllowance, pitchAllowance))
+    private fun stopEdgeRebound() {
+        attachedRecycler?.removeCallbacks(edgeFrame)
+        edgeRebounding = false
+        edgeSettled = null
+        edgePull.snap(edgePull.value)
     }
 
     private fun cancelSettleAnimation() {
         val animator = settleAnimator
         settleAnimator = null
         animator?.cancel()
+        stopEdgeRebound()
     }
 
     override fun computeScrollVectorForPosition(targetPosition: Int): PointF? {
@@ -670,4 +730,10 @@ class RightRailFlowLayoutManager(
             return snapped.coerceAtLeast(0)
         }
     }
+}
+
+internal fun cardEdgeDisplacement(pull: Float, limit: Float): Float {
+    require(limit > 0f) { "Edge displacement limit must be positive" }
+    val resisted = pull * .45f
+    return resisted / (1f + abs(resisted) / limit)
 }
