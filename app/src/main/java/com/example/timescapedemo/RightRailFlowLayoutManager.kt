@@ -9,6 +9,7 @@ import android.widget.TextView
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
@@ -370,6 +371,7 @@ class RightRailFlowLayoutManager(
         val card: AspectRatioCardView?,
         val presentation: TimescapeCardLayout?,
         val pose: CardFlowPose = CardFlowPose(),
+        val bottomEdge: FloatArray = FloatArray(4),
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
         var lastQuantizedSide: Int = -1,
@@ -511,8 +513,8 @@ class RightRailFlowLayoutManager(
             )
             child.rotationX = pose.pitch
             child.rotationY = pose.yaw
-            child.rotation = pose.roll
             cache.presentation?.setCornerMorph(pose.corners)
+            applyBottomEdgeAngle(child, cache)
             cache.presentation?.setDepth(depth, geometry)
             val visualHalfHeight = h * child.scaleY / 2f
             cache.presentation?.setRenderCaching(
@@ -522,6 +524,30 @@ class RightRailFlowLayoutManager(
             child.elevation = 0f
             val ribbonZ = (14f - depth * 2f).coerceIn(1f, 24f)
             child.translationZ = (ribbonZ + (32f - ribbonZ) * opening) * density
+        }
+    }
+
+    private fun applyBottomEdgeAngle(card: View, cache: ChildCache) {
+        val limit = geometry.maximumRollDegrees
+        if (limit == 0f) {
+            card.rotation = 0f
+            return
+        }
+        card.rotation = card.rotation.coerceIn(-limit, limit)
+        // Correct the drawn edge, since perspective and face height also contribute to its angle.
+        repeat(2) {
+            val edge = cache.bottomEdge
+            edge[0] = 0f
+            edge[1] = card.height.toFloat()
+            edge[2] = card.width.toFloat()
+            edge[3] = edge[1]
+            cache.presentation?.mapCornerMorph(edge)
+            card.matrix.mapPoints(edge)
+            val projected = Math.toDegrees(atan2(
+                (edge[3] - edge[1]).toDouble(), (edge[2] - edge[0]).toDouble())).toFloat()
+            val correction = cache.pose.bottomEdgeAngle - projected
+            if (abs(correction) < .01f) return
+            card.rotation = (card.rotation + correction).coerceIn(-limit, limit)
         }
     }
 

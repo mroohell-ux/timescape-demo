@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
@@ -15,6 +16,7 @@ import android.text.TextUtils
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.util.Log
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.Gravity
@@ -538,7 +540,7 @@ class TimescapeFlowTest {
             assertTrue(next.alpha < 1f)
             assertEquals(manager.geometry.maximumPitchDegrees * (1f - manager.geometry.pitchDepthVariation),
                 next.rotationX, .001f)
-            assertEquals(manager.geometry.maximumYawDegrees, next.rotationY, .001f)
+            assertEquals(manager.geometry.maximumYawDegrees / 4f, next.rotationY, .001f)
             assertTrue(next.left + next.width / 2f < text.itemView.left + text.itemView.width / 2f)
             assertTrue(next.rotation < 0f)
             assertScreenFacingCardLettering(text.presentation)
@@ -554,6 +556,145 @@ class TimescapeFlowTest {
             assertEquals(View.INVISIBLE, text.presentation.getChildAt(0).visibility)
             assertTrue(holder(1).itemView.width * holder(1).itemView.scaleX < text.itemView.width * text.itemView.scaleX)
             assertTrue(holder(1).itemView.translationZ < text.itemView.translationZ)
+        }
+    }
+
+    @Test
+    fun cardBottomEdgesTwistProgressivelyOnBothSidesOfTheReadingCard() = scene { s ->
+        fun sideRatio(index: Int): Float {
+            val points = projectedCorners(s.holder(index).itemView)
+            val left = kotlin.math.hypot(points[6] - points[0], points[7] - points[1])
+            val right = kotlin.math.hypot(points[4] - points[2], points[5] - points[3])
+            return right / left
+        }
+        var perspectiveRatios = emptyList<Float>()
+        s.onMain {
+            adapter.submitList((0..16).map {
+                CardItem(100L + it, "Card $it", "A short thought.",
+                    bg = BgImage.Res(R.drawable.bg_2))
+            }) { manager.restoreState(8, true) }
+        }
+        s.await {
+            s.manager.isFocused(8) && (3..14).all {
+                s.recycler.findViewHolderForAdapterPosition(it) != null
+            }
+        }
+        capturePerspective(s, "progressive-edges", 3..14)
+        s.onMain {
+            fun edgeAngle(index: Int): Float {
+                val points = projectedCorners(holder(index).itemView)
+                return Math.toDegrees(kotlin.math.atan2(
+                    (points[5] - points[7]).toDouble(),
+                    (points[4] - points[6]).toDouble())).toFloat()
+            }
+            val upper = (1..5).map { edgeAngle(8 - it) }
+            val lower = (1..6).map { -edgeAngle(8 + it) }
+            Log.i("CardEdgePerspective", "upper bottom angles=$upper; lower magnitudes=$lower")
+            assertEquals("The open reading card must remain level", 0f, edgeAngle(8), .01f)
+            for (angles in listOf(upper, lower)) {
+                assertTrue("Upper/lower edges must tilt in opposite directions: $angles",
+                    angles.all { it > 0f })
+                assertTrue("Consecutive bottom edges remained nearly parallel: $angles",
+                    angles.zipWithNext().all { (near, far) -> far - near >= .8f })
+                assertTrue("The card band has too little accumulated twist: $angles",
+                    angles.last() - angles.first() >= 5f)
+            }
+            perspectiveRatios = listOf(3, 13).map(::sideRatio)
+            assertScreenFacingCardLettering(holder(7).presentation)
+            assertScreenFacingCardLettering(holder(9).presentation)
+            manager.geometry = manager.geometry.copy(maximumYawDegrees = 0f)
+        }
+        s.await { listOf(3, 13).all { s.holder(it).itemView.rotationY == 0f } }
+        s.onMain {
+            for ((offset, index) in listOf(3, 13).withIndex()) {
+                val withoutYaw = sideRatio(index)
+                assertTrue("Yaw did not change card $index's trapezoid: " +
+                    "${perspectiveRatios[offset]} vs $withoutYaw",
+                    abs(perspectiveRatios[offset] - withoutYaw) >= .01f)
+            }
+        }
+    }
+
+    @Test
+    fun differentCardHeightsKeepClearlySeparatedProjectedBottomEdges() = scene { s ->
+        s.onMain {
+            val portrait = checkNotNull(adapter.getItemAt(1)?.image)
+            val landscape = checkNotNull(adapter.getItemAt(2)?.image)
+            adapter.submitList((0..16).map { index ->
+                when (index % 4) {
+                    0 -> CardItem(200L + index, "Long card $index",
+                        "Four lines of preview text should not flatten the edge angle. ".repeat(12),
+                        bg = BgImage.Res(R.drawable.bg_2))
+                    1 -> CardItem(200L + index, "Short card $index", "A short thought.",
+                        bg = BgImage.Res(R.drawable.bg_2))
+                    2 -> CardItem(200L + index, "Portrait $index", "", image = portrait)
+                    else -> CardItem(200L + index, "Landscape $index", "", image = landscape)
+                }
+            }) { manager.restoreState(8, true) }
+        }
+        s.await {
+            s.manager.isFocused(8) && (2..14).all {
+                val holder = s.recycler.findViewHolderForAdapterPosition(it) as? CardsAdapter.VH
+                holder != null && (it % 4 < 2 || holder.previewImage.drawable is BitmapDrawable)
+            }
+        }
+        capturePerspective(s, "variable-height-edges", 2..14)
+        s.onMain {
+            val heights = (2..14).map { holder(it).itemView.height }
+            assertTrue("The fixture must exercise different face heights", heights.max() >= heights.min() * 2)
+            for (side in listOf(-1, 1)) {
+                val angles = (1..6).map { distance ->
+                    val index = 8 + side * distance
+                    val points = projectedCorners(holder(index).itemView)
+                    -side * Math.toDegrees(kotlin.math.atan2(
+                        (points[5] - points[7]).toDouble(),
+                        (points[4] - points[6]).toDouble())).toFloat()
+                }
+                Log.i("CardEdgePerspective", "variable-height side=$side angles=$angles; heights=$heights")
+                assertTrue("Different-height cards still formed parallel groups: $angles",
+                    angles.zipWithNext().all { (near, far) -> far - near >= .8f })
+                for ((offset, actual) in angles.withIndex()) {
+                    val expected = 12f * kotlin.math.tanh((offset + 1) / 8f)
+                    assertEquals("Height/aspect changed the actual projected bottom edge", expected, actual, .05f)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun upperCardsStaggerTowardTheUpperRightInOverviewAndReading() = scene { s ->
+        s.onMain {
+            adapter.submitList((0..16).map { index ->
+                CardItem(300L + index, "Card $index",
+                    if (index % 3 == 0) "A longer preview exercises different card heights. ".repeat(8)
+                    else "A short thought.", bg = BgImage.Res(R.drawable.bg_2))
+            }) { manager.restoreState(8, true) }
+        }
+        for (focused in listOf(true, false)) {
+            s.onMain { manager.restoreState(8, focused) }
+            s.await {
+                s.manager.isFocused(8) == focused && (2..14).all {
+                    s.recycler.findViewHolderForAdapterPosition(it) != null
+                } && s.holder(8).presentation.expansionProgress == if (focused) 1f else 0f
+            }
+            capturePerspective(s, "upper-right-${if (focused) "reading" else "overview"}", 2..14)
+            s.onMain {
+                val centers = (0..6).map { distance ->
+                    val points = projectedCorners(holder(8 - distance).itemView)
+                    PointF((points[0] + points[2] + points[4] + points[6]) / 4f,
+                        (points[1] + points[3] + points[5] + points[7]) / 4f)
+                }
+                Log.i("CardRibbonPath", "focused=$focused upper centers=$centers")
+                for ((near, far) in centers.zipWithNext()) {
+                    assertTrue("Upper cards still leave vertically without visible horizontal staggering: $centers",
+                        far.x - near.x >= recycler.width * .03f)
+                    assertTrue("Upper cards must rise while moving right: $centers", far.y < near.y)
+                }
+                assertTrue("The upper band has too little total rightward travel: $centers",
+                    centers.last().x - centers.first().x >= recycler.width * .25f)
+                assertScreenFacingCardLettering(holder(7).presentation)
+                assertScreenFacingCardLettering(holder(9).presentation)
+            }
         }
     }
 
@@ -1053,11 +1194,13 @@ class TimescapeFlowTest {
         var strong = 0f
         var width = 0
         var scale = 0f
+        var yaw = 0f
         s.onMain {
             val card = holder(6).itemView
             strong = skew(card)
             width = card.width
             scale = card.scaleX
+            yaw = card.rotationY
             manager.geometry = manager.geometry.copy(cameraDistanceInCardWidths = 3f)
         }
         s.await {
@@ -1071,7 +1214,7 @@ class TimescapeFlowTest {
             assertEquals(width, card.width)
             assertEquals(scale, card.scaleX, 0f)
             assertEquals(expectedPitch, card.rotationX, .001f)
-            assertEquals(-5f, card.rotationY, 0f)
+            assertEquals(yaw, card.rotationY, 0f)
         }
     }
 
@@ -2930,6 +3073,8 @@ class TimescapeFlowTest {
                     put("rotationX", card.rotationX)
                     put("rotationY", card.rotationY)
                     put("rotationZ", card.rotation)
+                    put("layoutWidth", card.width)
+                    put("layoutHeight", card.height)
                     put("scaleX", card.scaleX)
                     put("scaleY", card.scaleY)
                     put("cameraDistance", card.cameraDistance)

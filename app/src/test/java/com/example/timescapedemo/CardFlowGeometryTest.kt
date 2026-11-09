@@ -3,6 +3,10 @@ package com.example.timescapedemo
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.sin
+import kotlin.math.tanh
 
 class CardFlowGeometryTest {
     private val geometry = CardFlowGeometry()
@@ -15,7 +19,8 @@ class CardFlowGeometryTest {
             val pose = pose(0f, opening)
             assertEquals(0f, pose.pitch, 0f)
             assertEquals(0f, pose.yaw, 0f)
-            assertEquals(0f, pose.roll, 0f)
+            assertEquals(0f, pose.bottomEdgeAngle, 0f)
+            assertEquals(0f, pose.bend, 0f)
             assertEquals(1f, pose.depthScale, 0f)
             assertEquals(1f, pose.scaleY, 0f)
             assertEquals(.5f, pose.pivotX, 0f)
@@ -49,7 +54,7 @@ class CardFlowGeometryTest {
             val after = pose(boundary + .0001f)
             assertTrue(abs(before.pitch - after.pitch) < .02f)
             assertTrue(abs(before.yaw - after.yaw) < .01f)
-            assertTrue(abs(before.roll - after.roll) < .01f)
+            assertTrue(abs(before.bottomEdgeAngle - after.bottomEdgeAngle) < .01f)
             assertTrue(abs(before.pivotY - after.pivotY) < .001f)
             assertTrue(abs(before.bend - after.bend) < .001f)
             assertTrue(abs(before.depthScale - after.depthScale) < .001f)
@@ -83,18 +88,94 @@ class CardFlowGeometryTest {
         }
     }
 
-    @Test fun customAnglesAnchorsAndYScaleUseTheSameProgress() {
+    @Test fun customAnglesAnchorsAndYScaleRespectTheirContinuousDepthWeights() {
         val geometry = geometry.copy(maximumPitchDegrees = 40f, maximumYawDegrees = 8f,
             maximumRollDegrees = 3f, distantScaleY = .9f, distantPivotX = .2f, distantPivotY = .9f,
             pitchDepthVariation = 0f)
         val pose = CardFlowPose()
         geometry.sample(1f, .5f, pose)
         assertEquals(20f, pose.pitch, 0f)
-        assertEquals(4f, pose.yaw, 0f)
+        assertEquals(1f, pose.yaw, 0f)
+        assertEquals(-3f * tanh(1f / 8f) * .5f, pose.bottomEdgeAngle, 0f)
         assertEquals(.95f, pose.scaleY, .0001f)
         assertEquals(.35f, pose.pivotX, .0001f)
         assertEquals(.7f, pose.pivotY, .0001f)
-        assertTrue(abs(pose.roll) <= 1.5f)
+        assertTrue(abs(pose.bottomEdgeAngle) <= 1.5f)
+    }
+
+    @Test fun yawAndBottomEdgesKeepTwistingBeyondTheFirstNeighborWithoutReversalOrClamping() {
+        for (side in listOf(-1f, 1f)) {
+            var previousYaw = 0f
+            var previousEdgeAngle = 0f
+            for (distance in 1..24) {
+                val pose = pose(side * distance)
+                assertTrue(abs(pose.yaw) > previousYaw)
+                assertTrue(abs(pose.bottomEdgeAngle) > previousEdgeAngle)
+                assertTrue(abs(pose.yaw) < abs(geometry.maximumYawDegrees))
+                assertTrue(abs(pose.bottomEdgeAngle) < geometry.maximumRollDegrees)
+                assertTrue(pose.yaw * side < 0f)
+                assertTrue(pose.bottomEdgeAngle * side < 0f)
+                val mirrored = pose(-side * distance)
+                assertEquals(-pose.yaw, mirrored.yaw, 0f)
+                assertEquals(-pose.bottomEdgeAngle, mirrored.bottomEdgeAngle, 0f)
+                previousYaw = abs(pose.yaw)
+                previousEdgeAngle = abs(pose.bottomEdgeAngle)
+            }
+        }
+    }
+
+    @Test fun openingUnwindsTheSameDepthPoseWithoutChangingScaleOrCornerGrowth() {
+        for (depth in listOf(-6f, -2f, -.5f, .5f, 2f, 6f)) {
+            val closed = pose(depth)
+            val halfway = pose(depth, .5f)
+            val open = pose(depth, 1f)
+            assertEquals(closed.pitch * .5f, halfway.pitch, .0001f)
+            assertEquals(closed.yaw * .5f, halfway.yaw, .0001f)
+            assertEquals(closed.bottomEdgeAngle * .5f, halfway.bottomEdgeAngle, .0001f)
+            assertEquals(closed.bend * .5f, halfway.bend, .0001f)
+            assertEquals(0f, open.pitch, 0f)
+            assertEquals(0f, open.yaw, 0f)
+            assertEquals(0f, open.bottomEdgeAngle, 0f)
+            assertEquals(0f, open.bend, 0f)
+            assertEquals(closed.depthScale, open.depthScale, 0f)
+            assertArrayEquals(closed.corners, open.corners, 0f)
+        }
+    }
+
+    @Test fun upperCardsKeepStaggeringRightBeyondTheFormerThreeCardPlateau() {
+        for (settings in listOf(geometry, geometry.copy(bendFrequency = .1f),
+            geometry.copy(lateralBend = .15f, bendFrequency = 1f))) {
+            for (opening in listOf(0f, .5f)) {
+                val minimumStep = settings.lateralBend * settings.bendFrequency *
+                    cos(settings.bendFrequency) * (1f - opening)
+                var previous = 0f
+                for (distance in 1..24) {
+                    val current = CardFlowPose().also { settings.sample(-distance.toFloat(), opening, it) }
+                    assertTrue("Upper card $distance stopped moving right",
+                        current.bend - previous >= minimumStep - .000001f)
+                    previous = current.bend
+                }
+            }
+        }
+    }
+
+    @Test fun upperContinuationPreservesTheNearArcAndEveryLowerBend() {
+        for (opening in listOf(0f, .5f, 1f)) {
+            for (step in -100..2400) {
+                val depth = step / 100f
+                val oldDepth = depth.coerceIn(-3f, 6f)
+                val expected = (-sin(oldDepth * geometry.bendFrequency) * geometry.lateralBend +
+                    max(0f, oldDepth) * geometry.lateralDrift) * (1f - opening)
+                assertEquals("The near arc or lower path changed at $depth/$opening",
+                    expected, pose(depth, opening).bend, 0f)
+            }
+        }
+        val delta = .001f
+        val center = pose(-1f).bend
+        val farSlope = (pose(-1f - delta).bend - center) / delta
+        val nearSlope = (center - pose(-1f + delta).bend) / delta
+        assertEquals("The upper arc must join its continuation without a velocity jump",
+            nearSlope, farSlope, .0001f)
     }
 
     @Test fun fourCornersHaveDistinctLeadAndLagInsteadOfAnAlignedRectangle() {

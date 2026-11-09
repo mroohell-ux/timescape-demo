@@ -1,8 +1,8 @@
 # Timescape card flow
 
 The default view is a ribbon of compact card faces, arranged after `cards.png`.
-Cards recede in size and center-to-center pitch together, shifting along one
-gentle left-to-right bend rather than a repeating lateral wave. The overview face
+Cards recede in size and center-to-center pitch together, following a continuous
+ribbon path rather than a repeating lateral wave. The overview face
 is slightly narrower and text previews have a 112dp minimum height. Logical
 pitch uses 28% of the available width, bounded to 92-124dp before font scaling,
 keeping the shorter faces closely stacked. The upper
@@ -32,9 +32,37 @@ than the lower cards pitching toward the viewer. Default distant pitch varies
 smoothly from about 25.5 degrees at one card away to 28.4 degrees at six cards
 away, without reversing direction above/below focus. Opening continuously
 reduces that backward lean to zero.
+Yaw continues changing across the whole band using
+`depth / (abs(depth) + 3 * tiltDepth)` and the existing smooth away/opening blend.
+The bottom edge's target screen angle is
+`-maximumRollDegrees * tanh(depth / (8 * tiltDepth)) * away`.
+At default settings, edges one through six cards away reach approximately
+1.5, 2.9, 4.3, 5.5, 6.7 and 7.6 degrees in opposite directions above/below
+a level focus. After measuring the real four-corner/native projection, the layout
+corrects the Euler roll to reach that edge angle. This prevents varying text,
+portrait and landscape face heights from cancelling the visible fan progression.
+The correction reuses per-card scratch coordinates, takes at most two matrix
+samples, and keeps native roll within the configured limit. Extreme customized
+poses retain that safety bound; a zero roll limit disables the fan correction.
+Changing yaw still changes the trapezoid's side lengths, not just screen rotation.
+The edge-angle correction preserves pitch, dimensions, spacing and unfolding corners.
+Native regressions check the actual edges of different-height cards within
+0.05 degrees of their targets, at least 0.8 degrees between consecutive edges,
+and a perspective-only side-length comparison.
 Subpixel translations preserve smooth motion and compensate the scale component
 of a moving anchor without cancelling its perspective.
-The receding ribbon initially bends left, without mirroring images or lettering.
+Below focus, the receding ribbon initially bends left, without mirroring images
+or lettering. Its existing bend and drift are unchanged. Above focus, the first
+neighbor follows the existing arc; farther cards continue that arc's tangent
+instead of reversing and then clamping at three cards away. The upper displacement
+is `lateralBend * (sin(min(-depth, 1) * bendFrequency) +
+max(0, -depth - 1) * bendFrequency * cos(bendFrequency))`, blended to zero
+during opening. At defaults, each additional upper card moves approximately
+4.9% of viewport width farther right, with no velocity jump at the join.
+Mixed-height native regressions check actual projected centers in both overview
+and reading: at least 3% of viewport width rightward per row, at least 25% across
+six rows, and strictly upward travel. This makes the upper ribbon exit diagonally
+toward the upper right while keeping the lower ribbon and its edge angles intact.
 Depth changes continuously while scrolling.
 Overview scrolling never automatically expands a card.
 
@@ -44,15 +72,15 @@ the next layout without resetting selection, scroll or reader offsets:
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `maximumPitchDegrees` / `maximumYawDegrees` / `maximumRollDegrees` | 30 / -5 / 1.6 | X/Y/Z rotations away from focus |
-| `tiltDepth` | 1 | Distance in logical card pitches to reach full tilt |
+| `maximumPitchDegrees` / `maximumYawDegrees` / `maximumRollDegrees` | 30 / -10 / 12 | Bounded X/Y/Z rotations; roll also bounds the projected-edge fan target |
+| `tiltDepth` | 1 | Full pitch/anchor blend radius in card pitches; yaw uses a soft radius of 3 times this depth, and the projected-edge fan uses 8 times it |
 | `cameraDistanceInCardWidths` | 1.35 | Smaller values strengthen perspective; distance is at least 1.1 times the larger card dimension or corner radius to protect tall faces and extreme anchors |
 | `minimumScale` / `maximumScale` | .52 / 1 | Compact scale range; fully open reading remains at its existing width and scale |
 | `depthShrink` / `departingShrink` | .10 / .025 | Compact shrink per card behind/in front of focus |
 | `distantScaleY` | 1 | Additional Y scale away from focus; default preserves media proportions |
 | `focusPivotX` / `focusPivotY` | .5 / .5 | Focus anchor fractions |
 | `distantPivotX` / `distantPivotY` | .46 / .78 | Distant anchor fractions, continuously interpolated |
-| `lateralBend` / `lateralDrift` / `bendFrequency` | .095 / .012 / .65 | Existing single ribbon bend |
+| `lateralBend` / `lateralDrift` / `bendFrequency` | .095 / .012 / .65 | Ribbon arc and upper tangent continuation; drift applies to the unchanged lower path |
 | `cornerStagger` | .14 | Depth-growth delay per corner; 0 disables the staggered morph |
 | `cornerWidthLead` / `cornerHeightLead` | .55 / .30 | Share of horizontal/vertical scale growth delayed at each corner |
 | `cornerDirectionBlendDepth` | .15 | Continuous direction-blend radius near focus, in card pitches |

@@ -1,17 +1,19 @@
 package com.example.timescapedemo
 
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tanh
 
 data class CardFlowGeometry(
     val maximumPitchDegrees: Float = 30f,
-    val maximumYawDegrees: Float = -5f,
-    val maximumRollDegrees: Float = 1.6f,
+    val maximumYawDegrees: Float = -10f,
+    val maximumRollDegrees: Float = 12f,
     val tiltDepth: Float = 1f,
     val cameraDistanceInCardWidths: Float = 1.35f,
     val minimumScale: Float = .52f,
@@ -94,17 +96,21 @@ data class CardFlowGeometry(
     internal fun sample(depth: Float, opening: Float, pose: CardFlowPose) {
         val progress = (abs(depth) / tiltDepth).coerceIn(0f, 1f)
         val away = progress * progress * (3f - 2f * progress) * (1f - opening)
-        val bendDepth = depth.coerceIn(-3f, 6f)
+        val bendDepth = depth.coerceIn(-1f, 6f)
         pose.depthScale = scaleAtDepth(depth)
         pose.scaleY = 1f + (distantScaleY - 1f) * away
         val beyondNeighbor = max(0f, abs(depth) / tiltDepth - 1f)
         val pitchWeight = 1f - pitchDepthVariation / (1f + beyondNeighbor * .35f)
         pose.pitch = maximumPitchDegrees * pitchWeight * away
-        pose.yaw = sign(depth) * maximumYawDegrees * away
-        pose.roll = -sin(depth * bendFrequency) * maximumRollDegrees * away
+        // Keep the band twisting beyond the first neighbor without a sinusoidal reversal.
+        val twist = depth / (abs(depth) + 3f * tiltDepth)
+        pose.yaw = maximumYawDegrees * twist * away
+        pose.bottomEdgeAngle = -maximumRollDegrees * tanh(depth / (8f * tiltDepth)) * away
         pose.pivotX = focusPivotX + (distantPivotX - focusPivotX) * away
         pose.pivotY = focusPivotY + (distantPivotY - focusPivotY) * away
-        pose.bend = (-sin(bendDepth * bendFrequency) * lateralBend +
+        // Continue the upper arc's tangent instead of clamping departing cards into a vertical stack.
+        val upperContinuation = max(0f, -depth - 1f) * bendFrequency * cos(bendFrequency)
+        pose.bend = ((-sin(bendDepth * bendFrequency) + upperContinuation) * lateralBend +
             max(0f, bendDepth) * lateralDrift) * (1f - opening)
         sampleCorners(depth, pose.depthScale, pose.corners)
     }
@@ -155,7 +161,7 @@ internal class CardFlowPose {
     var scaleY = 1f
     var pitch = 0f
     var yaw = 0f
-    var roll = 0f
+    var bottomEdgeAngle = 0f
     var pivotX = .5f
     var pivotY = .5f
     var bend = 0f
