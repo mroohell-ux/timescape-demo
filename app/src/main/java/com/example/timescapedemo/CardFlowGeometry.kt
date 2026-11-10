@@ -1,7 +1,6 @@
 package com.example.timescapedemo
 
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -19,7 +18,7 @@ data class CardFlowGeometry(
     val minimumScale: Float = .52f,
     val maximumScale: Float = 1f,
     val depthShrink: Float = .10f,
-    val departingShrink: Float = .025f,
+    val departingShrink: Float = .10f,
     val distantScaleY: Float = 1f,
     val focusPivotX: Float = .5f,
     val focusPivotY: Float = .5f,
@@ -96,22 +95,21 @@ data class CardFlowGeometry(
     internal fun sample(depth: Float, opening: Float, pose: CardFlowPose) {
         val progress = (abs(depth) / tiltDepth).coerceIn(0f, 1f)
         val away = progress * progress * (3f - 2f * progress) * (1f - opening)
-        val bendDepth = depth.coerceIn(-1f, 6f)
+        val bendDepth = abs(depth).coerceAtMost(6f)
         pose.depthScale = scaleAtDepth(depth)
         pose.scaleY = 1f + (distantScaleY - 1f) * away
         val beyondNeighbor = max(0f, abs(depth) / tiltDepth - 1f)
         val pitchWeight = 1f - pitchDepthVariation / (1f + beyondNeighbor * .35f)
-        pose.pitch = maximumPitchDegrees * pitchWeight * away
+        pose.pitch = sign(depth) * maximumPitchDegrees * pitchWeight * away
         // Keep the band twisting beyond the first neighbor without a sinusoidal reversal.
-        val twist = depth / (abs(depth) + 3f * tiltDepth)
+        val twist = abs(depth) / (abs(depth) + 3f * tiltDepth)
         pose.yaw = maximumYawDegrees * twist * away
-        pose.bottomEdgeAngle = -maximumRollDegrees * tanh(depth / (8f * tiltDepth)) * away
+        pose.outerEdgeAngle = -maximumRollDegrees * tanh(depth / (8f * tiltDepth)) * away
         pose.pivotX = focusPivotX + (distantPivotX - focusPivotX) * away
         pose.pivotY = focusPivotY + (distantPivotY - focusPivotY) * away
-        // Continue the upper arc's tangent instead of clamping departing cards into a vertical stack.
-        val upperContinuation = max(0f, -depth - 1f) * bendFrequency * cos(bendFrequency)
-        pose.bend = ((-sin(bendDepth * bendFrequency) + upperContinuation) * lateralBend +
-            max(0f, bendDepth) * lateralDrift) * (1f - opening)
+        if (depth < 0f) pose.pivotY = 1f - pose.pivotY
+        pose.bend = (-sin(bendDepth * bendFrequency) * lateralBend +
+            bendDepth * lateralDrift) * (1f - opening)
         sampleCorners(depth, pose.depthScale, pose.corners)
     }
 
@@ -127,7 +125,12 @@ data class CardFlowGeometry(
                 2 -> 3f
                 else -> 2f
             }
-            val reverseRank = 3f - forwardRank
+            val reverseRank = when (corner) {
+                0 -> 2f
+                1 -> 3f
+                2 -> 1f
+                else -> 0f
+            }
             val delay = cornerStagger * (reverseRank + (forwardRank - reverseRank) * direction)
             // Delay real scale growth instead of adding an inward-then-outward deformation.
             val delayedScale = scaleAtDepth(depth + sign(depth) * delay * staggerEnvelope)
@@ -161,7 +164,7 @@ internal class CardFlowPose {
     var scaleY = 1f
     var pitch = 0f
     var yaw = 0f
-    var bottomEdgeAngle = 0f
+    var outerEdgeAngle = 0f
     var pivotX = .5f
     var pivotY = .5f
     var bend = 0f

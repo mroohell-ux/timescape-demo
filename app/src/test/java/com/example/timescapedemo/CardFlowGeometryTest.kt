@@ -3,9 +3,8 @@ package com.example.timescapedemo
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.max
 import kotlin.math.sin
+import kotlin.math.sign
 import kotlin.math.tanh
 
 class CardFlowGeometryTest {
@@ -19,7 +18,7 @@ class CardFlowGeometryTest {
             val pose = pose(0f, opening)
             assertEquals(0f, pose.pitch, 0f)
             assertEquals(0f, pose.yaw, 0f)
-            assertEquals(0f, pose.bottomEdgeAngle, 0f)
+            assertEquals(0f, pose.outerEdgeAngle, 0f)
             assertEquals(0f, pose.bend, 0f)
             assertEquals(1f, pose.depthScale, 0f)
             assertEquals(1f, pose.scaleY, 0f)
@@ -39,8 +38,8 @@ class CardFlowGeometryTest {
             assertTrue(abs(pose.pitch) <= lastAngle)
             assertTrue(pose.depthScale >= lastScale)
             val departing = pose(-depth, opening)
-            assertEquals(pose.pitch, departing.pitch, 0f)
-            assertEquals(-pose.yaw, departing.yaw, 0f)
+            assertEquals(-pose.pitch, departing.pitch, 0f)
+            assertEquals(pose.yaw, departing.yaw, 0f)
             lastAngle = abs(pose.pitch)
             lastScale = pose.depthScale
         }
@@ -54,7 +53,7 @@ class CardFlowGeometryTest {
             val after = pose(boundary + .0001f)
             assertTrue(abs(before.pitch - after.pitch) < .02f)
             assertTrue(abs(before.yaw - after.yaw) < .01f)
-            assertTrue(abs(before.bottomEdgeAngle - after.bottomEdgeAngle) < .01f)
+            assertTrue(abs(before.outerEdgeAngle - after.outerEdgeAngle) < .01f)
             assertTrue(abs(before.pivotY - after.pivotY) < .001f)
             assertTrue(abs(before.bend - after.bend) < .001f)
             assertTrue(abs(before.depthScale - after.depthScale) < .001f)
@@ -96,11 +95,11 @@ class CardFlowGeometryTest {
         geometry.sample(1f, .5f, pose)
         assertEquals(20f, pose.pitch, 0f)
         assertEquals(1f, pose.yaw, 0f)
-        assertEquals(-3f * tanh(1f / 8f) * .5f, pose.bottomEdgeAngle, 0f)
+        assertEquals(-3f * tanh(1f / 8f) * .5f, pose.outerEdgeAngle, 0f)
         assertEquals(.95f, pose.scaleY, .0001f)
         assertEquals(.35f, pose.pivotX, .0001f)
         assertEquals(.7f, pose.pivotY, .0001f)
-        assertTrue(abs(pose.bottomEdgeAngle) <= 1.5f)
+        assertTrue(abs(pose.outerEdgeAngle) <= 1.5f)
     }
 
     @Test fun yawAndBottomEdgesKeepTwistingBeyondTheFirstNeighborWithoutReversalOrClamping() {
@@ -110,16 +109,16 @@ class CardFlowGeometryTest {
             for (distance in 1..24) {
                 val pose = pose(side * distance)
                 assertTrue(abs(pose.yaw) > previousYaw)
-                assertTrue(abs(pose.bottomEdgeAngle) > previousEdgeAngle)
+                assertTrue(abs(pose.outerEdgeAngle) > previousEdgeAngle)
                 assertTrue(abs(pose.yaw) < abs(geometry.maximumYawDegrees))
-                assertTrue(abs(pose.bottomEdgeAngle) < geometry.maximumRollDegrees)
-                assertTrue(pose.yaw * side < 0f)
-                assertTrue(pose.bottomEdgeAngle * side < 0f)
+                assertTrue(abs(pose.outerEdgeAngle) < geometry.maximumRollDegrees)
+                assertTrue(pose.yaw < 0f)
+                assertTrue(pose.outerEdgeAngle * side < 0f)
                 val mirrored = pose(-side * distance)
-                assertEquals(-pose.yaw, mirrored.yaw, 0f)
-                assertEquals(-pose.bottomEdgeAngle, mirrored.bottomEdgeAngle, 0f)
+                assertEquals(pose.yaw, mirrored.yaw, 0f)
+                assertEquals(-pose.outerEdgeAngle, mirrored.outerEdgeAngle, 0f)
                 previousYaw = abs(pose.yaw)
-                previousEdgeAngle = abs(pose.bottomEdgeAngle)
+                previousEdgeAngle = abs(pose.outerEdgeAngle)
             }
         }
     }
@@ -131,51 +130,53 @@ class CardFlowGeometryTest {
             val open = pose(depth, 1f)
             assertEquals(closed.pitch * .5f, halfway.pitch, .0001f)
             assertEquals(closed.yaw * .5f, halfway.yaw, .0001f)
-            assertEquals(closed.bottomEdgeAngle * .5f, halfway.bottomEdgeAngle, .0001f)
+            assertEquals(closed.outerEdgeAngle * .5f, halfway.outerEdgeAngle, .0001f)
             assertEquals(closed.bend * .5f, halfway.bend, .0001f)
             assertEquals(0f, open.pitch, 0f)
             assertEquals(0f, open.yaw, 0f)
-            assertEquals(0f, open.bottomEdgeAngle, 0f)
+            assertEquals(0f, open.outerEdgeAngle, 0f)
             assertEquals(0f, open.bend, 0f)
             assertEquals(closed.depthScale, open.depthScale, 0f)
             assertArrayEquals(closed.corners, open.corners, 0f)
         }
     }
 
-    @Test fun upperCardsKeepStaggeringRightBeyondTheFormerThreeCardPlateau() {
-        for (settings in listOf(geometry, geometry.copy(bendFrequency = .1f),
-            geometry.copy(lateralBend = .15f, bendFrequency = 1f))) {
-            for (opening in listOf(0f, .5f)) {
-                val minimumStep = settings.lateralBend * settings.bendFrequency *
-                    cos(settings.bendFrequency) * (1f - opening)
-                var previous = 0f
-                for (distance in 1..24) {
-                    val current = CardFlowPose().also { settings.sample(-distance.toFloat(), opening, it) }
-                    assertTrue("Upper card $distance stopped moving right",
-                        current.bend - previous >= minimumStep - .000001f)
-                    previous = current.bend
+    @Test fun bothHalvesUseTheSameCurveScaleAndSpacingWithVerticallyMirroredPerspective() {
+        for (settings in listOf(geometry, geometry.copy(depthShrink = .16f, departingShrink = .16f,
+            focusPivotY = .3f, distantPivotY = .9f))) {
+            for (opening in listOf(0f, .5f, 1f)) {
+                for (step in 1..240) {
+                    val depth = step / 10f
+                    val lower = CardFlowPose().also { settings.sample(depth, opening, it) }
+                    val upper = CardFlowPose().also { settings.sample(-depth, opening, it) }
+                    assertEquals(lower.bend, upper.bend, 0f)
+                    assertEquals(lower.depthScale, upper.depthScale, 0f)
+                    assertEquals(lower.scaleY, upper.scaleY, 0f)
+                    assertEquals(-lower.pitch, upper.pitch, 0f)
+                    assertEquals(lower.yaw, upper.yaw, 0f)
+                    assertEquals(-lower.outerEdgeAngle, upper.outerEdgeAngle, 0f)
+                    assertEquals(lower.pivotX, upper.pivotX, 0f)
+                    assertEquals(1f - lower.pivotY, upper.pivotY, 0f)
+                    assertEquals(-settings.ribbonOffset(depth, 124f),
+                        settings.ribbonOffset(-depth, 124f), 0f)
                 }
             }
         }
     }
 
-    @Test fun upperContinuationPreservesTheNearArcAndEveryLowerBend() {
+    @Test fun mirroredUpperPathPreservesEveryLowerBendAndStillExitsTowardTheRight() {
         for (opening in listOf(0f, .5f, 1f)) {
-            for (step in -100..2400) {
+            for (step in 0..2400) {
                 val depth = step / 100f
-                val oldDepth = depth.coerceIn(-3f, 6f)
+                val oldDepth = depth.coerceAtMost(6f)
                 val expected = (-sin(oldDepth * geometry.bendFrequency) * geometry.lateralBend +
-                    max(0f, oldDepth) * geometry.lateralDrift) * (1f - opening)
-                assertEquals("The near arc or lower path changed at $depth/$opening",
+                    oldDepth * geometry.lateralDrift) * (1f - opening)
+                assertEquals("The lower path changed at $depth/$opening",
                     expected, pose(depth, opening).bend, 0f)
+                assertEquals(expected, pose(-depth, opening).bend, 0f)
             }
         }
-        val delta = .001f
-        val center = pose(-1f).bend
-        val farSlope = (pose(-1f - delta).bend - center) / delta
-        val nearSlope = (center - pose(-1f + delta).bend) / delta
-        assertEquals("The upper arc must join its continuation without a velocity jump",
-            nearSlope, farSlope, .0001f)
+        assertTrue(pose(-6f).bend > .1f)
     }
 
     @Test fun fourCornersHaveDistinctLeadAndLagInsteadOfAnAlignedRectangle() {
@@ -214,12 +215,12 @@ class CardFlowGeometryTest {
         }
     }
 
-    @Test fun bothSidesLieBackwardWithSmallPositionDependentPitchDifferences() {
+    @Test fun bothSidesHaveMirroredPitchWithSmallPositionDependentDifferences() {
         for (side in listOf(-1f, 1f)) {
             var previous = 0f
             for (distance in 1..6) {
                 val pitch = pose(side * distance).pitch
-                assertTrue(pitch > 0f)
+                assertTrue(pitch * side > 0f)
                 assertTrue(abs(pitch) > previous)
                 assertTrue(abs(pitch) <= geometry.maximumPitchDegrees)
                 if (distance > 1) assertTrue(abs(pitch) - previous < 2f)
@@ -230,18 +231,17 @@ class CardFlowGeometryTest {
         for (depth in listOf(-6f, -1f, 1f, 6f)) {
             val pose = CardFlowPose()
             uniform.sample(depth, 0f, pose)
-            assertEquals(geometry.maximumPitchDegrees, pose.pitch, 0f)
+            assertEquals(sign(depth) * geometry.maximumPitchDegrees, pose.pitch, 0f)
         }
     }
 
     @Test fun approachingFromTheOtherSideReversesTheCornerOrder() {
-        val symmetric = geometry.copy(departingShrink = geometry.depthShrink)
         for (step in 1..99) {
-            val ahead = CardFlowPose().also { symmetric.sample(step / 100f, 0f, it) }.corners
-            val behind = CardFlowPose().also { symmetric.sample(-step / 100f, 0f, it) }.corners
+            val ahead = pose(step / 100f).corners
+            val behind = pose(-step / 100f).corners
             for (corner in 0..3) {
-                val mirrored = (corner + 2) % 4
-                assertEquals(1f - ahead[mirrored * 2], behind[corner * 2], .00001f)
+                val mirrored = 3 - corner
+                assertEquals(ahead[mirrored * 2], behind[corner * 2], .00001f)
                 assertEquals(1f - ahead[mirrored * 2 + 1], behind[corner * 2 + 1], .00001f)
             }
         }

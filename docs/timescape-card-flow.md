@@ -5,8 +5,8 @@ Cards recede in size and center-to-center pitch together, following a continuous
 ribbon path rather than a repeating lateral wave. The overview face
 is slightly narrower and text previews have a 112dp minimum height. Logical
 pitch uses 28% of the available width, bounded to 92-124dp before font scaling,
-keeping the shorter faces closely stacked. The upper
-cards overlap the next ones, with a 52% minimum depth scale. Logical scroll and
+keeping the shorter faces closely stacked. Cards overlap their more distant
+neighbors, with a 52% minimum depth scale on both sides. Logical scroll and
 reading selection remain linear; the visible window and prefetch use the inverse
 compressed geometry so distant cards still cover tall viewports.
 Cards use real RenderNode perspective, not an affine scale or a selected-state
@@ -18,7 +18,8 @@ The closer camera makes upper/lower edge lengths and all four corner trajectorie
 unequal. An additional four-point projective morph unfolds corners at different
 rates, rather than only rotating a rigid rectangle. For a card approaching from
 below, the top-left corner leads, followed by top-right, bottom-left and
-bottom-right. Approaching from above reverses that order. Corners delay a share
+bottom-right. Approaching from above vertically mirrors that order: bottom-left,
+bottom-right, top-left and top-right. Corners delay a share
 of the card's actual depth-scale growth, rather than adding a temporary inward
 pulse: the incoming lower edge expands without first narrowing and appearing to
 recede. These are curves of the same continuous distance-to-focus progress, not
@@ -27,18 +28,21 @@ Direction blends continuously near the focus instead of switching when the
 nearest selection changes. Morphing applies to overview and continuous reading;
 both compact distant faces and the focus recover their unwarped outline.
 The focus recovers a front-facing rectangle in overview and reading.
-Cards on both sides of the focus lie backward: their far/top edge recedes rather
-than the lower cards pitching toward the viewer. Default distant pitch varies
-smoothly from about 25.5 degrees at one card away to 28.4 degrees at six cards
-away, without reversing direction above/below focus. Opening continuously
-reduces that backward lean to zero.
+Upper cards vertically mirror the lower cards' perspective without reflecting
+the photographs or lettering. Default distant pitch varies smoothly from about
+25.5 degrees at one card away to 28.4 degrees at six cards away below focus,
+with equal negative angles above focus. Yaw is equal at matching distances;
+the vertical pivot, corner order and screen roll are mirrored. Opening
+continuously reduces the perspective to zero.
 Yaw continues changing across the whole band using
 `depth / (abs(depth) + 3 * tiltDepth)` and the existing smooth away/opening blend.
-The bottom edge's target screen angle is
+The outer edge's target screen angle is
 `-maximumRollDegrees * tanh(depth / (8 * tiltDepth)) * away`.
 At default settings, edges one through six cards away reach approximately
 1.5, 2.9, 4.3, 5.5, 6.7 and 7.6 degrees in opposite directions above/below
-a level focus. After measuring the real four-corner/native projection, the layout
+a level focus. The outer edge is the lower card's bottom edge or the upper card's
+top edge, so correcting it preserves a true vertical mirror of the quadrilateral.
+After measuring the real four-corner/native projection, the layout
 corrects the Euler roll to reach that edge angle. This prevents varying text,
 portrait and landscape face heights from cancelling the visible fan progression.
 The correction reuses per-card scratch coordinates, takes at most two matrix
@@ -51,18 +55,20 @@ Native regressions check the actual edges of different-height cards within
 and a perspective-only side-length comparison.
 Subpixel translations preserve smooth motion and compensate the scale component
 of a moving anchor without cancelling its perspective.
-Below focus, the receding ribbon initially bends left, without mirroring images
-or lettering. Its existing bend and drift are unchanged. Above focus, the first
-neighbor follows the existing arc; farther cards continue that arc's tangent
-instead of reversing and then clamping at three cards away. The upper displacement
-is `lateralBend * (sin(min(-depth, 1) * bendFrequency) +
-max(0, -depth - 1) * bendFrequency * cos(bendFrequency))`, blended to zero
-during opening. At defaults, each additional upper card moves approximately
-4.9% of viewport width farther right, with no velocity jump at the join.
-Mixed-height native regressions check actual projected centers in both overview
-and reading: at least 3% of viewport width rightward per row, at least 25% across
-six rows, and strictly upward travel. This makes the upper ribbon exit diagonally
-toward the upper right while keeping the lower ribbon and its edge angles intact.
+Both halves use the existing lower ribbon's lateral curve:
+`(-sin(d * bendFrequency) * lateralBend + d * lateralDrift) * (1 - opening)`,
+where `d = min(abs(depth), 6)`. Vertical offsets have opposite signs, while
+horizontal offsets match. Upper cards therefore follow the same curved motion,
+not the previous straight tangent; the distant upper arm still exits toward the
+upper right. Both default depth-shrink rates are 0.10, so scale, integrated
+vertical spacing and scale-derived corner growth have the same rhythm.
+Layer depth and media-preview opacity also match at equal distances.
+Custom callers may still override `departingShrink` independently; change both
+shrink rates together to retain the mirror when tuning.
+Native regressions compare all four actual projected corners of matched text,
+portrait and landscape cards within one pixel in overview and reading, including
+equal-and-opposite quarter, half and three-quarter-card scroll offsets. Text
+continues facing the screen, and photographs retain their original orientation.
 Depth changes continuously while scrolling.
 Overview scrolling never automatically expands a card.
 
@@ -76,11 +82,11 @@ the next layout without resetting selection, scroll or reader offsets:
 | `tiltDepth` | 1 | Full pitch/anchor blend radius in card pitches; yaw uses a soft radius of 3 times this depth, and the projected-edge fan uses 8 times it |
 | `cameraDistanceInCardWidths` | 1.35 | Smaller values strengthen perspective; distance is at least 1.1 times the larger card dimension or corner radius to protect tall faces and extreme anchors |
 | `minimumScale` / `maximumScale` | .52 / 1 | Compact scale range; fully open reading remains at its existing width and scale |
-| `depthShrink` / `departingShrink` | .10 / .025 | Compact shrink per card behind/in front of focus |
+| `depthShrink` / `departingShrink` | .10 / .10 | Matching compact shrink per card below/above focus; independently overridable |
 | `distantScaleY` | 1 | Additional Y scale away from focus; default preserves media proportions |
 | `focusPivotX` / `focusPivotY` | .5 / .5 | Focus anchor fractions |
 | `distantPivotX` / `distantPivotY` | .46 / .78 | Distant anchor fractions, continuously interpolated |
-| `lateralBend` / `lateralDrift` / `bendFrequency` | .095 / .012 / .65 | Ribbon arc and upper tangent continuation; drift applies to the unchanged lower path |
+| `lateralBend` / `lateralDrift` / `bendFrequency` | .095 / .012 / .65 | Shared lateral curve, mirrored vertically above focus |
 | `cornerStagger` | .14 | Depth-growth delay per corner; 0 disables the staggered morph |
 | `cornerWidthLead` / `cornerHeightLead` | .55 / .30 | Share of horizontal/vertical scale growth delayed at each corner |
 | `cornerDirectionBlendDepth` | .15 | Continuous direction-blend radius near focus, in card pitches |

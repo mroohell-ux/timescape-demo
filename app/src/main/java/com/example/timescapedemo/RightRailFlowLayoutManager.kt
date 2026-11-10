@@ -371,7 +371,7 @@ class RightRailFlowLayoutManager(
         val card: AspectRatioCardView?,
         val presentation: TimescapeCardLayout?,
         val pose: CardFlowPose = CardFlowPose(),
-        val bottomEdge: FloatArray = FloatArray(4),
+        val outerEdge: FloatArray = FloatArray(4),
         var lastMaxHeight: Int = -1,
         var lastMeasuredWidth: Int = -1,
         var lastQuantizedSide: Int = -1,
@@ -497,7 +497,7 @@ class RightRailFlowLayoutManager(
 
             val density = child.resources.displayMetrics.density
             child.alpha = if (cache.presentation?.isMediaPreview == false) 1f else {
-                1f - (max(0f, depth) * 0.055f).coerceAtMost(0.28f) * (1f - opening)
+                1f - (abs(depth) * 0.055f).coerceAtMost(0.28f) * (1f - opening)
             }
             child.scaleX = cache.visualScale
             child.scaleY = cache.visualScale * pose.scaleY
@@ -514,7 +514,7 @@ class RightRailFlowLayoutManager(
             child.rotationX = pose.pitch
             child.rotationY = pose.yaw
             cache.presentation?.setCornerMorph(pose.corners)
-            applyBottomEdgeAngle(child, cache)
+            applyOuterEdgeAngle(child, cache, depth)
             cache.presentation?.setDepth(depth, geometry)
             val visualHalfHeight = h * child.scaleY / 2f
             cache.presentation?.setRenderCaching(
@@ -522,12 +522,12 @@ class RightRailFlowLayoutManager(
                     py - visualHalfHeight <= height + itemPitchPx / 2f
             )
             child.elevation = 0f
-            val ribbonZ = (14f - depth * 2f).coerceIn(1f, 24f)
+            val ribbonZ = (14f - abs(depth) * 2f).coerceIn(1f, 24f)
             child.translationZ = (ribbonZ + (32f - ribbonZ) * opening) * density
         }
     }
 
-    private fun applyBottomEdgeAngle(card: View, cache: ChildCache) {
+    private fun applyOuterEdgeAngle(card: View, cache: ChildCache, depth: Float) {
         val limit = geometry.maximumRollDegrees
         if (limit == 0f) {
             card.rotation = 0f
@@ -536,16 +536,16 @@ class RightRailFlowLayoutManager(
         card.rotation = card.rotation.coerceIn(-limit, limit)
         // Correct the drawn edge, since perspective and face height also contribute to its angle.
         repeat(2) {
-            val edge = cache.bottomEdge
+            val edge = cache.outerEdge
             edge[0] = 0f
-            edge[1] = card.height.toFloat()
+            edge[1] = if (depth < 0f) 0f else card.height.toFloat()
             edge[2] = card.width.toFloat()
             edge[3] = edge[1]
             cache.presentation?.mapCornerMorph(edge)
             card.matrix.mapPoints(edge)
             val projected = Math.toDegrees(atan2(
                 (edge[3] - edge[1]).toDouble(), (edge[2] - edge[0]).toDouble())).toFloat()
-            val correction = cache.pose.bottomEdgeAngle - projected
+            val correction = cache.pose.outerEdgeAngle - projected
             if (abs(correction) < .01f) return
             card.rotation = (card.rotation + correction).coerceIn(-limit, limit)
         }

@@ -6,7 +6,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
@@ -560,7 +559,7 @@ class TimescapeFlowTest {
     }
 
     @Test
-    fun cardBottomEdgesTwistProgressivelyOnBothSidesOfTheReadingCard() = scene { s ->
+    fun cardOuterEdgesTwistProgressivelyOnBothSidesOfTheReadingCard() = scene { s ->
         fun sideRatio(index: Int): Float {
             val points = projectedCorners(s.holder(index).itemView)
             val left = kotlin.math.hypot(points[6] - points[0], points[7] - points[1])
@@ -583,18 +582,21 @@ class TimescapeFlowTest {
         s.onMain {
             fun edgeAngle(index: Int): Float {
                 val points = projectedCorners(holder(index).itemView)
+                if (index < 8) return Math.toDegrees(kotlin.math.atan2(
+                    (points[3] - points[1]).toDouble(),
+                    (points[2] - points[0]).toDouble())).toFloat()
                 return Math.toDegrees(kotlin.math.atan2(
                     (points[5] - points[7]).toDouble(),
                     (points[4] - points[6]).toDouble())).toFloat()
             }
             val upper = (1..5).map { edgeAngle(8 - it) }
             val lower = (1..6).map { -edgeAngle(8 + it) }
-            Log.i("CardEdgePerspective", "upper bottom angles=$upper; lower magnitudes=$lower")
+            Log.i("CardEdgePerspective", "upper top angles=$upper; lower bottom magnitudes=$lower")
             assertEquals("The open reading card must remain level", 0f, edgeAngle(8), .01f)
             for (angles in listOf(upper, lower)) {
                 assertTrue("Upper/lower edges must tilt in opposite directions: $angles",
                     angles.all { it > 0f })
-                assertTrue("Consecutive bottom edges remained nearly parallel: $angles",
+                assertTrue("Consecutive outer edges remained nearly parallel: $angles",
                     angles.zipWithNext().all { (near, far) -> far - near >= .8f })
                 assertTrue("The card band has too little accumulated twist: $angles",
                     angles.last() - angles.first() >= 5f)
@@ -616,7 +618,7 @@ class TimescapeFlowTest {
     }
 
     @Test
-    fun differentCardHeightsKeepClearlySeparatedProjectedBottomEdges() = scene { s ->
+    fun differentCardHeightsKeepClearlySeparatedProjectedOuterEdges() = scene { s ->
         s.onMain {
             val portrait = checkNotNull(adapter.getItemAt(1)?.image)
             val landscape = checkNotNull(adapter.getItemAt(2)?.image)
@@ -646,70 +648,116 @@ class TimescapeFlowTest {
                 val angles = (1..6).map { distance ->
                     val index = 8 + side * distance
                     val points = projectedCorners(holder(index).itemView)
+                    val left = if (side < 0) 0 else 6
+                    val right = if (side < 0) 2 else 4
                     -side * Math.toDegrees(kotlin.math.atan2(
-                        (points[5] - points[7]).toDouble(),
-                        (points[4] - points[6]).toDouble())).toFloat()
+                        (points[right + 1] - points[left + 1]).toDouble(),
+                        (points[right] - points[left]).toDouble())).toFloat()
                 }
                 Log.i("CardEdgePerspective", "variable-height side=$side angles=$angles; heights=$heights")
                 assertTrue("Different-height cards still formed parallel groups: $angles",
                     angles.zipWithNext().all { (near, far) -> far - near >= .8f })
                 for ((offset, actual) in angles.withIndex()) {
                     val expected = 12f * kotlin.math.tanh((offset + 1) / 8f)
-                    assertEquals("Height/aspect changed the actual projected bottom edge", expected, actual, .05f)
+                    assertEquals("Height/aspect changed the actual projected outer edge", expected, actual, .05f)
                 }
             }
         }
     }
 
     @Test
-    fun upperCardsStaggerTowardTheUpperRightInOverviewAndReading() = scene { s ->
+    fun upperCardsMirrorLowerShapesAndMotionWithoutFlippingTheirContents() = scene { s ->
         s.onMain {
+            val portrait = checkNotNull(adapter.getItemAt(1)?.image)
+            val landscape = checkNotNull(adapter.getItemAt(2)?.image)
             adapter.submitList((0..16).map { index ->
-                CardItem(300L + index, "Card $index",
-                    if (index % 3 == 0) "A longer preview exercises different card heights. ".repeat(8)
-                    else "A short thought.", bg = BgImage.Res(R.drawable.bg_2))
+                val distance = abs(index - 8)
+                when (distance % 3) {
+                    1 -> CardItem(300L + index, "Portrait $index", "", image = portrait)
+                    2 -> CardItem(300L + index, "Landscape $index", "", image = landscape)
+                    else -> CardItem(300L + index, "Card $index",
+                        if (distance == 0) "A short thought."
+                        else "A longer preview exercises different card heights. ".repeat(8),
+                        bg = BgImage.Res(R.drawable.bg_2))
+                }
             }) { manager.restoreState(8, true) }
+        }
+        fun assertMirror(upper: FloatArray, lower: FloatArray, axisY: Float) {
+            for (corner in 0..3) {
+                val mirrored = 3 - corner
+                assertEquals("Mirrored motion changed horizontal position", lower[mirrored * 2],
+                    upper[corner * 2], 1f)
+                assertEquals("The upper quadrilateral did not mirror the lower one",
+                    2f * axisY - lower[mirrored * 2 + 1], upper[corner * 2 + 1], 1f)
+            }
         }
         for (focused in listOf(true, false)) {
             s.onMain { manager.restoreState(8, focused) }
             s.await {
                 s.manager.isFocused(8) == focused && (2..14).all {
-                    s.recycler.findViewHolderForAdapterPosition(it) != null
+                    val holder = s.recycler.findViewHolderForAdapterPosition(it) as? CardsAdapter.VH
+                    holder != null && (abs(it - 8) % 3 == 0 || holder.previewImage.drawable is BitmapDrawable)
                 } && s.holder(8).presentation.expansionProgress == if (focused) 1f else 0f
             }
-            capturePerspective(s, "upper-right-${if (focused) "reading" else "overview"}", 2..14)
+            capturePerspective(s, "mirrored-${if (focused) "reading" else "overview"}", 2..14)
             s.onMain {
-                val centers = (0..6).map { distance ->
-                    val points = projectedCorners(holder(8 - distance).itemView)
-                    PointF((points[0] + points[2] + points[4] + points[6]) / 4f,
-                        (points[1] + points[3] + points[5] + points[7]) / 4f)
+                val focus = projectedCorners(holder(8).itemView)
+                val axisY = (focus[1] + focus[5]) / 2f
+                for (distance in 1..6) {
+                    val upper = holder(8 - distance).itemView
+                    val lower = holder(8 + distance).itemView
+                    assertMirror(projectedCorners(upper), projectedCorners(lower), axisY)
+                    assertEquals(lower.width, upper.width)
+                    assertEquals(lower.height, upper.height)
+                    assertEquals(lower.scaleX, upper.scaleX, .0001f)
+                    assertEquals(lower.scaleY, upper.scaleY, .0001f)
+                    assertEquals(-lower.rotationX, upper.rotationX, .001f)
+                    assertEquals(lower.rotationY, upper.rotationY, .001f)
+                    assertEquals(lower.alpha, upper.alpha, .001f)
+                    assertEquals(lower.translationZ, upper.translationZ, .001f)
                 }
-                Log.i("CardRibbonPath", "focused=$focused upper centers=$centers")
-                for ((near, far) in centers.zipWithNext()) {
-                    assertTrue("Upper cards still leave vertically without visible horizontal staggering: $centers",
-                        far.x - near.x >= recycler.width * .03f)
-                    assertTrue("Upper cards must rise while moving right: $centers", far.y < near.y)
-                }
-                assertTrue("The upper band has too little total rightward travel: $centers",
-                    centers.last().x - centers.first().x >= recycler.width * .25f)
-                assertScreenFacingCardLettering(holder(7).presentation)
-                assertScreenFacingCardLettering(holder(9).presentation)
+                assertScreenFacingCardLettering(holder(5).presentation)
+                assertScreenFacingCardLettering(holder(11).presentation)
             }
+        }
+        s.onMain { manager.restoreState(8, true) }
+        s.await { s.manager.isFocused(8) && s.holder(8).presentation.expansionProgress == 1f }
+        var axisY = 0f
+        s.onMain {
+            val focus = projectedCorners(holder(8).itemView)
+            axisY = (focus[1] + focus[5]) / 2f
+        }
+        fun sample(delta: Int, indices: IntRange): List<FloatArray> {
+            s.onMain { manager.restoreState(8, true) }
+            s.await { s.manager.isFocused(8) && s.holder(8).presentation.expansionProgress == 1f }
+            s.onMain { recycler.scrollBy(0, delta) }
+            awaitPresented(s)
+            var points = emptyList<FloatArray>()
+            s.onMain { points = indices.map { projectedCorners(holder(it).itemView) } }
+            return points
+        }
+        for (step in 1..3) {
+            val delta = s.dp(138) * step / 4
+            val lower = sample(delta, 9..12)
+            val upper = sample(-delta, 4..7).reversed()
+            for (index in lower.indices) assertMirror(upper[index], lower[index], axisY)
         }
     }
 
     @Test
-    fun upperAndLowerCardsLieBackwardWhileLetteringStandsFromItsLowerEdge() = scene { s ->
+    fun upperCardsMirrorLowerPerspectiveWhileLetteringStaysUpright() = scene { s ->
         s.onMain { manager.restoreState(5, false) }
         s.await { (3..7).all { s.recycler.findViewHolderForAdapterPosition(it) != null } }
         s.onMain {
             for (index in listOf(3, 4, 6, 7)) {
                 val card = holder(index)
-                assertTrue("Card $index leans toward the viewer", card.itemView.rotationX > 0f)
+                assertTrue("Card $index has the wrong mirrored pitch",
+                    card.itemView.rotationX * (index - 5) > 0f)
                 val corners = projectedCorners(card.itemView)
                 val top = kotlin.math.hypot(corners[2] - corners[0], corners[3] - corners[1])
                 val bottom = kotlin.math.hypot(corners[4] - corners[6], corners[5] - corners[7])
-                assertTrue("Card $index has its far/top edge nearer than the lower edge", top < bottom)
+                assertTrue("Card $index did not mirror its opposite edge lengths",
+                    if (index < 5) top > bottom else top < bottom)
                 if (!card.presentation.isMediaPreview) {
                     assertScreenFacingCardLettering(card.presentation)
                     assertEquals((card.previewText.height - card.previewText.paddingBottom).toFloat(),
@@ -1125,7 +1173,7 @@ class TimescapeFlowTest {
         s.onMain {
             fun corners() = (0..1).map { projectedCorners(holder(it).itemView) }
             assertEquals(1, manager.currentSelectionIndex())
-            assertTrue(holder(0).itemView.rotationX > 0f)
+            assertTrue(holder(0).itemView.rotationX < 0f)
             assertTrue(holder(1).itemView.rotationX > 0f)
             for (step in deltas.indices.reversed()) {
                 recycler.scrollBy(0, -deltas[step])
@@ -1946,7 +1994,7 @@ class TimescapeFlowTest {
                 assertTrue(manager.hasSelection())
                 assertFalse(manager.isFocused(0))
                 assertFalse(manager.isFocused(1))
-                assertTrue(holder(0).itemView.rotationX > 0f)
+                assertTrue(holder(0).itemView.rotationX < 0f)
                 assertTrue(holder(1).itemView.rotationX > 0f)
                 for (index in 0..1) {
                     val card = holder(index)
