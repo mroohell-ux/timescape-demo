@@ -40,22 +40,26 @@ internal fun assertScreenFacingCardLettering(card: TimescapeCardLayout) {
     assertEquals("Left edge is not screen-vertical", points[0], points[6], .5f)
     assertEquals("Right edge is not screen-vertical", points[2], points[4], .5f)
     assertTrue("Lettering was mirrored or collapsed", points[2] > points[0] && points[7] > points[1])
+}
 
-    val face = floatArrayOf(0f, 0f, card.width.toFloat(), 0f,
-        card.width.toFloat(), card.height.toFloat(), 0f, card.height.toFloat())
-    card.mapCornerMorph(face)
+internal fun assertNaturalCardLetteringScale(card: TimescapeCardLayout) {
+    val text = card.findViewById<View>(R.id.previewText)
+    val parent = text.parent as View
+    val natural = Matrix()
+    parent.renderedMatrixToAncestor(card, natural)
+    natural.preTranslate((text.left - parent.scrollX).toFloat(),
+        (text.top - parent.scrollY).toFloat())
+    val footY = (text.height - text.paddingBottom).toFloat()
+    val fit = card.width.toFloat() / text.width
+    natural.preScale(fit, fit, 0f, footY)
+    val baseline = floatArrayOf(0f, footY, text.width.toFloat(), footY)
+    natural.mapPoints(baseline)
+    card.mapCornerMorph(baseline)
     val global = Matrix()
     card.renderedMatrixToAncestor(null, global)
-    global.mapPoints(face)
-    val ink = projectedCardLetteringCorners(card, ink = true)
-    for (edge in 0..3) {
-        val next = (edge + 1) % 4
-        val dx = face[next * 2] - face[edge * 2]
-        val dy = face[next * 2 + 1] - face[edge * 2 + 1]
-        for (corner in 0..3) {
-            val margin = dx * (ink[corner * 2 + 1] - face[edge * 2 + 1]) -
-                dy * (ink[corner * 2] - face[edge * 2])
-            assertTrue("Upright lettering crosses card edge $edge", margin >= -hypot(dx, dy) * .5f)
-        }
-    }
+    global.mapPoints(baseline)
+    val points = projectedCardLetteringCorners(card)
+    assertEquals("Card containment must not shrink raised lettering",
+        hypot(baseline[2] - baseline[0], baseline[3] - baseline[1]),
+        points[2] - points[0], .5f)
 }

@@ -794,23 +794,17 @@ class TimescapeFlowTest {
             layout = holder(6).previewSnippet.layout
             val card = holder(6)
             assertTrue(card.previewTitle.text.isEmpty())
-            val natural = Matrix()
-            card.previewSurface.renderedMatrixToAncestor(null, natural)
-            natural.preTranslate(card.previewText.left.toFloat(), card.previewText.top.toFloat())
-            val footY = (card.previewText.height - card.previewText.paddingBottom).toFloat()
-            val baseline = floatArrayOf(0f, footY, card.presentation.width.toFloat(), footY)
-            natural.mapPoints(baseline)
-            val nominalWidth = kotlin.math.hypot(baseline[2] - baseline[0], baseline[3] - baseline[1])
-            val upright = projectedCardLetteringCorners(card.presentation)
-            assertTrue("Unused padding must not unnecessarily shrink short lettering",
-                upright[2] - upright[0] >= nominalWidth * .9f)
+            assertNaturalCardLetteringScale(card.presentation)
         }
         for (step in 0..12) {
             s.onMain {
                 if (step > 0) recycler.scrollBy(0, dp(138) / 12)
                 for (index in 0 until recycler.childCount) {
                     val card = recycler.getChildAt(index) as TimescapeCardLayout
-                    if (!card.isMediaPreview) assertScreenFacingCardLettering(card)
+                    if (!card.isMediaPreview) {
+                        assertScreenFacingCardLettering(card)
+                        assertNaturalCardLetteringScale(card)
+                    }
                 }
                 assertSame("Facing the user must not rewrap the summary", layout, holder(6).previewSnippet.layout)
             }
@@ -824,7 +818,7 @@ class TimescapeFlowTest {
     }
 
     @Test
-    fun uprightLetteringFitsExtremeCardPerspectiveAndLargeFonts() = scene { s ->
+    fun uprightLetteringKeepsNaturalScaleAtExtremePerspectiveAndLargeFonts() = scene { s ->
         s.onMain {
             adapter.setBodyTextSize(26f)
             manager.geometry = manager.geometry.copy(maximumPitchDegrees = 60f,
@@ -837,10 +831,103 @@ class TimescapeFlowTest {
         s.onMain {
             for (index in 0 until recycler.childCount) {
                 val card = recycler.getChildAt(index) as TimescapeCardLayout
-                if (!card.isMediaPreview) assertScreenFacingCardLettering(card)
+                if (!card.isMediaPreview) {
+                    assertScreenFacingCardLettering(card)
+                    assertNaturalCardLetteringScale(card)
+                }
             }
         }
         capturePerspective(s, "screen-facing-extreme", 5..7)
+    }
+
+    @Test
+    fun raisedLetteringPaintsOutsideTheCardIncludingDuringWindFades() = scene { s ->
+        s.onMain {
+            recycler.clipChildren = false
+            adapter.setBodyTextSize(26f)
+            manager.geometry = manager.geometry.copy(maximumPitchDegrees = 60f,
+                maximumYawDegrees = -30f, cameraDistanceInCardWidths = .6f,
+                distantScaleY = .8f, letteringLiftDp = 24f)
+            adapter.submitList((0 until 17).map {
+                CardItem(100L + it, "Raised title $it",
+                    "Long raised lettering must remain readable beyond the card edges. ".repeat(20),
+                    bg = BgImage.Res(R.drawable.bg_2))
+            }) { manager.restoreState(8, false) }
+        }
+        s.await {
+            (7..10).all { s.recycler.findViewHolderForAdapterPosition(it) != null } &&
+                s.holder(9).previewSnippet.layout?.lineCount == 4 &&
+                s.holder(9).previewImage.drawable != null && !s.recycler.isLayoutRequested
+        }
+        lateinit var face: FloatArray
+        lateinit var ink: FloatArray
+        s.onMain {
+            for (index in 0 until recycler.childCount) {
+                val card = recycler.getChildAt(index) as TimescapeCardLayout
+                assertScreenFacingCardLettering(card)
+                assertNaturalCardLetteringScale(card)
+            }
+            val card = holder(9).presentation
+            assertNull(card.clipBounds)
+            card.setRenderCaching(true)
+            face = floatArrayOf(0f, 0f, card.width.toFloat(), 0f,
+                card.width.toFloat(), card.height.toFloat(), 0f, card.height.toFloat())
+            card.mapCornerMorph(face)
+            val global = Matrix()
+            card.renderedMatrixToAncestor(null, global)
+            global.mapPoints(face)
+            ink = projectedCardLetteringCorners(card, ink = true)
+            for (index in 0 until recycler.childCount) {
+                val child = recycler.getChildAt(index)
+                if (child !== card) child.alpha = 0f
+            }
+        }
+        capturePerspective(s, "screen-facing-overflow", 7..10)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        for (opacity in listOf(1f, .45f)) {
+            s.onMain {
+                holder(9).presentation.setWindAlpha(opacity)
+                holder(9).previewText.alpha = 0f
+            }
+            awaitPresented(s)
+            val background = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                s.onMain { holder(9).previewText.alpha = 1f }
+                awaitPresented(s)
+                val lettering = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                try {
+                    var paintedOutside = 0
+                    for (y in ink[1].toInt().coerceAtLeast(0) until
+                        ink[5].toInt().coerceAtMost(lettering.height)) {
+                        for (x in ink[0].toInt().coerceAtLeast(0) until
+                            ink[2].toInt().coerceAtMost(lettering.width)) {
+                            val outside = (0..3).any { edge ->
+                                val next = (edge + 1) % 4
+                                val dx = face[next * 2] - face[edge * 2]
+                                val dy = face[next * 2 + 1] - face[edge * 2 + 1]
+                                dx * (y - face[edge * 2 + 1]) - dy * (x - face[edge * 2]) <
+                                    -2f * kotlin.math.hypot(dx, dy)
+                            }
+                            if (!outside) continue
+                            val before = background.getPixel(x, y)
+                            val after = lettering.getPixel(x, y)
+                            if (abs(Color.red(before) - Color.red(after)) +
+                                abs(Color.green(before) - Color.green(after)) +
+                                abs(Color.blue(before) - Color.blue(after)) > 30) {
+                                paintedOutside++
+                            }
+                        }
+                    }
+                    assertTrue("Card-edge clipping hid raised ink at wind opacity $opacity ($paintedOutside pixels)",
+                        paintedOutside > 50)
+                } finally {
+                    lettering.recycle()
+                }
+            } finally {
+                background.recycle()
+            }
+        }
+        capturePerspective(s, "screen-facing-overflow", 7..10)
     }
 
     @Test
@@ -1999,7 +2086,9 @@ class TimescapeFlowTest {
                 for (index in 0..1) {
                     val card = holder(index)
                     if (!card.presentation.isMediaPreview) assertScreenFacingCardLettering(card.presentation)
-                    assertEquals(card.itemView.height, card.itemView.clipBounds?.bottom)
+                    if (card.presentation.isMediaPreview) {
+                        assertEquals(card.itemView.height, card.itemView.clipBounds?.bottom)
+                    } else assertNull(card.itemView.clipBounds)
                     assertEquals(1f, card.preview.alpha, 0f)
                     if (!card.presentation.isMediaPreview) {
                         assertEquals(card.itemView.height, card.previewSurface.bottom)

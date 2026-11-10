@@ -104,8 +104,14 @@ there is no Compose migration, mesh, extra bitmap or new animation clock.
 The same inverse corner matrix handles taps and transformed touch coordinates,
 so the rectangular slot's empty corners do not capture card clicks. Morph corners
 stay inside that slot, preserving parent hit dispatch, clipping and ribbon layout.
-The transition's height clip is applied in the morph's source plane, so long text
-and media cannot spill past the moving slanted edges.
+The reading surface and media keep their height clip in the morph's source plane.
+Raised preview titles and summaries instead retain their natural projected baseline
+scale and may extend beyond all four slanted card edges; neither glyph containment
+nor card-edge clipping reduces their size. This does not change the ribbon's depth
+scale, text wrapping, media fitting or card hit region. Shared transition glyphs
+follow that same overflowing plane, while surplus reading paragraphs keep their
+viewport and lower fade. Text-transition and wind-opacity layers include the raised
+ink rather than cutting it off at the photographic face.
 Camera width ratios refer to actual screen-space projection distance, converted
 to View's DPI-normalized depth pixels (the underlying camera uses 72 pixels per
 unit), rather than incorrectly treating `View.cameraDistance` as screen pixels.
@@ -316,7 +322,8 @@ reading window no longer contains any of the summary's matching glyphs.
 bounded to a 1536px edge and one megapixel per text view. Mapping and rasterization
 are reused until text layout, dimensions, color or depth style change; caches are
 released at endpoints, on detachment and before media reuse. A single transparent,
-viewport-bounded text layer isolates these occlusions from the photograph and glass.
+text layer bounded to the viewport plus overflowing preview/shared ink isolates
+these occlusions from the photograph and glass.
 The two materials of each matching run still blend additively at identical positions,
 avoiding an opacity dip; different runs no longer accumulate their strokes.
 Occlusion gradients are cached with the snapshots, with no new per-frame bitmap

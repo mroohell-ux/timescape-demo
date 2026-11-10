@@ -44,6 +44,7 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
     private val sourceCorners = FloatArray(8)
     private val targetCorners = FloatArray(8)
     private val bottomPoint = FloatArray(2)
+    private val layerBounds = RectF()
     private var ready = false
     internal var snapshotCount = 0
         private set
@@ -188,12 +189,23 @@ internal class CardTextTransition(private val root: TimescapeCardLayout) {
             }
         }
         // Occlusion clears only this text layer, never the glass or photograph below.
-        val layer = canvas.saveLayer(0f, 0f, root.width.toFloat(), root.height.toFloat(), null)
+        layerBounds.set(0f, 0f, root.width.toFloat(), root.height.toFloat())
+        runs.forEach { layerBounds.union(it.inkBounds) }
+        preview.forEach { view ->
+            faces.getValue(view).extras.forEach { layerBounds.union(it.inkBounds) }
+        }
+        val layer = canvas.saveLayer(layerBounds, null)
         try {
-            reading.forEach {
-                val face = faces.getValue(it)
-                val alpha = if (it === reading[0]) metadataAlpha(progress) else smoothstep(progress)
-                drawExtras(canvas, face, alpha, collapse)
+            val saved = canvas.save()
+            try {
+                canvas.clipRect(0f, 0f, root.width.toFloat(), root.height.toFloat())
+                reading.forEach {
+                    val face = faces.getValue(it)
+                    val alpha = if (it === reading[0]) metadataAlpha(progress) else smoothstep(progress)
+                    drawExtras(canvas, face, alpha, collapse)
+                }
+            } finally {
+                canvas.restoreToCount(saved)
             }
             preview.forEach {
                 val alpha = if (it === preview[0]) metadataAlpha(collapse) else material

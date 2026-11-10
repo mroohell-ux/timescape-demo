@@ -13,11 +13,9 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.core.view.ViewCompat
-import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sign
 
 /** Separate overview and reading surfaces; media previews keep their source proportions. */
 class TimescapeCardLayout @JvmOverloads constructor(
@@ -47,7 +45,6 @@ class TimescapeCardLayout @JvmOverloads constructor(
     private var restingElevation = 0f
     private val density = resources.displayMetrics.density
     private lateinit var previewText: View
-    private lateinit var previewLettering: Array<TimescapeTextView>
     private lateinit var previewFace: View
     private lateinit var previewIcon: View
     private lateinit var readingFace: AspectRatioCardView
@@ -75,11 +72,10 @@ class TimescapeCardLayout @JvmOverloads constructor(
     private val letteringInverseParent = Matrix()
     private val letteringProjection = Matrix()
     private val appliedLetteringProjection = Matrix()
-    private val letteringCardCorners = FloatArray(8)
-    private val letteringInkCorners = FloatArray(8)
     private val letteringFootPoints = FloatArray(6)
-    private val letteringInkBounds = RectF()
-    private val letteringGlyphBounds = RectF()
+    private val letteringDrawBounds = RectF()
+    private val letteringDrawMatrix = Matrix()
+    private val windDrawBounds = RectF()
     private var letteringProjectionApplied = false
     private var cornerWidth = -1
     private var cornerHeight = -1
@@ -118,7 +114,9 @@ class TimescapeCardLayout @JvmOverloads constructor(
     }
 
     private fun updateSurfaceClip() {
-        clipBounds = if (flipLifted && expansionProgress == 1f) null else surfaceClip
+        clipBounds = if ((!isMediaPreview && expansionProgress < 1f) ||
+            (flipLifted && expansionProgress == 1f)
+        ) null else surfaceClip
     }
     override fun getChildDrawingOrder(childCount: Int, drawingPosition: Int): Int =
         childCount - 1 - drawingPosition
@@ -168,14 +166,6 @@ class TimescapeCardLayout @JvmOverloads constructor(
         }
         val geometry = letteringGeometry
         val away = 1f - expansionProgress
-        letteringInkBounds.setEmpty()
-        for (glyphs in previewLettering) {
-            if (glyphs.visibility == GONE || glyphs.text.isEmpty()) continue
-            if (glyphs.layout == null || glyphs.width == 0 || glyphs.height == 0) return
-            glyphs.renderedGlyphBounds(text, letteringGlyphBounds, letteringProjection)
-            letteringInkBounds.union(letteringGlyphBounds)
-        }
-        if (letteringInkBounds.isEmpty) return
         val footX = text.width / 2f
         val footY = (text.height - text.paddingBottom).coerceAtLeast(0).toFloat()
         text.pivotX = footX
@@ -233,18 +223,7 @@ class TimescapeCardLayout @JvmOverloads constructor(
             letteringCamera.restore()
         }
         letteringTargetWorld.preTranslate(-footX, -footY)
-        val halo = 3f * density
-        letteringInkCorners[0] = letteringInkBounds.left - halo
-        letteringInkCorners[1] = letteringInkBounds.top - halo
-        letteringInkCorners[2] = letteringInkBounds.right + halo
-        letteringInkCorners[3] = letteringInkCorners[1]
-        letteringInkCorners[4] = letteringInkCorners[2]
-        letteringInkCorners[5] = letteringInkBounds.bottom + 6f * density
-        letteringInkCorners[6] = letteringInkCorners[0]
-        letteringInkCorners[7] = letteringInkCorners[5]
-        letteringTargetWorld.mapPoints(letteringInkCorners)
-        val fittedScale = fitLetteringScale(anchorX, anchorY, scale)
-        letteringTargetWorld.postScale(fittedScale, fittedScale)
+        letteringTargetWorld.postScale(scale, scale)
         letteringTargetWorld.postTranslate(anchorX, anchorY)
 
         // Cancel the complete card/ancestor projection, not just its Euler angles.
@@ -256,42 +235,6 @@ class TimescapeCardLayout @JvmOverloads constructor(
             letteringProjectionApplied = true
             invalidate()
         }
-    }
-
-    private fun fitLetteringScale(anchorX: Float, anchorY: Float, scale: Float): Float {
-        letteringCardCorners[0] = 0f
-        letteringCardCorners[1] = 0f
-        letteringCardCorners[2] = width.toFloat()
-        letteringCardCorners[3] = 0f
-        letteringCardCorners[4] = width.toFloat()
-        letteringCardCorners[5] = height.toFloat()
-        letteringCardCorners[6] = 0f
-        letteringCardCorners[7] = height.toFloat()
-        letteringCardWorld.mapPoints(letteringCardCorners)
-        var area = 0f
-        for (corner in 0..3) {
-            val next = (corner + 1) % 4
-            area += letteringCardCorners[corner * 2] * letteringCardCorners[next * 2 + 1] -
-                letteringCardCorners[next * 2] * letteringCardCorners[corner * 2 + 1]
-        }
-        check(abs(area) > .01f) { "Card projection has no area for standing lettering" }
-        val orientation = sign(area)
-        var fitted = scale
-        for (edge in 0..3) {
-            val next = (edge + 1) % 4
-            val x = letteringCardCorners[edge * 2]
-            val y = letteringCardCorners[edge * 2 + 1]
-            val dx = letteringCardCorners[next * 2] - x
-            val dy = letteringCardCorners[next * 2 + 1] - y
-            val margin = ((dx * (anchorY - y) - dy * (anchorX - x)) * orientation).coerceAtLeast(0f)
-            for (corner in 0..3) {
-                val slope = (dx * letteringInkCorners[corner * 2 + 1] -
-                    dy * letteringInkCorners[corner * 2]) * orientation
-                if (slope < 0f) fitted = min(fitted, margin / -slope)
-            }
-        }
-        check(fitted.isFinite() && fitted > 0f) { "Standing lettering cannot fit inside the card projection" }
-        return fitted
     }
 
     internal fun setReadingWidth(width: Int) {
@@ -376,10 +319,31 @@ class TimescapeCardLayout @JvmOverloads constructor(
             return
         }
         // Native transition alpha rebuilds the whole perspective layer as lettering moves.
-        val saved = canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(),
-            (windAlpha * 255f).roundToInt())
+        windDrawBounds.set(0f, 0f, width.toFloat(), height.toFloat())
+        if (expansionProgress < 1f) {
+            previewText.renderedMatrixToAncestor(this, letteringDrawMatrix)
+            letteringDrawBounds.set(0f, 0f, previewText.width.toFloat(), previewText.height.toFloat())
+            letteringDrawMatrix.mapRect(letteringDrawBounds)
+            windDrawBounds.union(letteringDrawBounds)
+        }
+        cornerMatrix.mapRect(windDrawBounds)
+        val saved = canvas.saveLayerAlpha(windDrawBounds, (windAlpha * 255f).roundToInt())
         try {
             super.draw(canvas)
+        } finally {
+            canvas.restoreToCount(saved)
+        }
+    }
+
+    override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
+        if (child !== getChildAt(0) || isMediaPreview || expansionProgress == 1f) {
+            return super.drawChild(canvas, child, drawingTime)
+        }
+        // Only the raised preview may leave the card; the growing reader keeps its viewport.
+        val saved = canvas.save()
+        try {
+            canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+            return super.drawChild(canvas, child, drawingTime)
         } finally {
             canvas.restoreToCount(saved)
         }
@@ -395,7 +359,9 @@ class TimescapeCardLayout @JvmOverloads constructor(
         }
         val saved = canvas.save()
         canvas.concat(cornerMatrix)
-        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+        if (isMediaPreview || expansionProgress == 1f) {
+            canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+        }
         super.dispatchDraw(canvas)
         if (drawTextTransition) textTransition.draw(canvas, expansionProgress)
         canvas.restoreToCount(saved)
@@ -451,7 +417,6 @@ class TimescapeCardLayout @JvmOverloads constructor(
         super.onFinishInflate()
         check(childCount == 2) { "TimescapeCardLayout needs reading and preview surfaces" }
         previewText = findViewById(R.id.previewText)
-        previewLettering = arrayOf(findViewById(R.id.previewTitle), findViewById(R.id.previewSnippet))
         previewFace = findViewById(R.id.cardPreview)
         previewIcon = findViewById(R.id.previewTypeIcon)
         readingFace = findViewById(R.id.card)
