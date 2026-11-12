@@ -318,10 +318,19 @@ pieces of neighboring characters into another line. Unmatched preview text and
 ellipses also clear the text behind them as they appear, including when a scrolled
 reading window no longer contains any of the summary's matching glyphs.
 
-`CardTextTransition` caches transparent text-only snapshots while transitioning,
+`CardTextTransition` caches transparent text-only snapshots independently of the
+active transition and its reading-window clips,
 bounded to a 1536px edge and one megapixel per text view. Mapping and rasterization
-are reused until text layout, dimensions, color or depth style change; caches are
-released at endpoints, on detachment and before media reuse. A single transparent,
+are reused until text content/layout, dimensions, color or depth style change.
+Changing the window within a snapshot rebuilds only visible strips and boundary
+ink masks when the existing raster has exactly the same resolution and pixel grid;
+otherwise it captures the new visible window at the original resolution. It does
+not rasterize the whole document or enlarge the bitmap budget. Glyph matching,
+shaped strips, ink bounds and occlusion gradients are reused with the content.
+Endpoints restore the ordinary text views without discarding those cached assets.
+Inactive caches are released beyond 2.25 card pitches from the focus, on detachment
+and before media reuse, retaining only nearby visited cards rather than an entire
+Flow. No neighboring-card prewarming is performed. A single transparent,
 text layer bounded to the viewport plus overflowing preview/shared ink isolates
 these occlusions from the photograph and glass.
 The two materials of each matching run still blend additively at identical positions,

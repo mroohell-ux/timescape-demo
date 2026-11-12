@@ -26,6 +26,10 @@ class TimescapeTextView @JvmOverloads constructor(
     private val glyphBounds = RectF()
     internal var drawPassCount = 0
         private set
+    internal var contentRevision = 0
+        private set
+    internal var renderRevision = 0
+        private set
     private val recordDiagnostics = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     var depthAmount = 1f
         set(value) {
@@ -46,7 +50,13 @@ class TimescapeTextView @JvmOverloads constructor(
         super.requestLayout()
     }
 
+    override fun invalidate() {
+        renderRevision++
+        super.invalidate()
+    }
+
     override fun onTextChanged(text: CharSequence?, start: Int, lengthBefore: Int, lengthAfter: Int) {
+        contentRevision++
         glyphBoundsLayout = null
         super.onTextChanged(text, start, lengthBefore, lengthAfter)
     }

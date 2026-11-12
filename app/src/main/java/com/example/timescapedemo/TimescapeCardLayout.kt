@@ -13,6 +13,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.core.view.ViewCompat
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -88,6 +89,8 @@ class TimescapeCardLayout @JvmOverloads constructor(
     private var accessibilityExpanded: Boolean? = null
     val previewHeight: Int get() = compactHeight
     internal val textTransitionSnapshotCount: Int get() = textTransition.snapshotCount
+    internal val textTransitionPreparationCount: Int get() = textTransition.preparationCount
+    internal val textTransitionInkScanCount: Int get() = textTransition.inkScanCount
     internal val sharedTextRunCount: Int get() = textTransition.sharedRunCount
     internal var measurePassCount = 0
         private set
@@ -150,6 +153,7 @@ class TimescapeCardLayout @JvmOverloads constructor(
         letteringDepth = signedDistance
         letteringGeometry = geometry
         updateLetteringProjection()
+        if (abs(signedDistance) > 2.25f) textTransition.trimInactiveSnapshots()
     }
 
     internal fun updateLetteringProjection() {
@@ -446,7 +450,9 @@ class TimescapeCardLayout @JvmOverloads constructor(
         preview.alpha = 1f
         // Shared glyphs are drawn once on a continuous plane during the text transition.
         previewText.alpha = 1f
-        if (expansionProgress == 0f || expansionProgress == 1f) textTransition.clear()
+        if (expansionProgress == 0f || expansionProgress == 1f) {
+            textTransition.clear(releaseSnapshots = false)
+        }
         previewIcon.alpha = (1f - expansionProgress / 0.18f).coerceIn(0f, 1f)
         updateBackgroundSurfaces()
         collapseButton.alpha =

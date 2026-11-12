@@ -416,6 +416,207 @@ class TimescapeFlowTest {
     }
 
     @Test
+    fun containedReadingWindowsReuseGlyphsAndMatchFreshSnapshotsExactly() = scene { s ->
+        s.longText()
+        s.await { s.holder(5).textScroll.canScrollVertically(1) &&
+            s.holder(5).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(5)
+            val reader = card.textScroll
+            val bottom = reader.bottom
+            val full = card.presentation.getChildAt(0)
+            val scaleX = full.scaleX
+            val scaleY = full.scaleY
+            val otherText = listOf(card.time, card.title, card.previewTime, card.previewTitle, card.previewSnippet)
+                .associateWith { it.visibility }
+            val renderer = CardTextTransition(card.presentation)
+            fun frame(transition: CardTextTransition): Bitmap {
+                assertTrue(transition.prepare(.7f, false))
+                return Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                    Bitmap.Config.ARGB_8888).also { transition.draw(Canvas(it), .7f) }
+            }
+            try {
+                otherText.keys.forEach { it.visibility = View.GONE }
+                reader.scrollTo(0, 0)
+                reader.layout(reader.left, reader.top, reader.right, reader.top + dp(128))
+                assertTrue(renderer.prepare(.7f, false))
+                val captured = renderer.readingSnapshotBounds
+                val size = checkNotNull(renderer.readingSnapshotSize)
+                assertEquals(captured.width().toInt(), size.first)
+                assertEquals(captured.height().toInt(), size.second)
+                val snapshots = renderer.snapshotCount
+                for ((height, scale) in listOf(112 to 1f, 80 to 1f, 96 to 1f,
+                    128 to 1f, 80 to .73f, 81 to .73f, 82 to .73f, 96 to .73f, 128 to .73f)) {
+                    full.scaleX = scale
+                    full.scaleY = scale
+                    reader.layout(reader.left, reader.top, reader.right, reader.top + dp(height))
+                    val cached = frame(renderer)
+                    val fresh = CardTextTransition(card.presentation)
+                    try {
+                        val reference = frame(fresh)
+                        try {
+                            assertTrue("The cached display window changed its glyph pixels at $height dp",
+                                reference.sameAs(cached))
+                        } finally {
+                            reference.recycle()
+                        }
+                        assertEquals(snapshots, renderer.snapshotCount)
+                        assertEquals(captured, renderer.readingSnapshotBounds)
+                        assertEquals(reader.height.toFloat(), renderer.readingViewportBounds.height(), 0f)
+                    } finally {
+                        cached.recycle()
+                        fresh.clear()
+                    }
+                }
+                assertTrue(renderer.prepare(.7f, false))
+                val scans = renderer.inkScanCount
+                assertTrue(renderer.prepare(.3f, false))
+                assertEquals(scans, renderer.inkScanCount)
+                reader.layout(reader.left, reader.top, reader.right, reader.top + dp(144))
+                assertTrue(renderer.prepare(.7f, false))
+                assertEquals(snapshots + 1, renderer.snapshotCount)
+                assertEquals(reader.height.toFloat(), renderer.readingSnapshotBounds.height(), 0f)
+            } finally {
+                renderer.clear()
+                reader.layout(reader.left, reader.top, reader.right, bottom)
+                full.scaleX = scaleX
+                full.scaleY = scaleY
+                otherText.forEach { (view, visibility) -> view.visibility = visibility }
+            }
+        }
+    }
+
+    @Test
+    fun transitionEndpointsRetainGlyphsButInactiveTrimmingAndMediaReleaseThem() = scene { s ->
+        s.onMain { manager.restoreState(0, true) }
+        s.await { s.holder(0).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(0)
+            val renderer = CardTextTransition(card.presentation)
+            val frame = Bitmap.createBitmap(card.presentation.width, card.presentation.height,
+                Bitmap.Config.ARGB_8888)
+            fun pixels(): IntArray {
+                assertTrue(renderer.prepare(.46f, false))
+                frame.eraseColor(Color.TRANSPARENT)
+                renderer.draw(Canvas(frame), .46f)
+                return IntArray(frame.width * frame.height).also {
+                    frame.getPixels(it, 0, frame.width, 0, 0, frame.width, frame.height)
+                }
+            }
+            try {
+                val original = pixels()
+                val snapshots = renderer.snapshotCount
+                val scans = renderer.inkScanCount
+                renderer.trimInactiveSnapshots()
+                assertNotNull(renderer.readingSnapshotSize)
+                for (endpoint in listOf(1f, 0f, 1f)) {
+                    assertFalse(renderer.prepare(endpoint, false))
+                    assertEquals(1f, card.snippet.alpha, 0f)
+                    assertArrayEquals(original, pixels())
+                    assertEquals(snapshots, renderer.snapshotCount)
+                    assertEquals(scans, renderer.inkScanCount)
+                }
+                assertFalse(renderer.prepare(0f, false))
+                renderer.trimInactiveSnapshots()
+                assertNull(renderer.readingSnapshotSize)
+                assertArrayEquals(original, pixels())
+                assertTrue(renderer.snapshotCount > snapshots)
+                assertFalse(renderer.prepare(1f, false))
+                assertFalse(renderer.prepare(.46f, true))
+                assertNull(renderer.readingSnapshotSize)
+            } finally {
+                renderer.clear()
+                frame.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun nearbyVisitedCardsRetainTextAssetsButDistantInactiveCardsReleaseThem() = scene { s ->
+        s.onMain { manager.restoreState(0, true) }
+        s.await { s.holder(0).presentation.expansionProgress == 1f }
+        s.onMain {
+            val presentation = holder(0).presentation
+            val geometry = CardFlowGeometry()
+            fun prepare() {
+                presentation.setExpansion(.46f)
+                presentation.measure(
+                    View.MeasureSpec.makeMeasureSpec(presentation.width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                presentation.layout(presentation.left, presentation.top,
+                    presentation.left + presentation.measuredWidth,
+                    presentation.top + presentation.measuredHeight)
+                assertTrue(presentation.sharedTextRunCount > 0)
+            }
+            prepare()
+            val snapshots = presentation.textTransitionSnapshotCount
+            assertTrue(snapshots > 0)
+            presentation.setExpansion(0f)
+            presentation.setDepth(2f, geometry)
+            prepare()
+            assertEquals(snapshots, presentation.textTransitionSnapshotCount)
+            presentation.setDepth(3f, geometry)
+            assertTrue(presentation.sharedTextRunCount > 0)
+            assertEquals(snapshots, presentation.textTransitionSnapshotCount)
+            presentation.setExpansion(0f)
+            presentation.setDepth(3f, geometry)
+            prepare()
+            assertTrue(presentation.textTransitionSnapshotCount > snapshots)
+        }
+    }
+
+    @Test
+    fun retainedGlyphsInvalidateForMutableTextColorDepthFontAndVisibility() = scene { s ->
+        s.onMain { manager.restoreState(0, true) }
+        s.await { s.holder(0).presentation.expansionProgress == 1f }
+        s.onMain {
+            val card = holder(0)
+            val snippet = card.snippet
+            val renderer = CardTextTransition(card.presentation)
+            fun relayout() {
+                snippet.measure(View.MeasureSpec.makeMeasureSpec(snippet.width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                snippet.layout(snippet.left, snippet.top, snippet.right, snippet.top + snippet.measuredHeight)
+            }
+            fun changed(mutation: () -> Unit) {
+                val snapshots = renderer.snapshotCount
+                assertFalse(renderer.prepare(1f, false))
+                mutation()
+                assertTrue(renderer.prepare(.46f, false))
+                assertEquals(snapshots + 1, renderer.snapshotCount)
+            }
+            try {
+                snippet.setText("Editable paragraph 🌄 مرحبا بالعالم ".repeat(8),
+                    android.widget.TextView.BufferType.EDITABLE)
+                relayout()
+                assertTrue(renderer.prepare(.46f, false))
+                val layout = snippet.layout
+                changed { snippet.editableText.replace(0, 1, "Q") }
+                assertSame(layout, snippet.layout)
+                changed { snippet.setTextColor(Color.CYAN) }
+                changed { snippet.depthAmount = .4f }
+                changed {
+                    snippet.editableText.setSpan(android.text.style.ForegroundColorSpan(Color.MAGENTA),
+                        0, 4, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                changed {
+                    snippet.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, snippet.textSize * 1.2f)
+                    relayout()
+                }
+                val preparations = renderer.preparationCount
+                card.previewSnippet.visibility = View.GONE
+                assertTrue(renderer.prepare(.46f, false))
+                assertEquals(preparations + 1, renderer.preparationCount)
+                card.previewSnippet.visibility = View.VISIBLE
+                assertTrue(renderer.prepare(.46f, false))
+                assertEquals(preparations + 2, renderer.preparationCount)
+            } finally {
+                renderer.clear()
+            }
+        }
+    }
+
+    @Test
     fun glassPhotographsKeepWhiteAndCustomLetteringAndNeverLeakIntoRecycledMedia() = scene { s ->
         s.onMain {
             val card = holder(0)

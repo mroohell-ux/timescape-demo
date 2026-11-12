@@ -281,14 +281,21 @@ class CardFlowPerformanceTest {
                 var initialMeasures = 0
                 var initialIntrinsicMeasures = 0
                 var initialDraws = 0
+                var initialSnapshots = 0
+                var initialPreparations = 0
+                var initialInkScans = 0
                 scene.onMain {
                     initialMeasures = measureCount()
                     initialIntrinsicMeasures = intrinsicMeasureCount()
                     initialDraws = drawCount()
+                    initialSnapshots = snapshotCount()
+                    initialPreparations = preparationCount()
+                    initialInkScans = inkScanCount()
                     activity.window.addOnFrameMetricsAvailableListener(listener, handler)
                     listening = true
                 }
-                val calls = scene.frames(240)
+                val reversing = InstrumentationRegistry.getArguments().getString("profileReverse") == "true"
+                val calls = scene.frames(240, reversing)
                 SystemClock.sleep(100)
                 scene.onMain {
                     activity.window.removeOnFrameMetricsAvailableListener(listener)
@@ -301,19 +308,28 @@ class CardFlowPerformanceTest {
                 var measures = 0
                 var intrinsicMeasures = 0
                 var draws = 0
+                var snapshots = 0
+                var preparations = 0
+                var inkScans = 0
                 scene.onMain {
                     measures = measureCount() - initialMeasures
                     intrinsicMeasures = intrinsicMeasureCount() - initialIntrinsicMeasures
                     draws = drawCount() - initialDraws
+                    snapshots = snapshotCount() - initialSnapshots
+                    preparations = preparationCount() - initialPreparations
+                    inkScans = inkScanCount() - initialInkScans
                 }
                 val result = JSONObject().apply {
                     put("mode", if (reading) "reading" else "overview")
                     put("previewEffectsDisabled", scene.disablePreviewEffects)
+                    put("reversing", reversing)
                     put("frames", samples.size)
                     put("droppedReports", droppedReports)
                     put("scrollCalls", calls.size)
                     put("scrollP50Ms", percentile(calls, .5))
                     put("scrollP95Ms", percentile(calls, .95))
+                    put("scrollMeanMs", calls.average())
+                    put("scrollTotalMs", calls.sum())
                     put("frameP50Ms", percentile(samples.map { it.total }, .5))
                     put("frameP95Ms", percentile(samples.map { it.total }, .95))
                     put("layoutP95Ms", percentile(samples.map { it.layout }, .95))
@@ -327,6 +343,9 @@ class CardFlowPerformanceTest {
                     put("measurementPasses", measures)
                     put("previewIntrinsicMeasurementPasses", intrinsicMeasures)
                     put("textDrawPasses", draws)
+                    put("textSnapshots", snapshots)
+                    put("textPreparations", preparations)
+                    put("textInkScans", inkScans)
                 }
                 val label = InstrumentationRegistry.getArguments().getString("profileLabel") ?: "current"
                 require(label.matches(Regex("[a-zA-Z0-9_-]+")))
@@ -416,6 +435,9 @@ class CardFlowPerformanceTest {
             InstrumentationRegistry.getInstrumentation().runOnMainSync { block() }
         fun measureCount(): Int = cards.sumOf { it.measurePassCount }
         fun intrinsicMeasureCount(): Int = cards.sumOf { it.previewIntrinsicMeasureCount }
+        fun snapshotCount(): Int = cards.sumOf { it.textTransitionSnapshotCount }
+        fun preparationCount(): Int = cards.sumOf { it.textTransitionPreparationCount }
+        fun inkScanCount(): Int = cards.sumOf { it.textTransitionInkScanCount }
         fun drawCount(): Int {
             fun count(view: View): Int {
                 var result = (view as? TimescapeTextView)?.drawPassCount ?: 0
@@ -434,7 +456,7 @@ class CardFlowPerformanceTest {
             }
             throw AssertionError("Card profile fixture was not ready")
         }
-        fun frames(count: Int): List<Double> {
+        fun frames(count: Int, reversing: Boolean = false): List<Double> {
             val complete = CountDownLatch(1)
             val durations = mutableListOf<Double>()
             intervals.clear()
@@ -448,7 +470,7 @@ class CardFlowPerformanceTest {
                         if (previousFrame != 0L) intervals += (frameTimeNanos - previousFrame) / 1e6
                         previousFrame = frameTimeNanos
                         val start = System.nanoTime()
-                        recycler.scrollBy(0, dp(14))
+                        recycler.scrollBy(0, dp(if (reversing && durations.size / 8 % 2 == 1) -14 else 14))
                         durations += (System.nanoTime() - start) / 1e6
                         if (durations.size < count) choreographer.postFrameCallback(this)
                         else complete.countDown()
