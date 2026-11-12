@@ -72,6 +72,32 @@ continues facing the screen, and photographs retain their original orientation.
 Depth changes continuously while scrolling.
 Overview scrolling never automatically expands a card.
 
+In landscape, the ribbon runs left-to-right instead of top-to-bottom. The active
+card is centered horizontally; its upright neighbors taper, curve and fan toward
+the left/right edges. The same distance-based pose and corner timing are transposed,
+with yaw taking the main hinge and the outer vertical edges taking the mirrored
+fan correction. Photographs and screen-facing lettering are not rotated.
+Opening makes room along the horizontal axis without a vertical focus jump.
+The reading width uses 58% of the available pane width, bounded to 260-640dp,
+and horizontal logical pitch uses 60% of that width, bounded to 160-320dp before
+font scaling. The collapse control moves beside the reading face, saving vertical
+space; media/photograph preview bounds track that sidebar during expansion.
+Single-finger horizontal drags browse cards even when a reverse face exists.
+Landscape flipping uses the existing flip button, Space key or stylus control;
+portrait retains its horizontal flip gesture. Long text/images still scroll
+vertically inside their reading viewport. Nested reader handoff keeps the outer
+Flow pager blocked while the card RecyclerView takes a horizontal drag.
+Flow paging remains available in empty areas; two-pane Flow navigation does not
+steal swipes that started on a card. Landscape Left/Right keys browse cards and
+Up/Down keys switch Flows. Portrait key mapping is unchanged. Bookmark navigation,
+prefetch, edge resistance, settling and scroll vectors use the active ribbon axis.
+Rotation/restoration retains the current card and reading mode.
+
+Full-screen Flow/card/search scrolling containers remain keyboard-focusable, but
+disable Android's default focus highlight. Otherwise the first keyboard event
+can tint the entire viewport until touch mode resumes, appearing as a persistent
+grey veil. Buttons and text inputs retain their normal focus feedback.
+
 `CardFlowGeometry.kt` centralizes tuning. Pass a `CardFlowGeometry` to the layout
 manager or assign `manager.geometry = manager.geometry.copy(...)` to apply it on
 the next layout without resetting selection, scroll or reader offsets:

@@ -97,6 +97,7 @@ data class CardFlowGeometry(
         val away = progress * progress * (3f - 2f * progress) * (1f - opening)
         val bendDepth = abs(depth).coerceAtMost(6f)
         pose.depthScale = scaleAtDepth(depth)
+        pose.scaleX = 1f
         pose.scaleY = 1f + (distantScaleY - 1f) * away
         val beyondNeighbor = max(0f, abs(depth) / tiltDepth - 1f)
         val pitchWeight = 1f - pitchDepthVariation / (1f + beyondNeighbor * .35f)
@@ -111,6 +112,34 @@ data class CardFlowGeometry(
         pose.bend = (-sin(bendDepth * bendFrequency) * lateralBend +
             bendDepth * lateralDrift) * (1f - opening)
         sampleCorners(depth, pose.depthScale, pose.corners)
+    }
+
+    internal fun sampleHorizontal(depth: Float, opening: Float, pose: CardFlowPose) {
+        sample(depth, opening, pose)
+        val pitch = pose.pitch
+        pose.pitch = -pose.yaw
+        pose.yaw = -pitch
+        pose.outerEdgeAngle = -pose.outerEdgeAngle
+        val pivotX = pose.pivotX
+        pose.pivotX = pose.pivotY
+        pose.pivotY = pivotX
+        pose.scaleX = pose.scaleY
+        pose.scaleY = 1f
+        val corners = pose.corners
+        val topLeftX = corners[0]
+        val topRightX = corners[2]
+        val topRightY = corners[3]
+        val bottomRightX = corners[4]
+        val bottomLeftX = corners[6]
+        val bottomLeftY = corners[7]
+        corners[0] = corners[1]
+        corners[1] = topLeftX
+        corners[2] = bottomLeftY
+        corners[3] = bottomLeftX
+        corners[4] = corners[5]
+        corners[5] = bottomRightX
+        corners[6] = topRightY
+        corners[7] = topRightX
     }
 
     private fun sampleCorners(depth: Float, scale: Float, corners: FloatArray) {
@@ -161,6 +190,7 @@ data class CardFlowGeometry(
 
 internal class CardFlowPose {
     var depthScale = 1f
+    var scaleX = 1f
     var scaleY = 1f
     var pitch = 0f
     var yaw = 0f

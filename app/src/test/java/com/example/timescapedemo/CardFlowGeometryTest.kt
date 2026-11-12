@@ -27,6 +27,56 @@ class CardFlowGeometryTest {
         }
     }
 
+    @Test fun horizontalRibbonTurnsThePoseAndCornerOrderWithoutRotatingContent() {
+        val order = intArrayOf(0, 3, 2, 1)
+        for (depth in listOf(-6f, -.75f, -.25f, 0f, .25f, .75f, 6f)) {
+            for (opening in listOf(0f, .5f, 1f)) {
+                val vertical = pose(depth, opening)
+                val horizontal = CardFlowPose().also { geometry.sampleHorizontal(depth, opening, it) }
+                assertEquals(-vertical.yaw, horizontal.pitch, 0f)
+                assertEquals(-vertical.pitch, horizontal.yaw, 0f)
+                assertEquals(-vertical.outerEdgeAngle, horizontal.outerEdgeAngle, 0f)
+                assertEquals(vertical.pivotY, horizontal.pivotX, 0f)
+                assertEquals(vertical.pivotX, horizontal.pivotY, 0f)
+                assertEquals(vertical.depthScale, horizontal.depthScale, 0f)
+                assertEquals(vertical.bend, horizontal.bend, 0f)
+                for (corner in 0..3) {
+                    assertEquals(vertical.corners[order[corner] * 2 + 1], horizontal.corners[corner * 2], 0f)
+                    assertEquals(vertical.corners[order[corner] * 2], horizontal.corners[corner * 2 + 1], 0f)
+                }
+            }
+        }
+    }
+
+    @Test fun horizontalSidesMirrorAcrossTheFocusAndUseTheSameSpacing() {
+        for (step in 1..600) {
+            val depth = step / 100f
+            val right = CardFlowPose().also { geometry.sampleHorizontal(depth, .4f, it) }
+            val left = CardFlowPose().also { geometry.sampleHorizontal(-depth, .4f, it) }
+            assertEquals(right.pitch, left.pitch, 0f)
+            assertEquals(-right.yaw, left.yaw, 0f)
+            assertEquals(-right.outerEdgeAngle, left.outerEdgeAngle, 0f)
+            assertEquals(1f - right.pivotX, left.pivotX, .000001f)
+            assertEquals(right.pivotY, left.pivotY, 0f)
+            val mirrored = intArrayOf(1, 0, 3, 2)
+            for (corner in 0..3) {
+                assertEquals(1f - right.corners[mirrored[corner] * 2], left.corners[corner * 2], .000001f)
+                assertEquals(right.corners[mirrored[corner] * 2 + 1], left.corners[corner * 2 + 1], .000001f)
+            }
+        }
+    }
+
+    @Test fun axisChangesResetReusedPoseScaleWithoutAllocatingAnotherPose() {
+        val settings = geometry.copy(distantScaleY = .9f)
+        val sample = CardFlowPose()
+        settings.sampleHorizontal(2f, 0f, sample)
+        assertEquals(.9f, sample.scaleX, 0f)
+        assertEquals(1f, sample.scaleY, 0f)
+        settings.sample(2f, 0f, sample)
+        assertEquals(1f, sample.scaleX, 0f)
+        assertEquals(.9f, sample.scaleY, 0f)
+    }
+
     @Test fun approachingFocusContinuouslyUnfoldsAndReversingRetracesIt() {
         var lastAngle = 31f
         var lastScale = 0f

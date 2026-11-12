@@ -42,6 +42,252 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 class TimescapeFlowTest {
     @Test
+    fun horizontalRibbonBrowsesAndExchangesExpansionWithoutVerticalMotion() = scene(horizontal = true) { s ->
+        s.openCard(5)
+        s.onMain {
+            assertFalse(manager.canScrollVertically())
+            assertTrue(manager.canScrollHorizontally())
+            val forward = checkNotNull(manager.computeScrollVectorForPosition(6))
+            assertEquals(1f, forward.x, 0f)
+            assertEquals(0f, forward.y, 0f)
+            val before = projectedCorners(holder(5).itemView)
+            recycler.scrollBy(0, dp(40))
+            assertArrayEquals(before, projectedCorners(holder(5).itemView), 0f)
+            recycler.scrollBy(dp(40), 0)
+            assertTrue(holder(5).presentation.expansionProgress in 0f..1f)
+            assertTrue(holder(6).presentation.expansionProgress > 0f)
+            assertEquals(1f, holder(5).presentation.expansionProgress + holder(6).presentation.expansionProgress, .001f)
+            recycler.scrollBy(-dp(40), 0)
+            assertArrayEquals(before, projectedCorners(holder(5).itemView), 1f)
+            assertEquals(5, manager.nearestIndex())
+            assertEquals(0, manager.offsetTo(5))
+        }
+    }
+
+    @Test
+    fun horizontalProjectedCardsMirrorTheirSideEdgesAndKeepLetteringUpright() = scene(horizontal = true) { s ->
+        s.onMain {
+            val template = checkNotNull(adapter.getItemAt(5))
+            adapter.submitList((0 until 9).map {
+                template.copy(id = 100L + it, title = "Card $it", snippet = "A quiet afternoon.")
+            }) { manager.restoreState(4, false) }
+        }
+        s.await { s.manager.nearestIndex() == 4 && s.recycler.findViewHolderForAdapterPosition(5) != null }
+        s.onMain {
+            val axis = recycler.width / 2f
+            val left = projectedCorners(holder(3).itemView)
+            val right = projectedCorners(holder(5).itemView)
+            val reflected = intArrayOf(1, 0, 3, 2)
+            for (corner in 0..3) {
+                assertEquals(axis * 2f - right[reflected[corner] * 2], left[corner * 2], 1f)
+                assertEquals(right[reflected[corner] * 2 + 1], left[corner * 2 + 1], 1f)
+            }
+            for (index in 3..5) {
+                val card = holder(index)
+                assertEquals(0f, card.previewText.rotation, 0f)
+                val heading = boundsInAncestor(card.previewTitle, card.presentation)
+                val body = boundsInAncestor(card.previewSnippet, card.presentation)
+                assertTrue("Landscape lettering was rotated or reflected", body.centerY() > heading.centerY())
+                assertScreenFacingCardLettering(card.presentation)
+                assertNaturalCardLetteringScale(card.presentation)
+            }
+            assertTrue(holder(3).itemView.rotationY > 0f)
+            assertTrue(holder(5).itemView.rotationY < 0f)
+        }
+        capturePerspective(s, "horizontal-overview", 3..5)
+    }
+
+    @Test
+    fun horizontalReadingScrollsProseVerticallyAndSwipesCardsInsteadOfFlipping() = scene(horizontal = true) { s ->
+        s.longText()
+        s.openCard(5)
+        var savedOffset = 0
+        s.onMain {
+            val card = holder(5)
+            assertFalse(card.flip.gestureEnabled)
+            assertTrue(card.textScroll.canScrollVertically(1))
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            swipe(recycler, frame.centerX(), frame.centerY() + dp(20),
+                frame.centerX(), frame.centerY() - dp(40), MotionEvent.ACTION_CANCEL)
+        }
+        s.await { s.holder(5).textScroll.scrollY > 0 && s.manager.isFocused(5) }
+        s.onMain {
+            val card = holder(5)
+            savedOffset = card.textScroll.scrollY
+            val frame = boundsInAncestor(card.textScroll, recycler)
+            swipe(recycler, frame.centerX(), frame.centerY(),
+                frame.centerX() - dp(160), frame.centerY(), MotionEvent.ACTION_CANCEL)
+            assertFalse(card.flip.isFlipping)
+            assertEquals(HandwritingFace.FRONT, adapter.currentFaceFor(5))
+        }
+        s.await { s.manager.isFocused(6) && s.holder(6).presentation.expansionProgress == 1f }
+        s.openCard(5)
+        s.onMain { assertEquals(savedOffset, holder(5).textScroll.scrollY) }
+    }
+
+    @Test
+    fun horizontalButtonFlippingStillWorksAndTheCollapseControlUsesTheSide() = scene(horizontal = true) { s ->
+        s.longText()
+        s.openCard(5)
+        s.onMain {
+            val card = holder(5)
+            val full = card.presentation.getChildAt(0) as android.widget.LinearLayout
+            assertEquals(android.widget.LinearLayout.HORIZONTAL, full.orientation)
+            val collapse = boundsInAncestor(card.collapseButton, card.presentation)
+            val content = boundsInAncestor(card.card, card.presentation)
+            assertTrue(collapse.right <= content.left + dp(1))
+            assertTrue(card.flip.flip())
+        }
+        s.await { s.adapter.currentFaceFor(5) == HandwritingFace.BACK && !s.holder(5).flip.isFlipping }
+        s.onMain {
+            assertTrue(holder(5).snippet.text.startsWith("Back"))
+            assertTrue(holder(5).flip.flip())
+        }
+        s.await { s.adapter.currentFaceFor(5) == HandwritingFace.FRONT && !s.holder(5).flip.isFlipping }
+    }
+
+    @Test
+    fun changingTheRibbonAxisPreservesTheContinuousReadingPosition() = scene { s ->
+        s.openCard(5)
+        var offset = 0
+        s.onMain {
+            recycler.scrollBy(0, dp(34))
+            offset = manager.offsetTo(6)
+            manager.orientation = RecyclerView.HORIZONTAL
+        }
+        s.await { !s.holder(5).flip.gestureEnabled && !s.holder(5).presentation.isLayoutRequested }
+        s.onMain {
+            assertEquals(offset, manager.offsetTo(6))
+            assertEquals(5, manager.nearestIndex())
+            manager.orientation = RecyclerView.VERTICAL
+        }
+        s.await { s.holder(5).flip.gestureEnabled && !s.holder(5).presentation.isLayoutRequested }
+        s.onMain {
+            assertEquals(offset, manager.offsetTo(6))
+            assertEquals(5, manager.nearestIndex())
+        }
+    }
+
+    @Test
+    fun horizontalMediaPreviewAndReadingFrameStayAlignedThroughoutOpening() = scene(horizontal = true) { s ->
+        s.onMain {
+            val panorama = File.createTempFile("horizontal-panorama-", ".png", root.context.cacheDir)
+            val bitmap = Bitmap.createBitmap(1200, 120, Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(Color.BLUE)
+                panorama.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            } finally {
+                bitmap.recycle()
+            }
+            files += panorama
+            adapter.submitList((0 until adapter.itemCount).map { checkNotNull(adapter.getItemAt(it)) } +
+                CardItem(10, "Panorama", "", image = CardImage(Uri.fromFile(panorama))))
+        }
+        s.await { s.adapter.itemCount == 10 }
+        for (direction in listOf(View.LAYOUT_DIRECTION_LTR, View.LAYOUT_DIRECTION_RTL)) {
+            s.onMain { root.layoutDirection = direction }
+            for (index in listOf(1, 2, 4, 8, 9)) {
+                s.openCard(index)
+                s.await { s.holder(index).previewImage.drawable != null }
+                s.onMain {
+                    val card = holder(index)
+                    val source = if (index == 4) card.handwriting else card.imageCard
+                    val aspect = checkNotNull(source.drawable).let {
+                        it.intrinsicWidth.toFloat() / it.intrinsicHeight
+                    }
+                    assertEquals(source.width / aspect, source.height.toFloat(), 1f)
+                    assertEquals(if (direction == View.LAYOUT_DIRECTION_RTL) 90f else -90f,
+                        card.collapseButton.rotation, 0f)
+                    for (opening in listOf(1f, .999f, .75f, .5f, .25f)) {
+                        val presentation = card.presentation
+                        presentation.setExpansion(opening)
+                        presentation.measure(
+                            View.MeasureSpec.makeMeasureSpec(dp(260), View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                        )
+                        presentation.layout(0, 0, presentation.measuredWidth, presentation.measuredHeight)
+                        val preview = boundsInAncestor(card.preview, presentation)
+                        val reading = boundsInAncestor(card.card, presentation)
+                        val diagnostic = "Media $index at $opening: reading=$reading preview=$preview " +
+                            "full=${presentation.getChildAt(0).width}x${presentation.getChildAt(0).height} " +
+                            "scale=${presentation.getChildAt(0).scaleX} preview=${card.preview.width}x${card.preview.height} " +
+                            "scale=${card.previewSurface.scaleX} direction=$direction"
+                        assertEquals("$diagnostic: left", reading.left, preview.left, 1.5f)
+                        assertEquals("$diagnostic: top", reading.top, preview.top, 1.5f)
+                        assertEquals("$diagnostic: right", reading.right, preview.right, 1.5f)
+                        assertEquals("$diagnostic: bottom", reading.bottom, preview.bottom, 1.5f)
+                        assertEquals(card.previewSurface.scaleX, card.previewSurface.scaleY, 0f)
+                        assertTrue(preview.bottom <= presentation.height + 1f)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun horizontalEndpointPullsRetraceOnTheXaxisAndKeepTheReadingFaceOpen() = scene(horizontal = true) { s ->
+        for ((index, direction) in listOf(0 to -1, 8 to 1)) {
+            s.openCard(index)
+            s.onMain {
+                val card = holder(index).presentation
+                val original = projectedCorners(card)
+                recycler.scrollBy(direction * dp(160), 0)
+                val pulled = projectedCorners(card)
+                assertTrue(abs(pulled[0] - original[0]) > dp(5))
+                assertTrue(abs(pulled[0] - original[0]) < minOf(dp(96).toFloat(), recycler.width * .12f))
+                for (corner in 0..3) {
+                    assertEquals(original[corner * 2 + 1], pulled[corner * 2 + 1], .01f)
+                    assertEquals(pulled[0] - original[0], pulled[corner * 2] - original[corner * 2], .01f)
+                }
+                recycler.scrollBy(-direction * dp(40), 0)
+                assertTrue(abs(projectedCorners(card)[0] - original[0]) < abs(pulled[0] - original[0]))
+                recycler.scrollBy(-direction * dp(120), 0)
+                assertArrayEquals(original, projectedCorners(card), .01f)
+                assertEquals(1f, card.expansionProgress, 0f)
+                assertEquals(0, manager.offsetTo(index))
+                recycler.scrollBy(-direction * dp(50), 0)
+                assertTrue(holder(index - direction).presentation.expansionProgress > 0f)
+                manager.settleScrollIfNeeded()
+            }
+            s.await { s.manager.isFocused(index) }
+        }
+    }
+
+    @Test
+    fun horizontalPrefetchUsesTheCompressedRibbonWindowAndIgnoresTheYaxis() = scene(horizontal = true) { s ->
+        s.onMain {
+            val template = checkNotNull(adapter.getItemAt(5))
+            adapter.submitList((0 until 160).map { template.copy(id = it.toLong(), title = "Card $it") }) {
+                manager.restoreState(80, false)
+            }
+        }
+        s.await { s.manager.nearestIndex() == 80 && s.recycler.findViewHolderForAdapterPosition(80) != null }
+        s.onMain {
+            val attached = (0 until recycler.childCount).map {
+                recycler.getChildAdapterPosition(recycler.getChildAt(it))
+            }
+            val positions = mutableMapOf<Int, Int>()
+            val registry = object : RecyclerView.LayoutManager.LayoutPrefetchRegistry {
+                override fun addPosition(layoutPosition: Int, pixelDistance: Int) {
+                    positions[layoutPosition] = pixelDistance
+                }
+            }
+            val state = RecyclerView.State()
+            manager.collectAdjacentPrefetchPositions(0, dp(480), state, registry)
+            assertTrue(positions.isEmpty())
+            manager.collectAdjacentPrefetchPositions(dp(480), 0, state, registry)
+            assertTrue(positions.isNotEmpty())
+            assertTrue(positions.keys.all { it > attached.max() })
+            assertTrue(positions.values.all { it >= 0 })
+            positions.clear()
+            manager.collectAdjacentPrefetchPositions(-dp(480), 0, state, registry)
+            assertTrue(positions.isNotEmpty())
+            assertTrue(positions.keys.all { it < attached.min() })
+            assertTrue(positions.values.all { it >= 0 })
+        }
+    }
+
+    @Test
     fun previewDatesSitOnTheLowerCardFaceSeparateFromRaisedProse() = scene { s ->
         for (index in listOf(0, 6, 7)) {
             s.onMain { manager.restoreState(index, false) }
@@ -3342,11 +3588,11 @@ class TimescapeFlowTest {
         }
     }
 
-    private fun scene(allActions: Boolean = false, test: (Scene) -> Unit) {
+    private fun scene(allActions: Boolean = false, horizontal: Boolean = false, test: (Scene) -> Unit) {
         ActivityScenario.launch(TimescapeFlowTestActivity::class.java).use { scenario ->
             lateinit var scene: Scene
             scenario.onActivity { activity ->
-                scene = Scene(activity, allActions)
+                scene = Scene(activity, allActions, horizontal)
                 activity.setContentView(scene.root)
             }
             try {
@@ -3432,10 +3678,12 @@ class TimescapeFlowTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
     }
 
-    private class Scene(activity: TimescapeFlowTestActivity, allActions: Boolean) {
+    private class Scene(activity: TimescapeFlowTestActivity, allActions: Boolean, horizontal: Boolean) {
         val root = FrameLayout(activity)
         val recycler = RecyclerView(activity)
-        val manager = RightRailFlowLayoutManager(dp(340), dp(360), dp(138), dp(8))
+        val manager = if (horizontal) {
+            RightRailFlowLayoutManager(dp(260), dp(260), dp(160), dp(8), orientation = RecyclerView.HORIZONTAL)
+        } else RightRailFlowLayoutManager(dp(340), dp(360), dp(138), dp(8))
         val files = mutableListOf<File>()
         val actionClicks = mutableListOf<Pair<String, Long>>()
         val adapter = CardsAdapter(
@@ -3489,7 +3737,7 @@ class TimescapeFlowTest {
                     if (newState == RecyclerView.SCROLL_STATE_IDLE) manager.settleScrollIfNeeded()
                 }
             })
-            root.addView(recycler, FrameLayout.LayoutParams(-1, -1))
+            root.addView(recycler, FrameLayout.LayoutParams(-1, if (horizontal) dp(280) else -1, Gravity.CENTER))
             adapter.submitList(listOf(
                 CardItem(1, "Mountain morning", "A quiet moment above the clouds. ".repeat(35), bg = BgImage.Res(R.drawable.bg_2)),
                 CardItem(2, "Portrait", "", image = CardImage(Uri.fromFile(portrait))),

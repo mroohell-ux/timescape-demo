@@ -86,6 +86,12 @@ class GestureCardFlipLayout @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : FrameLayout(context, attrs) {
+    var gestureEnabled = true
+        set(value) {
+            if (field == value) return
+            field = value
+            if (!value && direction != Direction.NONE) cancelInteraction()
+        }
     var canFlip: () -> Boolean = { false }
     var onPrepare: () -> Unit = {}
     var onFlipStarted: () -> Unit = {}
@@ -260,7 +266,9 @@ class GestureCardFlipLayout @JvmOverloads constructor(
                 offsetDescendantRectToMyCoords(seekBar, controlBounds)
                 controlBounds.contains(event.x.toInt(), event.y.toInt())
             }
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && canFlip() && !finishing && !onSeekBar) {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && gestureEnabled &&
+            canFlip() && !finishing && !onSeekBar
+        ) {
             pendingTarget = null
             pointerId = event.getPointerId(0)
             downX = event.x

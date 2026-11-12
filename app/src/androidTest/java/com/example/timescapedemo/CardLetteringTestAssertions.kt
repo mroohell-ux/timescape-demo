@@ -3,6 +3,7 @@ package com.example.timescapedemo
 import android.graphics.Matrix
 import android.graphics.RectF
 import android.view.View
+import android.widget.LinearLayout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import kotlin.math.hypot
@@ -49,7 +50,8 @@ internal fun assertNaturalCardLetteringScale(card: TimescapeCardLayout) {
     parent.renderedMatrixToAncestor(card, natural)
     natural.preTranslate((text.left - parent.scrollX).toFloat(),
         (text.top - parent.scrollY).toFloat())
-    val footY = (text.height - text.paddingBottom).toFloat()
+    val horizontal = (card.getChildAt(0) as LinearLayout).orientation == LinearLayout.HORIZONTAL
+    val footY = if (horizontal) text.height / 2f else (text.height - text.paddingBottom).toFloat()
     val fit = card.width.toFloat() / text.width
     natural.preScale(fit, fit, 0f, footY)
     val baseline = floatArrayOf(0f, footY, text.width.toFloat(), footY)

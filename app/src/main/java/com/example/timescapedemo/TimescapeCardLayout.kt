@@ -10,9 +10,12 @@ import android.graphics.Matrix
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import androidx.core.view.ViewCompat
+import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
@@ -38,6 +41,10 @@ class TimescapeCardLayout @JvmOverloads constructor(
     private var intrinsicPreviewHeight = 0
     private var intrinsicPreviewWidth = -1
     private var readingHeaderHeight = 0
+    private var readingHeaderWidth = 0
+    private var readingMediaVerticalGap = 0f
+    private var horizontalFlow = false
+    private var cardTouchActive = false
     private var readingWidth = 0
     private var readingScale = 1f
     private var previewScale = 1f
@@ -156,6 +163,35 @@ class TimescapeCardLayout @JvmOverloads constructor(
         if (abs(signedDistance) > 2.25f) textTransition.trimInactiveSnapshots()
     }
 
+    internal fun setHorizontalFlow(horizontal: Boolean) {
+        if (horizontalFlow == horizontal) return
+        horizontalFlow = horizontal
+        cardFlip.gestureEnabled = !horizontal
+        cardFlip.cancelInteraction()
+        val full = getChildAt(0) as LinearLayout
+        full.orientation = if (horizontal) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        full.gravity = if (horizontal) Gravity.CENTER_VERTICAL else Gravity.CENTER_HORIZONTAL
+        val margins = collapseButton.layoutParams as LinearLayout.LayoutParams
+        margins.gravity = if (horizontal) Gravity.CENTER_VERTICAL else Gravity.END
+        margins.marginEnd = if (horizontal) (4f * density).roundToInt() else 0
+        margins.bottomMargin = if (horizontal) 0 else (4f * density).roundToInt()
+        collapseButton.layoutParams = margins
+        updateCollapseDirection()
+        textTransition.clear()
+        requestLayout()
+    }
+
+    override fun onRtlPropertiesChanged(layoutDirection: Int) {
+        super.onRtlPropertiesChanged(layoutDirection)
+        if (::collapseButton.isInitialized) updateCollapseDirection()
+    }
+
+    private fun updateCollapseDirection() {
+        collapseButton.rotation = if (horizontalFlow) {
+            if (layoutDirection == LAYOUT_DIRECTION_RTL) 90f else -90f
+        } else 0f
+    }
+
     internal fun updateLetteringProjection() {
         if (!::previewText.isInitialized) return
         val text = previewText
@@ -170,8 +206,12 @@ class TimescapeCardLayout @JvmOverloads constructor(
         }
         val geometry = letteringGeometry
         val away = 1f - expansionProgress
-        val footX = text.width / 2f
-        val footY = (text.height - text.paddingBottom).coerceAtLeast(0).toFloat()
+        val footX = if (horizontalFlow) {
+            text.width * (.5f - letteringDepth.coerceIn(-1f, 1f) * .5f)
+        } else text.width / 2f
+        val footY = if (horizontalFlow) text.height / 2f else {
+            (text.height - text.paddingBottom).coerceAtLeast(0).toFloat()
+        }
         text.pivotX = footX
         text.pivotY = footY
         text.rotationX = 0f
@@ -182,7 +222,8 @@ class TimescapeCardLayout @JvmOverloads constructor(
         text.translationX = 0f
         text.translationY = 0f
         val cameraDistance = geometry.cameraDistance(
-            text.width, text.height, resources.displayMetrics.densityDpi, .5f, 1f
+            text.width, text.height, resources.displayMetrics.densityDpi,
+            if (horizontalFlow) footX / text.width else .5f, if (horizontalFlow) .5f else 1f
         )
         if (letteringCameraDistance != cameraDistance) {
             text.cameraDistance = cameraDistance
@@ -212,9 +253,10 @@ class TimescapeCardLayout @JvmOverloads constructor(
         letteringNaturalWorld.mapPoints(letteringFootPoints)
         val scale = hypot(letteringFootPoints[2] - letteringFootPoints[0],
             letteringFootPoints[3] - letteringFootPoints[1]) / text.width
-        val anchorX = letteringFootPoints[4] +
-            letteringDepth.coerceIn(-2f, 2f) * 2.5f * density * away * scale
-        val anchorY = letteringFootPoints[5] - geometry.letteringLiftDp * density * away * scale
+        val parallax = letteringDepth.coerceIn(-2f, 2f) * 2.5f * density * away * scale
+        val anchorX = letteringFootPoints[4] + if (horizontalFlow) 0f else parallax
+        val anchorY = letteringFootPoints[5] - geometry.letteringLiftDp * density * away * scale +
+            if (horizontalFlow) parallax else 0f
 
         letteringTargetWorld.reset()
         val facingPitch = geometry.letteringFacingPitchDegrees * away
@@ -222,7 +264,8 @@ class TimescapeCardLayout @JvmOverloads constructor(
             letteringCamera.save()
             letteringCamera.setLocation(0f, 0f,
                 -cameraDistance / resources.displayMetrics.densityDpi)
-            letteringCamera.rotateX(facingPitch)
+            if (horizontalFlow) letteringCamera.rotateY(-facingPitch)
+            else letteringCamera.rotateX(facingPitch)
             letteringCamera.getMatrix(letteringTargetWorld)
             letteringCamera.restore()
         }
@@ -372,15 +415,37 @@ class TimescapeCardLayout @JvmOverloads constructor(
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (cornerMatrix.isIdentity) return super.dispatchTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && !containsCardPoint(event.x, event.y)) return false
-        val localEvent = MotionEvent.obtain(event)
-        localEvent.transform(inverseCornerMatrix)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && (horizontalFlow || !cornerMatrix.isIdentity) &&
+            !containsCardPoint(event.x, event.y)
+        ) return false
+        if (horizontalFlow && event.actionMasked == MotionEvent.ACTION_DOWN) {
+            cardTouchActive = true
+            blockOuterPaging()
+        }
+        val localEvent = if (cornerMatrix.isIdentity) event else MotionEvent.obtain(event).apply {
+            transform(inverseCornerMatrix)
+        }
         return try {
             super.dispatchTouchEvent(localEvent)
         } finally {
-            localEvent.recycle()
+            if (localEvent !== event) localEvent.recycle()
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                cardTouchActive = false
+                if (horizontalFlow && event.actionMasked == MotionEvent.ACTION_UP) {
+                    (parent as? RecyclerView)?.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
         }
+    }
+
+    override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+        super.requestDisallowInterceptTouchEvent(disallowIntercept)
+        if (horizontalFlow && cardTouchActive && !disallowIntercept) blockOuterPaging()
+    }
+
+    private fun blockOuterPaging() {
+        // Readers may release the card RecyclerView, but must not release the outer Flow pager.
+        (parent as? RecyclerView)?.parent?.requestDisallowInterceptTouchEvent(true)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -498,16 +563,25 @@ class TimescapeCardLayout @JvmOverloads constructor(
         val preview = getChildAt(1)
         val availableReadingWidth = (width - previewFaceInset).coerceAtLeast(1)
         val fullWidth = if (readingWidth > 0) readingWidth else availableReadingWidth
-        var previewWidth = width
+        val margins = collapseButton.layoutParams as MarginLayoutParams
+        val sidebarWidth = if (horizontalFlow) {
+            collapseButton.layoutParams.width + margins.marginStart + margins.marginEnd
+        } else 0
+        readingScale = availableReadingWidth.toFloat() / fullWidth
+        readingHeaderWidth = (sidebarWidth * readingScale * expansionProgress).roundToInt()
+        readingMediaVerticalGap = 0f
+        if (horizontalFlow) readingHeaderHeight = 0
+        var availablePreviewWidth = (width - readingHeaderWidth).coerceAtLeast(1)
+        var previewWidth = availablePreviewWidth
         if (isMediaPreview) {
             val heightLimit = min(viewportCap * 0.62f, width * 0.72f)
-            previewWidth = fullWidth
+            previewWidth = (fullWidth - sidebarWidth).coerceAtLeast(1)
             val previewHeight = (previewWidth / mediaAspect).roundToInt().coerceAtLeast(1)
             preview.measure(
                 MeasureSpec.makeMeasureSpec(previewWidth, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(previewHeight, MeasureSpec.EXACTLY)
             )
-            previewScale = min(width.toFloat() / previewWidth, heightLimit / previewHeight)
+            previewScale = min(availablePreviewWidth.toFloat() / previewWidth, heightLimit / previewHeight)
         } else {
             val textWidth = previewText.layoutParams.width.takeIf { it > 0 } ?: previewWidth
             // The text plane has a fixed width even while the photographic face grows.
@@ -527,7 +601,6 @@ class TimescapeCardLayout @JvmOverloads constructor(
             (preview.measuredHeight * previewScale).roundToInt().coerceAtLeast(1)
         } else intrinsicPreviewHeight
         val full = getChildAt(0)
-        readingScale = availableReadingWidth.toFloat() / fullWidth
         var mediaBodyHeight = 0
         val reader = activeMediaReader
         val scrollMedia = isMediaPreview && reader.usesWidthFitViewport &&
@@ -544,11 +617,13 @@ class TimescapeCardLayout @JvmOverloads constructor(
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
             )
             val collapse = collapseButton
-            val margins = collapse.layoutParams as MarginLayoutParams
-            val headerHeight = collapse.measuredHeight + margins.topMargin + margins.bottomMargin
+            val headerHeight = if (horizontalFlow) 0 else {
+                collapse.measuredHeight + margins.topMargin + margins.bottomMargin
+            }
             if (isMediaPreview) {
                 // Keep one surface scale; scrollable media shortens the viewport, not the source.
-                val bodyHeight = (full.measuredHeight - headerHeight).coerceAtLeast(1)
+                val bodyHeight = (if (horizontalFlow) cardFlip.measuredHeight
+                    else full.measuredHeight - headerHeight).coerceAtLeast(1)
                 if (!scrollMedia) readingScale *= min(1f, viewportCap.toFloat() / bodyHeight)
                 val naturalBodyHeight = if (scrollMedia) {
                     bodyHeight + reader.naturalHeight - reader.measuredHeight
@@ -556,18 +631,23 @@ class TimescapeCardLayout @JvmOverloads constructor(
                 val compactScale = compactHeight.toFloat() / naturalBodyHeight.coerceAtLeast(1)
                 readingScale = compactScale + (readingScale - compactScale) * expansionProgress
                 mediaBodyHeight = (bodyHeight * readingScale).roundToInt()
-                if (scrollMedia) {
+                if (horizontalFlow) {
+                    readingMediaVerticalGap = (full.measuredHeight - bodyHeight).coerceAtLeast(0) * readingScale
+                }
+                if (scrollMedia || horizontalFlow) {
                     preview.measure(
                         MeasureSpec.makeMeasureSpec(previewWidth, MeasureSpec.EXACTLY),
                         MeasureSpec.makeMeasureSpec(bodyHeight, MeasureSpec.EXACTLY)
                     )
                 }
             }
+            readingHeaderWidth = (sidebarWidth * readingScale * expansionProgress).roundToInt()
+            availablePreviewWidth = (width - readingHeaderWidth).coerceAtLeast(1)
             readingHeaderHeight = (headerHeight * readingScale).roundToInt()
         }
         val target = if (expansionProgress > 0f) (full.measuredHeight * readingScale).roundToInt() else compactHeight
         val height = if (isMediaPreview && expansionProgress > 0f) {
-            mediaBodyHeight + (readingHeaderHeight * expansionProgress).roundToInt()
+            mediaBodyHeight + ((readingHeaderHeight + readingMediaVerticalGap) * expansionProgress).roundToInt()
         } else (compactHeight + (target - compactHeight) * expansionProgress).roundToInt()
         if (expansionProgress < 1f && !isMediaPreview) {
             // Resolve the photograph's match-parent height after measuring the text plane.
@@ -579,9 +659,9 @@ class TimescapeCardLayout @JvmOverloads constructor(
                 )
             )
         }
-        previewScale = if (isMediaPreview) {
+        previewScale = if (isMediaPreview && horizontalFlow && expansionProgress > 0f) readingScale else if (isMediaPreview) {
             val bodyHeight = (height - (readingHeaderHeight * expansionProgress).roundToInt()).coerceAtLeast(1)
-            min(width.toFloat() / previewWidth, bodyHeight.toFloat() / preview.measuredHeight)
+            min(availablePreviewWidth.toFloat() / previewWidth, bodyHeight.toFloat() / preview.measuredHeight)
         } else 1f
         setMeasuredDimension(resolveSize(width, widthMeasureSpec), resolveSize(height, heightMeasureSpec))
     }
@@ -599,13 +679,24 @@ class TimescapeCardLayout @JvmOverloads constructor(
             child.scaleX = scale
             child.scaleY = scale
             val x = if (index == 0) {
-                if (isMediaPreview) ((measuredWidth - child.measuredWidth * scale) / 2f).roundToInt()
+                if (isMediaPreview) {
+                    val margins = collapseButton.layoutParams as MarginLayoutParams
+                    val sidebarShift = if (horizontalFlow) {
+                        (collapseButton.measuredWidth + margins.marginStart + margins.marginEnd) *
+                            scale * (1f - expansionProgress) / 2f
+                    } else 0f
+                    ((measuredWidth - child.measuredWidth * scale) / 2f +
+                        if (layoutDirection == LAYOUT_DIRECTION_RTL) sidebarShift else -sidebarShift).roundToInt()
+                }
                 else if (layoutDirection == LAYOUT_DIRECTION_RTL) 0 else previewFaceInset
-            } else ((measuredWidth - child.measuredWidth * scale) / 2f).roundToInt()
-            val y = if (index == 0) {
-                -(readingHeaderHeight * (1f - expansionProgress)).roundToInt()
             } else {
-                (readingHeaderHeight * expansionProgress).roundToInt()
+                val sidebar = if (layoutDirection == LAYOUT_DIRECTION_RTL) 0 else readingHeaderWidth
+                sidebar + ((measuredWidth - readingHeaderWidth - child.measuredWidth * scale) / 2f).roundToInt()
+            }
+            val y = if (index == 0) {
+                -((readingHeaderHeight + readingMediaVerticalGap / 2f) * (1f - expansionProgress)).roundToInt()
+            } else {
+                ((readingHeaderHeight + readingMediaVerticalGap / 2f) * expansionProgress).roundToInt()
             }
             child.layout(x, y, x + child.measuredWidth, y + child.measuredHeight)
         }

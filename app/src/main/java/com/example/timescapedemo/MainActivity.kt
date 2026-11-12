@@ -510,11 +510,20 @@ class MainActivity : AppCompatActivity() {
         if (handleStylusButtonKeyEvent(event)) return true
         if (handleSpaceFlipKeyEvent(event)) return true
         if (event.action == KeyEvent.ACTION_DOWN) {
+            val horizontalCards = currentController()?.layoutManager?.isHorizontal == true
             when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP -> if (handleCardArrowKey(delta = -1)) return true
-                KeyEvent.KEYCODE_DPAD_DOWN -> if (handleCardArrowKey(delta = 1)) return true
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (handleFlowArrowKey(delta = -1)) return true
-                KeyEvent.KEYCODE_DPAD_RIGHT -> if (handleFlowArrowKey(delta = 1)) return true
+                KeyEvent.KEYCODE_DPAD_UP -> if (
+                    if (horizontalCards) handleFlowArrowKey(-1) else handleCardArrowKey(-1)
+                ) return true
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (
+                    if (horizontalCards) handleFlowArrowKey(1) else handleCardArrowKey(1)
+                ) return true
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (
+                    if (horizontalCards) handleCardArrowKey(-1) else handleFlowArrowKey(-1)
+                ) return true
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (
+                    if (horizontalCards) handleCardArrowKey(1) else handleFlowArrowKey(1)
+                ) return true
             }
         }
         return super.dispatchKeyEvent(event)
@@ -963,6 +972,7 @@ class MainActivity : AppCompatActivity() {
             private var downX = 0f
             private var downY = 0f
             private var handlingHorizontalSwipe = false
+            private var canNavigateFlows = true
 
             override fun onInterceptTouchEvent(rv: RecyclerView, event: MotionEvent): Boolean {
                 if (!isTwoFlowPresentationActive()) return false
@@ -971,8 +981,11 @@ class MainActivity : AppCompatActivity() {
                         downX = event.x
                         downY = event.y
                         handlingHorizontalSwipe = false
+                        canNavigateFlows = (rv.layoutManager as? RightRailFlowLayoutManager)
+                            ?.hasCardUnder(event.x, event.y) != true
                     }
                     MotionEvent.ACTION_MOVE -> {
+                        if (!canNavigateFlows) return false
                         val dx = event.x - downX
                         val dy = event.y - downY
                         if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
@@ -2358,15 +2371,22 @@ class MainActivity : AppCompatActivity() {
         val horizontalInsetPx = (32 * density).roundToInt()
         val minSidePx = (180 * density).roundToInt()
         val availableWidth = (viewportWidthPx - horizontalInsetPx).coerceAtLeast(minSidePx)
-        val baseSide = availableWidth
-        val focusSide = availableWidth
-        val pitch = (availableWidth * 0.28f).coerceIn(92 * density, 124 * density)
+        val horizontal = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val focusSide = if (horizontal) {
+            (availableWidth * .58f).coerceIn(minOf(260 * density, availableWidth.toFloat()),
+                minOf(640 * density, availableWidth.toFloat())).roundToInt()
+        } else availableWidth
+        val baseSide = focusSide
+        val pitch = (if (horizontal) {
+            (focusSide * .60f).coerceIn(160 * density, 320 * density)
+        } else (availableWidth * .28f).coerceIn(92 * density, 124 * density))
             .times(resources.configuration.fontScale.coerceAtLeast(1f)).roundToInt()
         return RightRailFlowLayoutManager(
             baseSidePx = baseSide,
             focusSidePx = focusSide,
             itemPitchPx = pitch,
-            rightInsetPx = (8 * density).roundToInt()
+            rightInsetPx = (8 * density).roundToInt(),
+            orientation = if (horizontal) RecyclerView.HORIZONTAL else RecyclerView.VERTICAL
         )
     }
 
@@ -8622,7 +8642,10 @@ class MainActivity : AppCompatActivity() {
             val scrollDelta = layoutManager.offsetTo(target)
             if (!expand) layoutManager.clearFocus(immediate = true)
             if (abs(scrollDelta) > 1) {
-                recycler.smoothScrollBy(0, scrollDelta)
+                recycler.smoothScrollBy(
+                    if (layoutManager.isHorizontal) scrollDelta else 0,
+                    if (layoutManager.isHorizontal) 0 else scrollDelta
+                )
             } else {
                 pendingKeyboardSelectionIndex = null
                 layoutManager.restoreState(target, focus = expand)
@@ -8737,7 +8760,10 @@ class MainActivity : AppCompatActivity() {
             val scrollDelta = layoutManager.offsetTo(target)
             if (!expand) layoutManager.clearFocus(immediate = true)
             if (abs(scrollDelta) > 1) {
-                recycler.smoothScrollBy(0, scrollDelta)
+                recycler.smoothScrollBy(
+                    if (layoutManager.isHorizontal) scrollDelta else 0,
+                    if (layoutManager.isHorizontal) 0 else scrollDelta
+                )
             } else {
                 pendingKeyboardSelectionIndex = null
                 if (expand) layoutManager.focus(target) else layoutManager.restoreState(target, focus = false)

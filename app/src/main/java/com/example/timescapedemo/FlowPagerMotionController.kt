@@ -151,6 +151,9 @@ internal class FlowPagerMotionController(
     private val adapter = pager.adapter
 
     init {
+        // A focus highlight on this full-screen viewport becomes a persistent keyboard veil.
+        pager.defaultFocusHighlightEnabled = false
+        recycler.defaultFocusHighlightEnabled = false
         pager.registerOnPageChangeCallback(callbacks)
         recycler.addOnItemTouchListener(touches)
         recycler.onFlingListener = flingListener
