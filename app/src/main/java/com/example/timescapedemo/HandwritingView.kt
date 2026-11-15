@@ -16,6 +16,9 @@ import android.graphics.ComposePathEffect
 import android.graphics.DiscretePathEffect
 import android.graphics.Matrix
 import android.graphics.PathDashPathEffect
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -23,8 +26,10 @@ import android.view.ViewParent
 import androidx.annotation.ColorInt
 import androidx.core.graphics.ColorUtils
 import com.example.timescapedemo.HandwritingDrawingTool.ERASER
+import com.example.timescapedemo.HandwritingDrawingTool.LASSO
 import com.example.timescapedemo.HandwritingDrawingTool.PEN
 import com.example.timescapedemo.HandwritingDrawingTool.TEXT
+import com.google.mlkit.vision.digitalink.recognition.Ink
 import java.util.UUID
 import kotlin.collections.ArrayDeque
 import kotlin.math.abs
@@ -40,6 +45,7 @@ class HandwritingView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private data class StateSnapshot(val bitmap: Bitmap, val hasDrawing: Boolean, val hasBase: Boolean)
+    private data class InkStrokePoint(val x: Float, val y: Float, val time: Long)
     data class InsertedHandwritingObject(
         val id: String,
         val type: String = "handwritingText",
@@ -95,7 +101,22 @@ class HandwritingView @JvmOverloads constructor(
         color = Color.parseColor("#2962FF")
     }
     private val path = Path()
+    private val lassoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0xCC)
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f * density, 7f * density), 0f)
+    }
+    private val selectionFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = ColorUtils.setAlphaComponent(Color.parseColor("#2962FF"), 0x18)
+        style = Paint.Style.FILL
+    }
+    private val pathBounds = RectF()
     private val history = ArrayDeque<StateSnapshot>()
+    private val recognitionStrokes = mutableListOf<List<InkStrokePoint>>()
+    private var activeRecognitionStroke: MutableList<InkStrokePoint>? = null
 
     private var extraBitmap: Bitmap? = null
     private var extraCanvas: Canvas? = null
@@ -129,6 +150,11 @@ class HandwritingView @JvmOverloads constructor(
     private var imageStartRect = RectF()
     private var imageStartDistance = 0f
     private var imagePlacementActive = false
+    private var selectedBitmap: Bitmap? = null
+    private var selectedRect: RectF? = null
+    private var selectionTouchMode = 0
+    private var selectionStartRect = RectF()
+    private var selectionStartDistance = 0f
 
     private var contentChangedListener: (() -> Unit)? = null
     private var textInsertionTapListener: ((x: Float, y: Float) -> Unit)? = null
@@ -219,6 +245,7 @@ class HandwritingView @JvmOverloads constructor(
         drawPaperGuides(canvas, width.toFloat(), height.toFloat(), 1f)
         drawPlacedImage(canvas, showHandles = false)
         extraBitmap?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+        drawSelection(canvas)
         canvas.drawPath(path, currentPreviewPaint())
         if (imagePlacementActive) drawPlacedImageHandles(canvas)
         insertionMarker?.let { (x, y) -> drawInsertionMarker(canvas, x, y) }
@@ -227,6 +254,10 @@ class HandwritingView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x.coerceIn(0f, width.toFloat())
         val y = event.y.coerceIn(0f, height.toFloat())
+        if (selectedBitmap != null && handleSelectionTouch(event)) {
+            invalidate()
+            return true
+        }
         if (placedImageBitmap != null && handlePlacedImageTouch(event)) {
             invalidate()
             return true
@@ -256,7 +287,7 @@ class HandwritingView @JvmOverloads constructor(
                 notifyStrokePreviewChanged()
             }
             MotionEvent.ACTION_UP -> {
-                touchUp()
+                if (drawingTool == LASSO) finishLassoSelection() else touchUp()
                 notifyStrokePreviewChanged()
                 strokeActiveListener?.invoke(false)
                 disallowParentIntercept(false)
@@ -297,6 +328,11 @@ class HandwritingView @JvmOverloads constructor(
         pendingHasContent = false
         pendingHasBase = false
         insertedHandwritingObjects.clear()
+        recognitionStrokes.clear()
+        activeRecognitionStroke = null
+        selectedBitmap?.recycle()
+        selectedBitmap = null
+        selectedRect = null
         placedImageBitmap?.recycle()
         placedImageBitmap = null
         placedImageRect = null
@@ -337,6 +373,14 @@ class HandwritingView @JvmOverloads constructor(
             invalidate()
             return true
         }
+        if (selectedBitmap != null) {
+            selectedBitmap?.recycle()
+            selectedBitmap = null
+            selectedRect = null
+            invalidate()
+            notifyContentChanged()
+            return true
+        }
         if (placedImageBitmap != null) {
             placedImageBitmap?.recycle()
             placedImageBitmap = null
@@ -360,9 +404,9 @@ class HandwritingView @JvmOverloads constructor(
         return true
     }
 
-    fun canUndo(): Boolean = !path.isEmpty || history.size > 1
+    fun canUndo(): Boolean = !path.isEmpty || selectedBitmap != null || history.size > 1
 
-    fun hasDrawing(): Boolean = hasContent || !path.isEmpty || placedImageBitmap != null
+    fun hasDrawing(): Boolean = hasContent || !path.isEmpty || selectedBitmap != null || placedImageBitmap != null
 
     fun setBitmap(bitmap: Bitmap?) {
         pendingBitmap?.recycle()
@@ -392,6 +436,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun exportBitmap(): Bitmap? {
+        commitSelection(addToHistory = false)
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
         val targetW = exportWidth.takeIf { it > 0 } ?: source.width
@@ -409,6 +454,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun exportEditLayerBitmap(): Bitmap? {
+        commitSelection(addToHistory = false)
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
         return source.copy(Config.ARGB_8888, false)
@@ -431,6 +477,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun exportContentBitmap(targetHeightPx: Int, paddingPx: Int): Bitmap? {
+        commitSelection(addToHistory = false)
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
         val contentBounds = findContentBounds(source) ?: return null
@@ -454,6 +501,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun exportContentBitmapScaled(scale: Float, paddingPx: Int): Bitmap? {
+        commitSelection(addToHistory = false)
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
         val contentBounds = findContentBounds(source) ?: return null
@@ -552,6 +600,7 @@ class HandwritingView @JvmOverloads constructor(
     }
 
     fun contentBounds(): Rect? {
+        commitSelection(addToHistory = false)
         commitCurrentPath(addToHistory = false)
         val source = extraBitmap ?: return null
         return findContentBounds(source)
@@ -643,11 +692,78 @@ class HandwritingView @JvmOverloads constructor(
     fun getEraserType(): HandwritingEraserType = eraserType
 
     fun setDrawingTool(tool: HandwritingDrawingTool) {
-        if (drawingTool == tool && !imagePlacementActive) return
+        if (drawingTool == tool && !imagePlacementActive && selectedBitmap == null) return
+        commitSelection()
         commitCurrentPath()
         drawingTool = tool
         imagePlacementActive = false
         invalidate()
+    }
+
+
+    fun placeTextBlock(
+        text: String,
+        x: Float,
+        y: Float,
+        @ColorInt color: Int = brushColorInt,
+        textSizePx: Float = 28f * density
+    ): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        commitSelection()
+        commitCurrentPath()
+        val maxWidth = ((width.takeIf { it > 0 } ?: exportWidth.takeIf { it > 0 } ?: 320) * 0.72f)
+            .roundToInt()
+            .coerceAtLeast((120f * density).roundToInt())
+        val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            this.textSize = textSizePx.coerceAtLeast(8f * density)
+            typeface = android.graphics.Typeface.DEFAULT
+        }
+        val layout = StaticLayout.Builder.obtain(trimmed, 0, trimmed.length, textPaint, maxWidth)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(0f, 1.05f)
+            .setIncludePad(true)
+            .build()
+        val horizontalPadding = (12f * density).roundToInt()
+        val verticalPadding = (8f * density).roundToInt()
+        val bitmap = Bitmap.createBitmap(
+            (layout.width + horizontalPadding * 2).coerceAtLeast(1),
+            (layout.height + verticalPadding * 2).coerceAtLeast(1),
+            Config.ARGB_8888
+        )
+        Canvas(bitmap).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            translate(horizontalPadding.toFloat(), verticalPadding.toFloat())
+            layout.draw(this)
+        }
+        selectedBitmap?.recycle()
+        selectedBitmap = null
+        selectedRect = null
+        placedImageBitmap?.recycle()
+        placedImageBitmap = bitmap
+        val left = x.coerceIn(0f, width.toFloat())
+        val top = y.coerceIn(0f, height.toFloat())
+        placedImageRect = RectF(left, top, left + bitmap.width, top + bitmap.height).also(::clampPlacedImageRect)
+        imagePlacementActive = true
+        hasContent = true
+        invalidate()
+        notifyContentChanged()
+        return true
+    }
+
+    fun hasActiveLassoSelection(): Boolean = selectedBitmap != null
+
+    fun deleteLassoSelection(): Boolean {
+        val bitmap = selectedBitmap ?: return false
+        if (!bitmap.isRecycled) bitmap.recycle()
+        selectedBitmap = null
+        selectedRect = null
+        hasContent = findContentBounds(extraBitmap ?: return true) != null || hasBaseImage
+        pushCurrentState(hasContent, hasBaseImage)
+        invalidate()
+        notifyContentChanged()
+        return true
     }
 
     fun hasPlacedImage(): Boolean = placedImageBitmap != null
@@ -691,6 +807,27 @@ class HandwritingView @JvmOverloads constructor(
 
     fun setOnStrokePreviewChangedListener(listener: (() -> Unit)?) {
         strokePreviewChangedListener = listener
+    }
+
+    fun recognitionInk(): Ink? {
+        val strokes = recognitionStrokes.toList()
+        if (strokes.isEmpty()) return null
+        val inkBuilder = Ink.builder()
+        strokes.forEach { stroke ->
+            if (stroke.isNotEmpty()) {
+                val strokeBuilder = Ink.Stroke.builder()
+                stroke.forEach { point ->
+                    strokeBuilder.addPoint(Ink.Point.create(point.x, point.y, point.time))
+                }
+                inkBuilder.addStroke(strokeBuilder.build())
+            }
+        }
+        return inkBuilder.build()
+    }
+
+    fun clearRecognitionInk() {
+        recognitionStrokes.clear()
+        activeRecognitionStroke = null
     }
 
     fun setTextInsertionPreview(x: Float, y: Float) {
@@ -748,6 +885,9 @@ class HandwritingView @JvmOverloads constructor(
         extraCanvas = null
         pendingBitmap?.recycle()
         pendingBitmap = null
+        selectedBitmap?.recycle()
+        selectedBitmap = null
+        selectedRect = null
         placedImageBitmap?.recycle()
         placedImageBitmap = null
         placedImageRect = null
@@ -760,6 +900,10 @@ class HandwritingView @JvmOverloads constructor(
             commitCurrentPath()
         }
         path.reset()
+        if (drawingTool == LASSO) commitSelection()
+        if (drawingTool == PEN) {
+            activeRecognitionStroke = mutableListOf(InkStrokePoint(x, y, System.currentTimeMillis()))
+        }
         path.moveTo(x, y)
         currentX = x
         currentY = y
@@ -770,6 +914,9 @@ class HandwritingView @JvmOverloads constructor(
         val dy = abs(y - currentY)
         if (dx >= touchTolerance || dy >= touchTolerance) {
             path.quadTo(currentX, currentY, (x + currentX) / 2, (y + currentY) / 2)
+            if (drawingTool == PEN) {
+                activeRecognitionStroke?.add(InkStrokePoint(x, y, System.currentTimeMillis()))
+            }
             currentX = x
             currentY = y
         }
@@ -777,15 +924,21 @@ class HandwritingView @JvmOverloads constructor(
 
     private fun touchUp() {
         path.lineTo(currentX, currentY)
+        if (drawingTool == PEN) {
+            activeRecognitionStroke?.add(InkStrokePoint(currentX, currentY, System.currentTimeMillis()))
+            activeRecognitionStroke?.takeIf { it.isNotEmpty() }?.let { recognitionStrokes += it.toList() }
+            activeRecognitionStroke = null
+        }
         commitCurrentPath()
     }
 
     private fun touchCancel() {
-        if (!path.isEmpty) {
+        if (drawingTool != LASSO && !path.isEmpty) {
             commitCurrentPath()
         } else {
             path.reset()
         }
+        activeRecognitionStroke = null
     }
 
     private fun notifyStrokePreviewChanged() {
@@ -795,6 +948,7 @@ class HandwritingView @JvmOverloads constructor(
     private fun commitCurrentPath(addToHistory: Boolean = true) {
         if (path.isEmpty) return
         val canvas = ensureDrawingSurface() ?: return
+        if (drawingTool == LASSO) return
         canvas.drawPath(path, currentCommitPaint())
         path.reset()
         hasContent = true
@@ -853,6 +1007,9 @@ class HandwritingView @JvmOverloads constructor(
         val rect = placedImageRect ?: return false
         val canvas = ensureDrawingSurface() ?: return false
         canvas.drawBitmap(image, null, rect, bitmapPaint)
+        selectedBitmap?.recycle()
+        selectedBitmap = null
+        selectedRect = null
         placedImageBitmap?.recycle()
         placedImageBitmap = null
         placedImageRect = null
@@ -862,6 +1019,130 @@ class HandwritingView @JvmOverloads constructor(
         notifyContentChanged()
         invalidate()
         return true
+    }
+
+    private fun finishLassoSelection() {
+        path.close()
+        selectLassoContent()
+        path.reset()
+        strokeActiveListener?.invoke(false)
+        disallowParentIntercept(false)
+        invalidate()
+    }
+
+    private fun selectLassoContent() {
+        val source = extraBitmap ?: return
+        if (source.isRecycled || path.isEmpty) return
+        path.computeBounds(pathBounds, true)
+        val bounds = Rect(
+            pathBounds.left.roundToInt().coerceIn(0, source.width),
+            pathBounds.top.roundToInt().coerceIn(0, source.height),
+            pathBounds.right.roundToInt().coerceIn(0, source.width),
+            pathBounds.bottom.roundToInt().coerceIn(0, source.height)
+        )
+        if (bounds.width() <= 1 || bounds.height() <= 1) return
+        val picked = Bitmap.createBitmap(bounds.width(), bounds.height(), Config.ARGB_8888)
+        Canvas(picked).apply {
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.SRC)
+            save()
+            translate(-bounds.left.toFloat(), -bounds.top.toFloat())
+            clipPath(path)
+            drawBitmap(source, 0f, 0f, bitmapPaint)
+            restore()
+        }
+        if (findContentBounds(picked) == null) {
+            picked.recycle()
+            return
+        }
+        selectedBitmap?.recycle()
+        selectedBitmap = picked
+        selectedRect = RectF(bounds)
+        extraCanvas?.apply {
+            save()
+            clipPath(path)
+            drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+            restore()
+        }
+        hasContent = true
+        notifyContentChanged()
+    }
+
+    private fun commitSelection(addToHistory: Boolean = true): Boolean {
+        val bitmap = selectedBitmap ?: return false
+        val rect = selectedRect ?: return false
+        val canvas = ensureDrawingSurface() ?: return false
+        canvas.drawBitmap(bitmap, null, rect, bitmapPaint)
+        if (!bitmap.isRecycled) bitmap.recycle()
+        selectedBitmap = null
+        selectedRect = null
+        hasContent = true
+        if (addToHistory) pushCurrentState(true, hasBaseImage)
+        notifyContentChanged()
+        invalidate()
+        return true
+    }
+
+    private fun drawSelection(canvas: Canvas) {
+        val bitmap = selectedBitmap ?: return
+        val rect = selectedRect ?: return
+        canvas.drawBitmap(bitmap, null, rect, bitmapPaint)
+        canvas.drawRoundRect(rect, 10f * density, 10f * density, selectionFillPaint)
+        canvas.drawRoundRect(rect, 10f * density, 10f * density, lassoPaint)
+        canvas.drawCircle(rect.right, rect.bottom, 9f * density, selectionFillPaint)
+        canvas.drawCircle(rect.right, rect.bottom, 9f * density, lassoPaint)
+    }
+
+    private fun handleSelectionTouch(event: MotionEvent): Boolean {
+        val rect = selectedRect ?: return false
+        val hitRect = RectF(rect).apply { inset(-12f * density, -12f * density) }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (!hitRect.contains(event.x, event.y)) return false
+                disallowParentIntercept(true)
+                selectionTouchMode = if (hypot(event.x - rect.right, event.y - rect.bottom) <= 22f * density) 3 else 1
+                imageTouchStartX = event.x
+                imageTouchStartY = event.y
+                selectionStartRect.set(rect)
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> if (event.pointerCount >= 2) {
+                selectionTouchMode = 2
+                selectionStartDistance = pointerDistance(event)
+                selectionStartRect.set(rect)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (selectionTouchMode == 1) {
+                    rect.set(selectionStartRect)
+                    rect.offset(event.x - imageTouchStartX, event.y - imageTouchStartY)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+                if (selectionTouchMode == 2 && event.pointerCount >= 2) {
+                    val scale = (pointerDistance(event) / selectionStartDistance).takeIf { it.isFinite() && it > 0f } ?: 1f
+                    val halfWidth = (selectionStartRect.width() * scale / 2f).coerceAtLeast(16f * density)
+                    val halfHeight = (selectionStartRect.height() * scale / 2f).coerceAtLeast(16f * density)
+                    rect.set(selectionStartRect.centerX() - halfWidth, selectionStartRect.centerY() - halfHeight, selectionStartRect.centerX() + halfWidth, selectionStartRect.centerY() + halfHeight)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+                if (selectionTouchMode == 3) {
+                    val aspect = (selectionStartRect.width() / selectionStartRect.height()).takeIf { it.isFinite() && it > 0f } ?: 1f
+                    val newWidth = (event.x - selectionStartRect.left).coerceAtLeast(24f * density)
+                    val newHeight = (newWidth / aspect).coerceAtLeast(24f * density)
+                    rect.set(selectionStartRect.left, selectionStartRect.top, selectionStartRect.left + newWidth, selectionStartRect.top + newHeight)
+                    clampPlacedImageRect(rect)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                selectionTouchMode = 0
+                disallowParentIntercept(false)
+                notifyContentChanged()
+                return true
+            }
+        }
+        return selectionTouchMode != 0
     }
 
     private fun drawPlacedImage(canvas: Canvas, showHandles: Boolean, scale: Float = 1f) {
@@ -1265,11 +1546,13 @@ class HandwritingView @JvmOverloads constructor(
         PEN -> penPaint
         ERASER -> eraserPaint
         TEXT -> penPaint
+        LASSO -> lassoPaint
     }
 
     private fun currentPreviewPaint(): Paint = when (drawingTool) {
         PEN -> penPaint
         ERASER -> eraserPreviewPaint
         TEXT -> penPaint
+        LASSO -> lassoPaint
     }
 }
