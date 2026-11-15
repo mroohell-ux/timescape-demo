@@ -18,6 +18,8 @@ import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.util.TypedValue
 import android.view.MotionEvent
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewTreeObserver
@@ -41,6 +43,216 @@ import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class TimescapeFlowTest {
+    @Test
+    fun importedStarredCardsShowSelectedCollectionControlsAtTheFront() = scene(allActions = true) { s ->
+        s.onMain {
+            val plain = checkNotNull(adapter.getItemAt(5))
+            val normal = CardCollectionState.fromJson(JSONObject("""{"isCollected":false}"""))
+            val starred = CardCollectionState.fromJson(
+                JSONObject("""{"isCollected":true,"collectionOriginalIndex":1}""")
+            )
+            val imported = listOf(
+                plain.copy(id = 200, title = "Normal", isCollected = normal.isCollected,
+                    collectionOriginalIndex = normal.originalIndex),
+                plain.copy(id = 201, title = "Starred", isCollected = starred.isCollected,
+                    collectionOriginalIndex = starred.originalIndex)
+            )
+            adapter.submitList(collectedCardsFirst(imported)) { manager.restoreState(0, true) }
+        }
+        s.await { s.adapter.getItemAt(0)?.id == 201L }
+        s.openCard(0)
+        s.onMain {
+            assertTrue(holder(0).collectionButton.isSelected)
+            assertEquals(root.context.getString(R.string.card_collection_restore_content_desc),
+                holder(0).collectionButton.contentDescription)
+            assertEquals(1, adapter.getItemAt(0)?.collectionOriginalIndex)
+        }
+        s.openCard(1)
+        s.onMain {
+            assertFalse(holder(1).collectionButton.isSelected)
+            assertEquals(root.context.getString(R.string.card_collection_move_front_content_desc),
+                holder(1).collectionButton.contentDescription)
+        }
+    }
+
+    @Test
+    fun portraitSearchExitRestoresThePreSearchCardAndExpansion() =
+        assertSearchReturnPosition(horizontal = false)
+
+    @Test
+    fun horizontalSearchExitRestoresThePreSearchCardAndExpansion() =
+        assertSearchReturnPosition(horizontal = true)
+
+    private fun assertSearchReturnPosition(horizontal: Boolean) = scene(horizontal = horizontal) { s ->
+        val templates = s.adapter.currentList.toList()
+        for (focused in listOf(false, true)) {
+            for (emptyResults in listOf(false, true)) {
+                val flow = CardFlow(30, "Disposable search", templates.map { it.copy() }.toMutableList(),
+                    templates[5].id, 5, focused)
+                val loaded = CountDownLatch(1)
+                s.onMain {
+                    adapter.submitList(flow.cards) { manager.restoreState(5, focused); loaded.countDown() }
+                }
+                assertTrue(loaded.await(5, TimeUnit.SECONDS))
+                awaitPresented(s)
+                val state = FlowSearchReturnState.capture(listOf(flow), flow.id)
+                val results = if (emptyResults) emptyList() else listOf(templates[1], templates[7])
+                val searched = CountDownLatch(1)
+                s.onMain {
+                    adapter.submitList(results) {
+                        manager.restoreState(if (emptyResults) 0 else 1, !emptyResults)
+                        flow.lastViewedCardId = results.lastOrNull()?.id
+                        flow.lastViewedCardIndex = if (emptyResults) 0 else 1
+                        flow.lastViewedCardFocused = !emptyResults
+                        searched.countDown()
+                    }
+                }
+                assertTrue(searched.await(5, TimeUnit.SECONDS))
+                awaitPresented(s)
+                val returned = CountDownLatch(1)
+                s.onMain {
+                    val position = checkNotNull(state.positionFor(flow))
+                    position.restoreTo(flow, flow.cards)
+                    recycler.stopScroll()
+                    adapter.submitList(flow.cards) {
+                        val restored = position.restoreTo(flow, adapter.currentList)
+                        manager.restoreState(restored.index, restored.focused)
+                        returned.countDown()
+                    }
+                }
+                assertTrue(returned.await(5, TimeUnit.SECONDS))
+                awaitPresented(s)
+                s.await {
+                    s.manager.nearestIndex() == 5 &&
+                        s.recycler.findViewHolderForAdapterPosition(5) != null &&
+                        (!focused || s.holder(5).presentation.expansionProgress == 1f)
+                }
+                s.onMain {
+                    assertEquals(templates.size, adapter.itemCount)
+                    assertEquals(templates[5].id, adapter.getItemAt(manager.nearestIndex())?.id)
+                    assertEquals(focused, manager.hasSelection())
+                    assertEquals(CardFlowPosition(templates[5].id, 5, focused), state.positionFor(flow))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun portraitDeletionKeepsNextOrSurvivingCardAndExpansionAfterListCommit() =
+        assertDeletionPositions(horizontal = false, filtered = false)
+
+    @Test
+    fun horizontalDeletionKeepsNextOrSurvivingCardAndExpansionAfterListCommit() =
+        assertDeletionPositions(horizontal = true, filtered = false)
+
+    @Test
+    fun portraitFilteredDeletionUsesVisibleOrderAndHandlesEmptyResults() =
+        assertDeletionPositions(horizontal = false, filtered = true)
+
+    @Test
+    fun horizontalFilteredDeletionUsesVisibleOrderAndHandlesEmptyResults() =
+        assertDeletionPositions(horizontal = true, filtered = true)
+
+    private fun assertDeletionPositions(horizontal: Boolean, filtered: Boolean) = scene(horizontal = horizontal) { s ->
+        val templates = s.adapter.currentList.toList()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val now = SystemClock.uptimeMillis()
+        for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+            assertTrue(instrumentation.uiAutomation.injectInputEvent(
+                KeyEvent(now, SystemClock.uptimeMillis(), action, KeyEvent.KEYCODE_A, 0,
+                    0, -1, 0, 0, InputDevice.SOURCE_KEYBOARD), true
+            ))
+        }
+        s.onMain { assertFalse(recycler.isInTouchMode) }
+        val visibleIndices = if (filtered) listOf(0, 2, 4, 5, 8) else templates.indices.toList()
+        val displayed = visibleIndices.map { templates[it] }
+        val cases = if (filtered) {
+            listOf(Triple(4, 4, 5), Triple(8, 8, 5), Triple(0, 0, 2),
+                Triple(5, 2, 5), Triple(5, 8, 5), Triple(5, 1, 5))
+        } else {
+            listOf(Triple(2, 2, 3), Triple(8, 8, 7), Triple(0, 0, 1),
+                Triple(5, 2, 5), Triple(5, 8, 5), Triple(4, 4, 5), Triple(5, 5, 6))
+        }
+        for (focused in listOf(false, true)) {
+            for ((current, deleted, target) in cases) {
+                val flow = CardFlow(
+                    20, "Disposable deletion",
+                    templates.map { it.copy() }.toMutableList(),
+                    templates[current].id, visibleIndices.indexOf(current), focused
+                )
+                val loaded = CountDownLatch(1)
+                s.onMain {
+                    recycler.stopScroll()
+                    adapter.submitList(displayed) {
+                        manager.restoreState(flow.lastViewedCardIndex, focused)
+                        loaded.countDown()
+                    }
+                }
+                assertTrue(loaded.await(5, TimeUnit.SECONDS))
+                awaitPresented(s)
+                s.await { s.manager.nearestIndex() == visibleIndices.indexOf(current) }
+                val committed = CountDownLatch(1)
+                val remaining = displayed.filterNot { it.id == templates[deleted].id }
+                val targetIndex = remaining.indexOfFirst { it.id == templates[target].id }
+                s.onMain {
+                    val position = flow.removeCardPreservingPosition(templates[deleted].id, displayed)
+                    assertEquals(templates[target].id, flow.lastViewedCardId)
+                    assertEquals(focused, flow.lastViewedCardFocused)
+                    recycler.stopScroll()
+                    adapter.submitList(remaining) {
+                        val resolved = position.restoreTo(flow, adapter.currentList)
+                        manager.restoreState(resolved.index, resolved.focused)
+                        committed.countDown()
+                    }
+                }
+                assertTrue(committed.await(5, TimeUnit.SECONDS))
+                awaitPresented(s)
+                s.await {
+                    s.manager.nearestIndex() == targetIndex &&
+                        s.recycler.findViewHolderForAdapterPosition(targetIndex) != null &&
+                        (!focused || s.holder(targetIndex).presentation.expansionProgress == 1f)
+                }
+                s.onMain {
+                    assertEquals(templates[target].id, adapter.getItemAt(manager.nearestIndex())?.id)
+                    assertEquals(targetIndex, flow.lastViewedCardIndex)
+                    assertEquals(focused, manager.hasSelection())
+                    assertEquals(if (focused) targetIndex else null, manager.currentSelectionIndex())
+                    assertEquals(0, manager.offsetTo(targetIndex))
+                    assertTrue(recycler.isFocusable)
+                }
+            }
+        }
+        val flow = CardFlow(20, "Disposable last match", templates.map { it.copy() }.toMutableList(),
+            templates[4].id, 0, true)
+        val single = listOf(templates[4])
+        val loaded = CountDownLatch(1)
+        s.onMain {
+            adapter.submitList(single) { manager.restoreState(0, true); loaded.countDown() }
+        }
+        assertTrue(loaded.await(5, TimeUnit.SECONDS))
+        awaitPresented(s)
+        val committed = CountDownLatch(1)
+        s.onMain {
+            if (!filtered) flow.cards.retainAll { it.id == templates[4].id }
+            val position = flow.removeCardPreservingPosition(templates[4].id, single)
+            adapter.submitList(emptyList()) {
+                val resolved = position.restoreTo(flow, adapter.currentList)
+                manager.restoreState(resolved.index, resolved.focused)
+                committed.countDown()
+            }
+        }
+        assertTrue(committed.await(5, TimeUnit.SECONDS))
+        awaitPresented(s)
+        s.onMain {
+            assertEquals(0, adapter.itemCount)
+            assertFalse(manager.hasSelection())
+            assertNull(flow.lastViewedCardId)
+            assertEquals(0, flow.lastViewedCardIndex)
+            assertFalse(flow.lastViewedCardFocused)
+            assertEquals(if (filtered) templates.size - 1 else 0, flow.cards.size)
+        }
+    }
+
     @Test
     fun horizontalRibbonBrowsesAndExchangesExpansionWithoutVerticalMotion() = scene(horizontal = true) { s ->
         s.openCard(5)

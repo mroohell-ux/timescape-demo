@@ -162,6 +162,7 @@ class MainActivity : AppCompatActivity() {
     private var searchView: SearchView? = null
     private var flowSearchQueryText: String = ""
     private var flowSearchQueryNormalized: String = ""
+    private var flowSearchReturnState: FlowSearchReturnState? = null
     private var globalSearchQueryText: String = ""
     private var globalSearchQueryNormalized: String = ""
     private val menuVisibilityCacheDuringSearch: MutableMap<Int, Boolean> = mutableMapOf()
@@ -218,6 +219,10 @@ class MainActivity : AppCompatActivity() {
     private var nextCardId: Long = 0
     private var nextFlowId: Long = 0
     private var selectedFlowIndex: Int = 0
+        set(value) {
+            field = value
+            if (::flowPager.isInitialized) updateVisibleVideoPlayback()
+        }
     private var lastStylusButtonEventTime: Long = Long.MIN_VALUE
     private var spaceFlipKeyActive: Boolean = false
     private var samsungSpenRemoteBridge: SamsungSpenRemoteBridge? = null
@@ -274,6 +279,7 @@ class MainActivity : AppCompatActivity() {
     private var videoProgressPersistJob: Job? = null
     private var stickyNoteNotificationSequence = 0
     private var isGlobalVideoMuted: Boolean = false
+    private var isVideoPlaybackForeground = false
     private var lanServer: TimescapeLanServer? = null
     private var isWatchSyncEnabled: Boolean = false
 
@@ -919,6 +925,22 @@ class MainActivity : AppCompatActivity() {
         restartStickyNoteNotificationSchedule()
     }
 
+    override fun onResume() {
+        super.onResume()
+        isVideoPlaybackForeground = true
+        updateVisibleVideoPlayback()
+    }
+
+    override fun onPause() {
+        isVideoPlaybackForeground = false
+        updateVisibleVideoPlayback()
+        super.onPause()
+    }
+
+    private fun updateVisibleVideoPlayback() {
+        flowControllers.values.forEach { it.updateVideoPlaybackVisibility() }
+    }
+
     private fun setupFlowPager() {
         flowPager.adapter = flowAdapter
         flowMotion = FlowPagerMotionController(
@@ -946,6 +968,11 @@ class MainActivity : AppCompatActivity() {
                 updateToolbarSubtitle()
                 updateShuffleMenuState()
                 flowPager.requestTransform()
+            }
+
+            override fun onPageScrollStateChanged(state: Int) {
+                super.onPageScrollStateChanged(state)
+                updateVisibleVideoPlayback()
             }
         })
         cardMovePagerDragController = CardMovePagerDragController(
@@ -1098,6 +1125,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         flowPager.requestTransform()
+        updateVisibleVideoPlayback()
     }
 
     private fun setFlowPaneWidth(view: View, width: Int) {
@@ -1212,11 +1240,7 @@ class MainActivity : AppCompatActivity() {
             })
         searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
             override fun onMenuItemActionExpand(item: MenuItem): Boolean {
-                val flow = currentFlow()
-                val controller = currentController()
-                if (flow != null && controller != null) {
-                    controller.captureState(flow)
-                }
+                beginFlowSearch()
                 view.setQuery(flowSearchQueryText, false)
                 view.post {
                     view.requestFocus()
@@ -1228,9 +1252,11 @@ class MainActivity : AppCompatActivity() {
 
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 view.clearFocus()
-                if (flowSearchQueryText.isNotEmpty()) {
-                    view.setQuery("", false)
-                }
+                flowSearchQueryText = ""
+                flowSearchQueryNormalized = ""
+                syncFlowSearchInput("")
+                restoreFlowSearchReturnState()
+                flowSearchReturnState = null
                 setToolbarItemsHiddenForSearch(false)
                 return true
             }
@@ -1256,6 +1282,7 @@ class MainActivity : AppCompatActivity() {
             syncFlowSearchInput(rawQuery)
             return
         }
+        if (normalized.isNotEmpty()) beginFlowSearch()
         flowSearchQueryText = rawQuery
         flowSearchQueryNormalized = normalized
         syncFlowSearchInput(rawQuery)
@@ -1296,8 +1323,40 @@ class MainActivity : AppCompatActivity() {
         searchResultEntries = emptyList()
     }
 
+    private fun beginFlowSearch() {
+        if (flowSearchReturnState != null) return
+        val flow = currentFlow() ?: return
+        captureVisibleFlowStates()
+        flowSearchReturnState = FlowSearchReturnState.capture(flows, flow.id)
+    }
+
+    private fun restoreFlowSearchReturnState() {
+        val state = flowSearchReturnState ?: return
+        flows.forEachIndexed { index, flow ->
+            val position = state.positionFor(flow) ?: CardFlowPosition(
+                flow.lastViewedCardId, flow.lastViewedCardIndex, flow.lastViewedCardFocused
+            ).resolved(flow.cards)
+            position.restoreTo(flow, flow.cards)
+            val controller = flowControllers[flow.id]
+            if (controller != null) {
+                controller.updateDisplayedCards(
+                    flow, "", shouldRestoreState = true, shouldScrollToTop = false,
+                    positionToRestore = position
+                )
+            } else {
+                flowAdapter.notifyItemChanged(index)
+            }
+        }
+        val returnIndex = flows.indexOfFirst { it.id == state.flowId }
+        if (returnIndex >= 0) flowMotion.navigateTo(returnIndex, false)
+    }
+
     private fun updateFlowSearchResults(restoreStateWhenCleared: Boolean) {
         val normalized = flowSearchQueryNormalized
+        if (normalized.isEmpty() && restoreStateWhenCleared && flowSearchReturnState != null) {
+            restoreFlowSearchReturnState()
+            return
+        }
         val flow = currentFlow() ?: return
         val controller = flowControllers[flow.id]
         val shouldRestoreState = normalized.isEmpty() && restoreStateWhenCleared
@@ -2415,7 +2474,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshFlow(flow: CardFlow, scrollToTop: Boolean = false) {
+    private fun refreshFlow(
+        flow: CardFlow,
+        scrollToTop: Boolean = false,
+        positionAfterDeletion: CardFlowPosition? = null
+    ) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
         if (scrollToTop && flowSearchQueryNormalized.isEmpty()) {
@@ -2430,7 +2493,8 @@ class MainActivity : AppCompatActivity() {
                 flow = flow,
                 query = flowSearchQueryNormalized,
                 shouldRestoreState = shouldRestoreState,
-                shouldScrollToTop = shouldScrollToTop
+                shouldScrollToTop = shouldScrollToTop,
+                positionToRestore = positionAfterDeletion
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
@@ -2653,14 +2717,7 @@ class MainActivity : AppCompatActivity() {
                     snackbar("Card updated")
                 },
                 onDelete = {
-                    disposeCardResources(card)
-                    val cardIndex = flow.cards.indexOfFirst { it.id == card.id }
-                    if (cardIndex >= 0) {
-                        flow.cards.removeAt(cardIndex)
-                        refreshFlow(flow, scrollToTop = true)
-                        saveState()
-                        snackbar(getString(R.string.snackbar_deleted_card))
-                    }
+                    deleteCard(flow, card)
                 }
             )
             }
@@ -2680,11 +2737,7 @@ class MainActivity : AppCompatActivity() {
                     saveState()
                     snackbar("Card updated")
                 }, onDelete = {
-                    disposeCardResources(card)
-                    flow.cards.remove(card)
-                    refreshFlow(flow, scrollToTop = true)
-                    saveState()
-                    snackbar(getString(R.string.snackbar_deleted_card))
+                    deleteCard(flow, card)
                 })
             }
         }
@@ -2840,7 +2893,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         actions += getString(R.string.image_card_option_delete) to {
-            deleteImageCard(flow, card)
+            deleteCard(flow, card)
         }
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_edit_image_card_title)
@@ -2909,10 +2962,15 @@ class MainActivity : AppCompatActivity() {
         snackbar(getString(R.string.image_card_handwriting_removed))
     }
 
-    private fun deleteImageCard(flow: CardFlow, card: CardItem) {
+    private fun deleteCard(flow: CardFlow, card: CardItem) {
+        flowControllers[flow.id]?.captureState(flow)
+        flowSearchReturnState?.onCardRemoved(flow, card.id)
+        val position = flow.removeCardPreservingPosition(
+            card.id,
+            filterCardsForSearch(flow.cards, flowSearchQueryNormalized)
+        )
         disposeCardResources(card)
-        flow.cards.remove(card)
-        refreshFlow(flow, scrollToTop = true)
+        refreshFlow(flow, positionAfterDeletion = position)
         saveState()
         snackbar(getString(R.string.snackbar_deleted_card))
     }
@@ -6563,6 +6621,7 @@ class MainActivity : AppCompatActivity() {
                 card.recognizedText?.let { writer.name("recognizedText").value(it) }
                 writer.name("textColor").value(colorToString(card.textColor))
                 writer.name("updatedAt").value(card.updatedAt)
+                CardCollectionState(card.isCollected, card.collectionOriginalIndex).writeTo(writer)
                 val cardLabel = buildExportCardLabel(flow.name, flowIndex, cardIndex, card.title)
                 card.handwriting?.let { handwriting ->
                     handwritingToJson(handwriting, warnings, cardLabel)?.let {
@@ -7007,9 +7066,11 @@ class MainActivity : AppCompatActivity() {
                             handwriting = importedCard.handwriting,
                             imageHandwriting = importedCard.imageHandwriting,
                             stickyNotes = importedCard.stickyNotes.toMutableList(),
-                            thermalReceipt = importedCard.thermalReceipt
+                            thermalReceipt = importedCard.thermalReceipt,
+                            isCollected = importedCard.collection.isCollected,
+                            collectionOriginalIndex = importedCard.collection.originalIndex
                         )
-                }.toMutableList()
+                }.let(::collectedCardsFirst).toMutableList()
                 val newFlow = CardFlow(
                     id = flowId,
                     name = flowName,
@@ -7122,7 +7183,8 @@ class MainActivity : AppCompatActivity() {
                                             imageHandwriting,
                                             recognizedText,
                                             stickyNotes,
-                                            thermalReceipt
+                                            thermalReceipt,
+                                            CardCollectionState.fromJson(cardObj)
                                         )
                                         parsedCards++
                                         onCardProgress?.invoke(parsedCards, totalCards)
@@ -7878,13 +7940,16 @@ class MainActivity : AppCompatActivity() {
                 cardsArray.put(obj)
             }
             flowObj.put("cards", cardsArray)
-            if (flow.lastViewedCardId != null) {
-                flowObj.put("lastViewedCardId", flow.lastViewedCardId)
+            val position = flowSearchReturnState?.positionFor(flow) ?: CardFlowPosition(
+                flow.lastViewedCardId, flow.lastViewedCardIndex, flow.lastViewedCardFocused
+            )
+            if (position.cardId != null) {
+                flowObj.put("lastViewedCardId", position.cardId)
             } else {
                 flowObj.put("lastViewedCardId", JSONObject.NULL)
             }
-            flowObj.put("lastViewedCardIndex", flow.lastViewedCardIndex)
-            flowObj.put("lastViewedCardFocused", flow.lastViewedCardFocused)
+            flowObj.put("lastViewedCardIndex", position.index)
+            flowObj.put("lastViewedCardFocused", position.focused)
             if (flow.bookmarkedCardId != null) {
                 flowObj.put("bookmarkedCardId", flow.bookmarkedCardId)
             } else {
@@ -7940,7 +8005,11 @@ class MainActivity : AppCompatActivity() {
             } else remove(KEY_APP_BACKGROUND)
             putLong(KEY_NEXT_CARD_ID, nextCardId)
             putLong(KEY_NEXT_FLOW_ID, nextFlowId)
-            val currentIndex = if (flows.isEmpty()) 0 else selectedFlowIndex.coerceIn(0, flows.lastIndex)
+            val searchReturnIndex = flowSearchReturnState?.let { state ->
+                flows.indexOfFirst { it.id == state.flowId }.takeIf { it >= 0 }
+            }
+            val currentIndex = if (flows.isEmpty()) 0 else
+                (searchReturnIndex ?: selectedFlowIndex).coerceIn(0, flows.lastIndex)
             putInt(KEY_SELECTED_FLOW_INDEX, currentIndex)
             putFloat(KEY_CARD_FONT_SIZE, cardFontSizeSp)
             if (cardFontPath != null) putString(KEY_CARD_FONT_PATH, cardFontPath) else remove(KEY_CARD_FONT_PATH)
@@ -8357,6 +8426,16 @@ class MainActivity : AppCompatActivity() {
 
         override fun getItemCount(): Int = flows.size
 
+        override fun onViewAttachedToWindow(holder: FlowVH) {
+            super.onViewAttachedToWindow(holder)
+            holder.boundFlowId?.let { flowControllers[it]?.updateVideoPlaybackVisibility() }
+        }
+
+        override fun onViewDetachedFromWindow(holder: FlowVH) {
+            holder.adapter.setVideoPlaybackEnabled(false)
+            super.onViewDetachedFromWindow(holder)
+        }
+
         override fun onViewRecycled(holder: FlowVH) {
             holder.boundFlowId?.let {
                 persistControllerState(it)
@@ -8479,7 +8558,9 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 pendingVideoCardUpdateAttempts = 0
-                adapter.setActiveVideoCardId(pendingActiveVideoCardId)
+                adapter.setActiveVideoCardId(
+                    pendingActiveVideoCardId.takeIf { isVideoPlaybackVisible() }
+                )
             }
         }
         private var activeQuery: String = ""
@@ -8487,6 +8568,7 @@ class MainActivity : AppCompatActivity() {
         private var lastHapticSelection: Int? = null
         private var pendingKeyboardSelectionIndex: Int? = null
         private var pendingSelectionFocus = false
+        private var pendingRestorationPosition: CardFlowPosition? = null
         private val selectionCallback: (Int?) -> Unit = { index ->
             vibrateOnCardChange(index)
             updateCardCounter(index)
@@ -8494,6 +8576,7 @@ class MainActivity : AppCompatActivity() {
         }
         private val scrollListener = object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (pendingRestorationPosition != null) return
                 if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
                     pendingKeyboardSelectionIndex = null
                     pendingSelectionFocus = false
@@ -8570,8 +8653,17 @@ class MainActivity : AppCompatActivity() {
             flow: CardFlow,
             query: String,
             shouldRestoreState: Boolean,
-            shouldScrollToTop: Boolean
+            shouldScrollToTop: Boolean,
+            positionToRestore: CardFlowPosition? = null
         ) {
+            if (positionToRestore != null) {
+                pendingRestorationPosition = positionToRestore
+                pendingKeyboardSelectionIndex = null
+                pendingSelectionFocus = false
+                recycler.stopScroll()
+            } else if (shouldScrollToTop) {
+                pendingRestorationPosition = null
+            }
             cardsReadyForTransition = false
             activeQuery = query
             val displayed = filterCardsForSearch(flow.cards, query)
@@ -8587,33 +8679,21 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        fun restoreState(flow: CardFlow) {
-            if (activeQuery.isNotBlank()) {
+        fun restoreState(flow: CardFlow, position: CardFlowPosition? = null) {
+            if (activeQuery.isNotBlank() && position == null) {
                 layoutManager.clearFocus()
                 layoutManager.restoreState(0, false)
                 return
             }
-            if (adapter.itemCount == 0) {
-                layoutManager.restoreState(0, false)
-                flow.lastViewedCardIndex = 0
-                flow.lastViewedCardId = null
-                flow.lastViewedCardFocused = false
-                return
-            }
-            val indexById = flow.lastViewedCardId?.let { id ->
-                flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 }
-            }
-            val resolvedIndex = indexById ?: flow.lastViewedCardIndex
-            val clampedIndex = resolvedIndex.coerceIn(0, adapter.itemCount - 1)
-            val cardId = adapter.getItemAt(clampedIndex)?.id
-            flow.lastViewedCardIndex = clampedIndex
-            flow.lastViewedCardId = cardId
-            val shouldFocus = flow.lastViewedCardFocused && indexById != null
-            layoutManager.restoreState(clampedIndex, shouldFocus)
-            flow.lastViewedCardFocused = shouldFocus
+            val resolved = (position ?: CardFlowPosition(
+                flow.lastViewedCardId, flow.lastViewedCardIndex, flow.lastViewedCardFocused
+            )).restoreTo(flow, adapter.currentList)
+            layoutManager.restoreState(resolved.index, resolved.focused)
         }
 
         fun captureState(flow: CardFlow) {
+            // The adapter still contains the old list until the restoration diff commits.
+            if (pendingRestorationPosition != null) return
             if (adapter.itemCount == 0) {
                 flow.lastViewedCardIndex = 0
                 flow.lastViewedCardId = null
@@ -8629,6 +8709,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun moveSelectionBy(delta: Int, flow: CardFlow): Boolean {
+            if (pendingRestorationPosition != null) return true
             if (adapter.itemCount == 0) return false
             val current = pendingKeyboardSelectionIndex
                 ?: layoutManager.currentSelectionIndex()
@@ -8735,6 +8816,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun dispose() {
+            adapter.setVideoPlaybackEnabled(false)
             bookmarkButtonPosition.detach(bookmarkButton)
             flipButtonPosition.detach(flipButton)
             recycler.removeOnScrollListener(scrollListener)
@@ -8786,14 +8868,19 @@ class MainActivity : AppCompatActivity() {
         ) {
             if (displayed.isEmpty()) {
                 layoutManager.clearFocus()
-                layoutManager.restoreState(0, false)
+                restoreState(flow, pendingRestorationPosition)
+                pendingRestorationPosition = null
                 cardCountView.isVisible = false
                 cardCountView.text = ""
                 updateBookmarkButton(flow)
                 return
             }
             updateBookmarkButton(flow)
-            if (activeQuery.isBlank()) {
+            val restorationPosition = pendingRestorationPosition
+            if (restorationPosition != null) {
+                restoreState(flow, restorationPosition)
+                pendingRestorationPosition = null
+            } else if (activeQuery.isBlank()) {
                 when {
                     shouldRestoreState -> restoreState(flow)
                     shouldScrollToTop -> {
@@ -8839,7 +8926,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         private fun maybeAutoPlayCenteredVideo(selectionIndex: Int?) {
-            if (flowId != VIDEO_FLOW_ID || selectionIndex == null || !layoutManager.isFocused(selectionIndex)) {
+            val visible = isVideoPlaybackVisible()
+            adapter.setVideoPlaybackEnabled(visible)
+            if (!visible || selectionIndex == null || !layoutManager.isFocused(selectionIndex)) {
                 setActiveVideoCardIdSafely(null)
                 return
             }
@@ -8849,6 +8938,20 @@ class MainActivity : AppCompatActivity() {
             }
             val item = adapter.getItemAt(index)
             setActiveVideoCardIdSafely(item?.video?.let { item.id })
+        }
+
+        fun updateVideoPlaybackVisibility() {
+            maybeAutoPlayCenteredVideo(layoutManager.currentSelectionIndex())
+        }
+
+        private fun isVideoPlaybackVisible(): Boolean {
+            if (!isVideoPlaybackForeground || flowId != VIDEO_FLOW_ID ||
+                currentFlow()?.id != flowId || flowPager.scrollState != ViewPager2.SCROLL_STATE_IDLE
+            ) return false
+            val page = flowPager.currentItem
+            if (selectedFlowIndex == page) return true
+            val companionPage = if (page == flows.lastIndex) page - 1 else page + 1
+            return isTwoFlowPresentationActive() && selectedFlowIndex == companionPage
         }
 
         private fun setActiveVideoCardIdSafely(cardId: Long?) {
@@ -8961,7 +9064,8 @@ class MainActivity : AppCompatActivity() {
         val imageHandwriting: HandwritingSide?,
         val recognizedText: String?,
         val stickyNotes: List<StickyNote>,
-        val thermalReceipt: ThermalReceipt?
+        val thermalReceipt: ThermalReceipt?,
+        val collection: CardCollectionState
     )
 
 }

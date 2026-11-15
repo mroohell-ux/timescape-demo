@@ -72,6 +72,32 @@ continues facing the screen, and photographs retain their original orientation.
 Depth changes continuously while scrolling.
 Overview scrolling never automatically expands a card.
 
+Flow JSON exports include each card's `isCollected` flag and, when available,
+`collectionOriginalIndex` for restoring its position when unstarred. Import keeps
+both values even though card IDs are regenerated, and stably places starred cards
+before normal cards while preserving relative order within both groups. Legacy
+exports without these optional fields import as unstarred cards; older app
+versions that ignore the fields cannot restore the stars.
+
+The toolbar card search keeps a separate snapshot of the original Flow, card ID
+and expanded/collapsed state. Clearing the query or closing search restores that
+position, rather than the last result viewed; retyping within the same search
+does not replace the snapshot. Search browsing is also excluded from persisted
+return positions. Card deletions update the snapshot using the next/previous
+fallback policy, and ID-based restoration tolerates reordering. Explicitly opening
+a card from the separate global-search dialog remains a navigation action.
+
+Deleting the current card keeps its expanded/collapsed state and selects the next
+card, or the previous card when deleting the last one. Deleting a different card
+preserves the current card by ID, even when its index shifts. This applies to
+portrait, landscape, shuffled order and filtered search results; an empty visible
+list clears the selection. Text, image and handwriting deletion share this policy.
+The replacement position is saved before the asynchronous list update and restored
+after it commits, so old viewport captures cannot reset it. Keyboard focus retains
+its feedback but does not automatically scroll this overlapping ribbon; card
+navigation owns the reading position, including after focus recovery. A deleted card's
+bookmark is cleared rather than redirected to an unrelated card.
+
 In landscape, the ribbon runs left-to-right instead of top-to-bottom. The active
 card is centered horizontally; its upright neighbors taper, curve and fan toward
 the left/right edges. The same distance-based pose and corner timing are transposed,
@@ -389,9 +415,22 @@ Video pauses during a turn and uses its cover. System-disabled animations settle
 immediately instead of running the release springs.
 Action controls are unavailable on the moving snapshot and return after settling.
 Videos can activate only on a fully open, settled card in the video flow; they
-pause during reading scrolls and resume after settling. Space opens
+also require the resumed activity, a settled pager and the currently active,
+visible pane. Offscreen and inactive preview flows cannot prepare/play inline
+videos. Leaving the page or backgrounding the app immediately pauses playback
+and releases audio focus, including while a deferred adapter update is pending.
+They pause during reading scrolls and resume after settling. Space opens
 the current card before flipping; arrows browse compact cards unless a card is
 already open. Search results and bookmarks retain explicit navigation.
+
+`InlineVideoView` disables the platform player's prepare-time audio focus.
+It requests focus only when actually starting an unmuted video with an audio
+track (or unmuting an already playing video). Muted playback and videos without
+audio tracks leave other apps' audio uninterrupted. Pause, stop, hiding,
+detachment, completion and playback errors release focus. Losing focus pauses
+the video without automatically reclaiming it; a denied request leaves it
+paused and reports that audio is in use. Muting updates the live player without
+reloading the card or resetting its watch position.
 
 Scrolling keeps a stable logical overview width and applies depth through GPU
 transforms instead of resizing and reflowing every card. Overview lettering and

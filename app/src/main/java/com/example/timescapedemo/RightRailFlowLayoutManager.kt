@@ -3,6 +3,7 @@ package com.example.timescapedemo
 import android.animation.ValueAnimator
 import android.graphics.Matrix
 import android.graphics.PointF
+import android.graphics.Rect
 import android.os.SystemClock
 import android.view.View
 import android.widget.TextView
@@ -143,6 +144,17 @@ class RightRailFlowLayoutManager(
     override fun isAutoMeasureEnabled() = true
     override fun generateDefaultLayoutParams() =
         RecyclerView.LayoutParams(baseSidePx, RecyclerView.LayoutParams.WRAP_CONTENT)
+
+    override fun requestChildRectangleOnScreen(
+        parent: RecyclerView,
+        child: View,
+        rect: Rect,
+        immediate: Boolean,
+        focusedChildVisible: Boolean
+    ): Boolean {
+        // Overlapping, transformed faces do not map child rectangles to logical ribbon positions.
+        return false
+    }
 
     // ---- Public helpers ----
     fun isFocused(index: Int) = readingMode && selectedIndex == index && focusProgress >= 0.999f &&
