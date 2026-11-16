@@ -79,6 +79,18 @@ before normal cards while preserving relative order within both groups. Legacy
 exports without these optional fields import as unstarred cards; older app
 versions that ignore the fields cannot restore the stars.
 
+Starring the current card moves it to the front but keeps reading at the next
+card in the pre-move visible order; the last card falls back to its previous
+neighbor, and a sole visible card stays selected. Unstarring restores the saved
+insertion position and follows the same reading rule. Toggling a different card
+keeps the current card by ID. Expansion is preserved, including in landscape,
+shuffled flows and filtered search results. Collection updates use a new card
+snapshot so the star control participates in adapter content diffs.
+The next-card position replaces any older pending restoration and is protected
+from viewport captures until the reordered list commits; persistence does not
+depend on a fixed number of UI posts. Search exit still returns to its original
+card by ID, even if that card was starred while searching.
+
 The toolbar card search keeps a separate snapshot of the original Flow, card ID
 and expanded/collapsed state. Clearing the query or closing search restores that
 position, rather than the last result viewed; retyping within the same search

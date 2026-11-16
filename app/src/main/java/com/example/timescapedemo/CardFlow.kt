@@ -10,6 +10,34 @@ data class CardFlow(
     var bookmarkedCardId: Long? = null,
     var bookmarkedCardIndex: Int = 0
 ) {
+    fun toggleCollectionPreservingPosition(
+        cardId: Long,
+        displayedCards: List<CardItem> = cards
+    ): CardFlowPosition {
+        val cardIndex = cards.indexOfFirst { it.id == cardId }
+        require(cardIndex >= 0) { "Card $cardId does not belong to Flow $id" }
+        val displayed = displayedCards.toList()
+        val current = CardFlowPosition(lastViewedCardId, lastViewedCardIndex, lastViewedCardFocused)
+        val next = current.afterRemoving(cardId, displayed)
+        val position = if (next.cardId == null && displayed.any { it.id == cardId }) {
+            CardFlowPosition(cardId, 0, current.focused)
+        } else {
+            next
+        }
+        val card = cards.removeAt(cardIndex)
+        val targetIndex = if (card.isCollected) {
+            card.collectionOriginalIndex?.coerceIn(0, cards.size) ?: cardIndex.coerceIn(0, cards.size)
+        } else {
+            0
+        }
+        cards.add(targetIndex, card.copy(
+            isCollected = !card.isCollected,
+            collectionOriginalIndex = if (card.isCollected) null else cardIndex
+        ))
+        val visibleIds = displayed.map { it.id }.toSet()
+        return position.restoreTo(this, cards.filter { it.id in visibleIds })
+    }
+
     fun removeCardPreservingPosition(
         cardId: Long,
         displayedCards: List<CardItem> = cards

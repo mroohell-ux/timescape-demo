@@ -2111,46 +2111,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleCardCollection(flow: CardFlow, cardId: Long) {
-        val currentIndex = flow.cards.indexOfFirst { it.id == cardId }
-        if (currentIndex == -1) return
+        if (flow.cards.none { it.id == cardId }) {
+            Log.w(TAG, "Ignoring collection for missing card $cardId in Flow ${flow.id}")
+            return
+        }
         val controller = flowControllers[flow.id]
-        controller?.captureState(flow)
-        val card = flow.cards[currentIndex]
-        val wasCollected = card.isCollected
-        val nextCardId = flow.cards.getOrNull(currentIndex + 1)?.id
-            ?: flow.cards.getOrNull(currentIndex - 1)?.id
-
-        flow.cards.removeAt(currentIndex)
-        if (wasCollected) {
-            val targetIndex = card.collectionOriginalIndex
-                ?.coerceIn(0, flow.cards.size)
-                ?: currentIndex.coerceIn(0, flow.cards.size)
-            card.isCollected = false
-            card.collectionOriginalIndex = null
-            flow.cards.add(targetIndex, card)
-        } else {
-            card.isCollected = true
-            card.collectionOriginalIndex = currentIndex
-            flow.cards.add(0, card)
-        }
-
-        val nextIndex = nextCardId
-            ?.let { id -> flow.cards.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
-            ?: flow.cards.indexOfFirst { it.id == card.id }.takeIf { it >= 0 }
-            ?: 0
-        flow.lastViewedCardIndex = nextIndex
-        flow.lastViewedCardId = flow.cards.getOrNull(nextIndex)?.id
-        flow.lastViewedCardFocused = true
-        refreshFlow(flow, scrollToTop = false)
-        if (controller != null) {
-            // Wait for the submitted move to commit and restore the next-card state before
-            // saveState() captures visible flow state from the RecyclerView.
-            controller.recycler.post {
-                controller.recycler.post { saveState() }
-            }
-        } else {
-            saveState()
-        }
+        val displayed = filterCardsForSearch(flow.cards, flowSearchQueryNormalized)
+        controller?.displayedPosition()?.restoreTo(flow, displayed)
+        val position = flow.toggleCollectionPreservingPosition(cardId, displayed)
+        refreshFlow(flow, positionToRestore = position)
+        saveState()
     }
 
     private fun toggleShuffleCards() {
@@ -2477,7 +2447,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshFlow(
         flow: CardFlow,
         scrollToTop: Boolean = false,
-        positionAfterDeletion: CardFlowPosition? = null
+        positionToRestore: CardFlowPosition? = null
     ) {
         prepareFlowCards(flow)
         val controller = flowControllers[flow.id]
@@ -2494,7 +2464,7 @@ class MainActivity : AppCompatActivity() {
                 query = flowSearchQueryNormalized,
                 shouldRestoreState = shouldRestoreState,
                 shouldScrollToTop = shouldScrollToTop,
-                positionToRestore = positionAfterDeletion
+                positionToRestore = positionToRestore
             )
         } else {
             val index = flows.indexOfFirst { it.id == flow.id }
@@ -2970,7 +2940,7 @@ class MainActivity : AppCompatActivity() {
             filterCardsForSearch(flow.cards, flowSearchQueryNormalized)
         )
         disposeCardResources(card)
-        refreshFlow(flow, positionAfterDeletion = position)
+        refreshFlow(flow, positionToRestore = position)
         saveState()
         snackbar(getString(R.string.snackbar_deleted_card))
     }
@@ -8515,8 +8485,12 @@ class MainActivity : AppCompatActivity() {
 
             fun onCollectionTapped(card: CardItem, cardView: View) {
                 val flow = flows.getOrNull(bindingAdapterPosition) ?: return
-                animateCollectionThrow(cardView, movingUp = !card.isCollected)
-                toggleCardCollection(flow, card.id)
+                val target = flow.cards.firstOrNull { it.id == card.id } ?: run {
+                    Log.w(TAG, "Ignoring collection click for missing card ${card.id} in Flow ${flow.id}")
+                    return
+                }
+                animateCollectionThrow(cardView, movingUp = !target.isCollected)
+                toggleCardCollection(flow, target.id)
             }
 
             fun onCardLongPressed(index: Int, cardView: View): Boolean {
@@ -8694,18 +8668,17 @@ class MainActivity : AppCompatActivity() {
         fun captureState(flow: CardFlow) {
             // The adapter still contains the old list until the restoration diff commits.
             if (pendingRestorationPosition != null) return
+            displayedPosition().restoreTo(flow, adapter.currentList)
+        }
+
+        fun displayedPosition(): CardFlowPosition {
             if (adapter.itemCount == 0) {
-                flow.lastViewedCardIndex = 0
-                flow.lastViewedCardId = null
-                flow.lastViewedCardFocused = false
-                return
+                return CardFlowPosition(null, 0, false)
             }
             val selectedIndex = layoutManager.currentSelectionIndex()
             val nearest = layoutManager.nearestIndex().coerceIn(0, adapter.itemCount - 1)
             val resolved = selectedIndex?.coerceIn(0, adapter.itemCount - 1) ?: nearest
-            flow.lastViewedCardIndex = resolved
-            flow.lastViewedCardId = adapter.getItemAt(resolved)?.id
-            flow.lastViewedCardFocused = layoutManager.hasSelection()
+            return CardFlowPosition(adapter.getItemAt(resolved)?.id, resolved, layoutManager.hasSelection())
         }
 
         fun moveSelectionBy(delta: Int, flow: CardFlow): Boolean {
